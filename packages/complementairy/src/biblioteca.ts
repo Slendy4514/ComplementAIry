@@ -56,8 +56,9 @@ export function biblioteca(root: string): Snippet[] {
     ...archivosEn(path.join(root, ".vscode")).map((f): [string, Snippet["origen"]] => [f, /^(cai|aicode)-base\.code-snippets$/.test(path.basename(f)) ? "base" : "proyecto"]),
     ...archivosEn(path.join(home(), "snippets")).map((f): [string, Snippet["origen"]] => [f, "usuario"]),
   ];
-  // Si el proyecto no tiene copia de la base, se usa la que trae ComplementAIry.
-  if (!fuentes.some(([, o]) => o === "base")) fuentes.push(...archivosEn(KIT).map((f): [string, Snippet["origen"]] => [f, "base"]));
+  // La base que trae ComplementAIry siempre está (al final): la copia del proyecto la sobreescribe
+  // por nombre, y los snippets base nuevos aparecen aunque el proyecto tenga una copia vieja.
+  fuentes.push(...archivosEn(KIT).map((f): [string, Snippet["origen"]] => [f, "base"]));
   const orden = { proyecto: 0, usuario: 1, base: 2 };
   const out = new Map<string, Snippet>();
   // Mismo nombre en lenguajes distintos (p. ej. "test" de JS y de Python) son snippets distintos.

@@ -46,7 +46,7 @@ cai init .                             # hooks, configuración, snippets base, t
 cai doctor --instalar                  # herramientas del lenguaje (tsc, eslint, vitest, stryker / mypy, ruff, pytest...)
 cai perfil set javascript intermedio   # tu nivel por tema
 ```
-Después escribe con tus palabras `.cai/proyecto.md` (qué buscas) y `.cai/reglas.md` (cómo escribes). Al guardar el primer archivo, el acompañante propone la arquitectura del proyecto.
+Después escribe con tus palabras `.cai/proyecto.md` (qué buscas) y `.cai/reglas.md` (cómo escribes). Las prácticas medibles (largo de funciones, anidamiento...) vienen activas por defecto y se ajustan en `.cai/config.json` → `practicas`. Al guardar el primer archivo, el acompañante propone la arquitectura del proyecto.
 
 ## Uso diario
 
@@ -58,6 +58,9 @@ Después escribe con tus palabras `.cai/proyecto.md` (qué buscas) y `.cai/regla
 | Revisión completa | `Ctrl+Alt+R` | `cai revisar <archivo>` |
 | Acompañante (plano, ayuda, comentarios) | automático al guardar | `cai watch` |
 | Preguntas sueltas, comandos, errores | — | `cai pregunta "..."`, `cai explica -- <cmd>`, `cai corre -- <cmd>` + `cai error` |
+| Tests de una función (casos apagados en `tests/`) | `@ia? !tests` o Ctrl+Shift+P → "proponer tests" | `cai tests <archivo> <función>` |
+| Visión del proyecto completo | `Ctrl+Alt+P` | `cai panorama` |
+| Memoria del proyecto (responder preguntas) | Ctrl+Shift+P → "memoria del proyecto" | `.cai/conocimiento.md` |
 | Consumo de IA | — | `cai uso` |
 
 ## Qué IA usa y cómo ahorra tokens

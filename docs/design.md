@@ -72,6 +72,48 @@ Se configura en `.cai/config.json`, en `"acompanar": { "nivel": "normal", "inten
 - **La biblioteca:** tus snippets (`Ctrl+Alt+S` convierte el código seleccionado en un snippet tuyo) más la base de estructuras conocidas en `.vscode/cai-base.code-snippets` (fn, fnasync, fnexport, try, error, test, describe, express-ruta, express-app, clase, def, main), que puedes editar. Para verla: `cai snippet lista`.
 - **La IA nunca puede activar un snippet:** ni escribiendo `[x]` (lo bloquea el hook) ni a través de la CLI (las sugerencias siempre se escriben apagadas y se verifica antes de guardar).
 
+### 3b. Buenas prácticas, tests y el proyecto completo
+**Prácticas medibles (por defecto activas y modificables).** Están en `.cai/config.json` → `practicas`; `null` desactiva una:
+
+| Práctica | Por defecto |
+|---|---|
+| `maxFuncionesArchivo` | 12 |
+| `maxLineasArchivo` | 300 |
+| `maxLineasFuncion` | 40 |
+| `maxAnidamiento` | 3 |
+| `maxParametros` | 4 |
+
+Se miden **sin IA** (con el parser) cada vez que guardas. Cuando se supera un umbral, el acompañante pide **un** plano de diseño, una vez por problema:
+- para una función: *"sepárala en validarPago(datos) y registrarPago(pago)…"*;
+- para un archivo: *"mueve la validación a validacion.ts…"*.
+
+Si en tu caso la práctica no aplica, te lo dice. Las prácticas en palabras van en `.cai/reglas.md`.
+
+**Tests en su propia carpeta** (`tests/` por defecto, configurable en `tests.carpeta`):
+1. Al terminar una función exportada que no tiene tests, te avisa (sin IA) cómo pedirlos.
+2. Los pides con `@ia? !tests` o `cai tests <archivo> <función>`. La IA propone **casos** (qué probar y qué *debería* pasar según la intención, no según el código actual, para no copiar bugs). El script valida cada llamada y calcula los imports.
+3. En `tests/<archivo>.test.ts` aparecen apagados (`snippet [ ]: test descripcion=... llamada=... esperado=...`). Si el valor esperado depende de una decisión tuya, te pregunta.
+4. Ajustas, activas con `[x]` y guardas: quedan tests reales. Los números con decimales usan `toBeCloseTo` automáticamente.
+
+En la prueba real, de 3 casos activados pasaron 2 y falló 1, que era justo el bug pendiente.
+
+**El proyecto completo: `cai panorama`** (`Ctrl+Alt+P`) deja en `.cai/panorama.md`:
+- el estado del proyecto;
+- sugerencias de diseño (con porqué y plano);
+- **otras formas de hacerlo**;
+- riesgos;
+- **preguntas para ti**;
+- las mediciones sin IA: prácticas, funciones sin tests, `@ia?` sin responder, snippets sin activar, errores frecuentes y consumo.
+
+**Memoria del proyecto: `.cai/conocimiento.md`.**
+- Contiene qué hace cada módulo, *lo que le contaste* y las preguntas abiertas.
+- Respondes después de `R:` y en el siguiente panorama la respuesta pasa a la memoria.
+- Se usa como contexto en todas las guías, revisiones y planos. Así entiende cada vez mejor el proyecto **sin releerlo entero**: solo resume los archivos que cambiaron, con el modelo rápido.
+
+**Criterio de todas las IAs:**
+- No se anclan a cómo lo hiciste: si hay un enfoque claramente mejor, lo proponen con su porqué, sin imponerlo.
+- Si les falta contexto, preguntan en vez de suponer.
+
 ### 4. Revisar al terminar
 **`Ctrl+Alt+R`** (o `cai revisar archivo.ts`):
 1. **Verificaciones deterministas:** tipos, lint, tests relacionados, reglas de arquitectura, tus reglas mecánicas (`.cai/reglas.json`) y, en zonas críticas, **mutation testing**, que muestra qué cambios de tu código no detecta ningún test.

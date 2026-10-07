@@ -20,6 +20,7 @@ import { insertBelow, renderReply } from "./render.js";
 import { aplicarExpansion, pedidoDe, planExpansion } from "./biblioteca.js";
 import { acompanar } from "./acompanante.js";
 import { init } from "./init.js";
+import { panorama } from "./panorama.js";
 import { guardReplies } from "./guard.js";
 import { verifyCommentOnly } from "./verify.js";
 import { langFor } from "./lang.js";
@@ -787,6 +788,138 @@ CASES.push(
         !fs.existsSync(path.join(r, ".claude/skills/aicode-guia")) && fs.existsSync(path.join(r, ".claude/skills/cai-guia/SKILL.md")) &&
         fs.readFileSync(path.join(r, ".vscode/cai-base.code-snippets"), "utf8").includes("editado")
       );
+    },
+  },
+);
+
+// --- Prácticas, tests, memoria del proyecto y panorama -----------------------------------
+const largo = (n: number) => `export function larga(a: number) {\n${Array.from({ length: n }, (_, i) => `  const v${i} = a + ${i};`).join("\n")}\n  return a;\n}\n`;
+CASES.push(
+  {
+    name: "prácticas: una función que supera el umbral recibe UN plano de diseño (y no se repite)",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ practicas: { maxLineasFuncion: 10 }, tests: { avisarSinTests: false } }));
+      const calls = fakeLLM(() => ({ respuestas: [{ tipo: "plano", texto: "Sepárala en calcularBase(a) y sumarAjustes(a).", links: [] }] }));
+      const f = path.join(r, "src/larga.ts");
+      fs.writeFileSync(f, largo(15));
+      await acompanar(r, "src/larga.ts");
+      await acompanar(r, "src/larga.ts");
+      const diseno = calls.filter((c) => c.prompt.includes("Práctica que no se cumple"));
+      return diseno.length === 1 && diseno[0]!.prompt.includes("líneas (máx. 10)") && fs.readFileSync(f, "utf8").includes("plano: Sepárala");
+    },
+  },
+  {
+    name: "prácticas: los umbrales se configuran (null desactiva) y nada se pide si se cumplen",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ practicas: { maxLineasFuncion: null }, tests: { avisarSinTests: false } }));
+      const calls = fakeLLM(() => ({ respuestas: [{ tipo: "plano", texto: "x", links: [] }] }));
+      fs.writeFileSync(path.join(r, "src/larga.ts"), largo(60));
+      await acompanar(r, "src/larga.ts");
+      return !calls.some((c) => c.prompt.includes("Práctica que no se cumple"));
+    },
+  },
+  {
+    name: "tests: al terminar una función exportada sin tests, aviso SIN IA de cómo pedirlos",
+    run: async (r) => {
+      const calls = fakeLLM(() => ({ hallazgos: [], respuestas: [] }));
+      const f = path.join(r, "src/st.ts");
+      fs.writeFileSync(f, "export const z = 0;\n");
+      await acompanar(r, "src/st.ts");
+      fs.writeFileSync(f, "export const z = 0;\nexport function doble(a: number) {\n  const b = a * 2;\n  return b;\n}\n");
+      await acompanar(r, "src/st.ts");
+      fs.writeFileSync(f, fs.readFileSync(f, "utf8") + "export const y = 1;\n");
+      await acompanar(r, "src/st.ts");
+      const out = fs.readFileSync(f, "utf8");
+      return out.includes("`doble` todavía no tiene tests") && out.includes("tests/st.test.ts") && !calls.some((c) => c.kind === "tests");
+    },
+  },
+  {
+    name: "tests: !tests propone casos APAGADOS en tests/, con imports calculados y preguntas si el esperado es dudoso",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, "src/cuota2.ts"), "export function cuota(monto: number, meses: number) {\n  // @ia? !tests\n  return monto / meses;\n}\n");
+      fakeLLM((o) =>
+        o.kind === "tests"
+          ? {
+              casos: [
+                { tipo: "normal", descripcion: "divide en partes iguales", llamada: "cuota(1200, 12)", esperado: "100", duda: "" },
+                { tipo: "normal", descripcion: "meses cero", llamada: "cuota(1200, 0)", esperado: "?", duda: "¿meses = 0 es error o 0?" },
+                { tipo: "normal", descripcion: "inválido", llamada: "cuota(require('fs'))", esperado: "1", duda: "" },
+              ],
+            }
+          : said("x"),
+      );
+      const res = await runGuia(r, "src/cuota2.ts");
+      const t = fs.readFileSync(path.join(r, "tests/cuota2.test.ts"), "utf8");
+      const src = fs.readFileSync(path.join(r, "src/cuota2.ts"), "utf8");
+      return (
+        res.respondidos === 1 &&
+        src.includes("Te propuse 2 caso(s) en tests/cuota2.test.ts") &&
+        t.includes('snippet [ ]: vitest') &&
+        t.includes('snippet [ ]: importar nombres="cuota" ruta="../src/cuota2.js"') &&
+        t.includes('snippet [ ]: test descripcion="divide en partes iguales" llamada="cuota(1200, 12)" esperado="100"') &&
+        t.includes("pregunta: ¿meses = 0 es error o 0?") &&
+        !t.includes("require") &&
+        !t.includes("Marca [x]") &&
+        (await verifyCommentOnly("", t, langFor("a.ts")!)).ok
+      );
+    },
+  },
+  {
+    name: "tests: al activar los casos con [x], el archivo de tests queda con código real",
+    run: async (r) => {
+      fs.mkdirSync(path.join(r, "tests"), { recursive: true });
+      const t = path.join(r, "tests/a.test.ts");
+      fs.writeFileSync(t, '// @guia[x1.1] snippet [x]: vitest\n// @guia[x1.1] snippet [x]: importar nombres="cuota" ruta="../src/a.js"\n// @guia[x1.1] snippet [x]: test descripcion="divide" llamada="cuota(1200, 12)" esperado="100"\n');
+      fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ acompanar: { nivel: "silencioso" } }));
+      await acompanar(r, "tests/a.test.ts");
+      const out = fs.readFileSync(t, "utf8");
+      return out.includes('import { describe, expect, test } from "vitest";') && out.includes('import { cuota } from "../src/a.js";') && out.includes("expect(cuota(1200, 12)).toBe(100);");
+    },
+  },
+  {
+    name: "panorama: resume solo lo que cambió, guarda la memoria y mueve tus respuestas a 'Lo que me contaste'",
+    run: async (r) => {
+      const calls = fakeLLM((o) =>
+        o.kind === "panorama:resumen"
+          ? { resumenes: [...o.prompt.matchAll(/=== (\S+)/g)].map((m) => ({ archivo: m[1]!, resumen: `resumen de ${m[1]}` })) }
+          : { estado: "Bien encaminado.", sugerencias: [{ titulo: "Separar validación", porque: "mezcla", plano: "crear validacion.ts", archivos: ["src/cuota.ts"] }], alternativas: [], riesgos: [], preguntas: ["¿En qué moneda trabajas?"] },
+      );
+      await panorama(r);
+      const mem = path.join(r, ".cai/conocimiento.md");
+      const m1 = fs.readFileSync(mem, "utf8");
+      fs.writeFileSync(mem, m1.replace("- P: ¿En qué moneda trabajas?\n  R: ", "- P: ¿En qué moneda trabajas?\n  R: CLP, sin decimales"));
+      fs.writeFileSync(path.join(r, "src/nuevo.ts"), "export const n = 1;\n");
+      await panorama(r);
+      const resumenCalls = calls.filter((c) => c.kind === "panorama:resumen");
+      const m2 = fs.readFileSync(mem, "utf8");
+      const pano = fs.readFileSync(path.join(r, ".cai/panorama.md"), "utf8");
+      return (
+        resumenCalls.length === 2 && resumenCalls[1]!.prompt.includes("src/nuevo.ts") && !resumenCalls[1]!.prompt.includes("src/cuota.ts") &&
+        m2.includes("¿En qué moneda trabajas? → CLP, sin decimales") && m2.includes("`src/cuota.ts`: resumen de src/cuota.ts") &&
+        pano.includes("Separar validación")
+      );
+    },
+  },
+  {
+    name: "panorama: sin cambios no vuelve a llamar a la IA; --sin-ia mide sin llamar",
+    run: async (r) => {
+      const calls = fakeLLM((o) => (o.kind === "panorama:resumen" ? { resumenes: [] } : { estado: "x", sugerencias: [], alternativas: [], riesgos: [], preguntas: [] }));
+      await panorama(r, { sinIa: true });
+      const sinIa = calls.length;
+      await panorama(r);
+      const n = calls.length;
+      await panorama(r);
+      return sinIa === 0 && calls.length === n;
+    },
+  },
+  {
+    name: "memoria: lo que respondiste se usa como contexto en la guía; y todas las IAs tienen el criterio de no anclarse",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, ".cai/conocimiento.md"), "# x\n\n## Lo que me contaste\n\n- ¿Moneda? → CLP, sin decimales\n");
+      fs.writeFileSync(path.join(r, "src/g.ts"), "// @ia? ¿cómo redondeo?\nexport {};\n");
+      const calls = fakeLLM(() => said("x"));
+      await runGuia(r, "src/g.ts");
+      return calls[0]!.prompt.includes("CLP, sin decimales") && calls[0]!.system.includes("No te ancles");
     },
   },
 );

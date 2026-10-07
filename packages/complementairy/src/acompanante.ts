@@ -4,12 +4,13 @@ import path from "node:path";
 import { aplicarExpansion, biblioteca, paraLenguaje, parseLlamada, planExpansion } from "./biblioteca.js";
 import { codeOnly, parse } from "./comments.js";
 import { makeZoner, dataDir } from "./config.js";
-import { contextBlock, projectContext, registrarPatron } from "./context.js";
+import { contextBlock, projectContext, registrarPatron, CRITERIO } from "./context.js";
 import { runGate } from "./gate.js";
 import { fileIdentifiers, guardReplies } from "./guard.js";
 import { langFor } from "./lang.js";
 import { ask, evitada } from "./llm.js";
 import { planoProyecto } from "./plano.js";
+import { funcionesSinTests, medir, rutaTest, violaciones } from "./metricas.js";
 import { loadPerfil, nivelDe, puntaje, registrar } from "./profile.js";
 import { insertAboveLine, renderReply, type Reply } from "./render.js";
 import { findThreads, nextThreadId, regionesTop, regionOf } from "./threads.js";
@@ -22,7 +23,7 @@ import type { SyntaxNode } from "./parser.js";
  */
 
 export interface Accion {
-  tipo: "expandido" | "respondido" | "plano-proyecto" | "plano-archivo" | "ayuda" | "resuelto" | "comentario";
+  tipo: "expandido" | "respondido" | "plano-proyecto" | "plano-archivo" | "ayuda" | "resuelto" | "comentario" | "diseno" | "sin-tests";
   detalle: string;
 }
 
@@ -44,6 +45,9 @@ interface Estado {
       vistos?: Record<string, string>;
       revisados?: Record<string, string>;
       ultimaRevision?: number;
+      /** Prácticas ya avisadas (no se repiten mientras el problema siga igual). */
+      practicas?: Record<string, true>;
+      sinTests?: Record<string, true>;
     }
   >;
 }
@@ -83,7 +87,9 @@ const SCHEMA = {
 const SYSTEM = `Eres el acompañante de ComplementAIry: observas cómo programa la persona y aportas cuando sirve. NUNCA escribes su código.
 - Plano de archivo: qué funciones crear (nombre y responsabilidad en palabras: qué recibe, qué devuelve, qué casos cuida), en qué orden, y qué snippets de la BIBLIOTECA sirven (tipo "snippet", texto = "<nombre> clave=valor — para qué"). Respeta docs/ESTRUCTURA.md si existe.
 - Ayuda cuando se traba: empieza explicando qué significa el error y dónde mirar (tipo "pista"); si sirve, la pieza (función/API con link a docs). Tono de compañero, breve, sin condescendencia. Sin código.
-- Español neutro con tuteo; 1 a 3 oraciones por respuesta. No cites números de línea.`;
+- Español neutro con tuteo; 1 a 3 oraciones por respuesta. No cites números de línea.
+
+${CRITERIO}`;
 
 /** Errores de sintaxis (nodos ERROR / faltantes) por línea, sin herramientas externas. */
 function syntaxErrors(root: SyntaxNode | null): { line: number; msg: string }[] {
@@ -167,7 +173,7 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
   const pedir = async (prompt: string, nivel: number): Promise<Reply[]> => {
     const { data, costUsd } = await ask<{ respuestas: Reply[] }>({ kind: "acompanar", system: SYSTEM, prompt, schema: SCHEMA, cwd: root, ...iaOpts(z.config) });
     contar(costUsd);
-    const g = guardReplies(data.respuestas, nivel, userIds);
+    const g = guardReplies(Array.isArray(data?.respuestas) ? data.respuestas : [], nivel, userIds);
     return g.ok.filter((r) => r.tipo !== "snippet" || libreria.some((s) => s.nombre === parseLlamada(r.texto)?.nombre));
   };
 
@@ -178,6 +184,21 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
     const id = `${nextThreadId(parsed.comments, new Set(), prefijo)}.1`;
     const block = replies.flatMap((r) => renderReply(lang, "", id, r));
     const next = await insertAboveLine(actual, lang, line, block);
+    if (!next) return false;
+    fs.writeFileSync(abs, next);
+    return true;
+  };
+
+  /** Como `escribir`, pero ancla por el texto de la línea en el archivo ACTUAL (null = arriba del todo). */
+  const escribirSobre = async (textoLinea: string | null, replies: Reply[], prefijo: string): Promise<boolean> => {
+    if (!replies.length) return false;
+    const actual = fs.readFileSync(abs, "utf8");
+    const parsedActual = await parse(actual, lang);
+    const ls = actual.split("\n");
+    const line = textoLinea === null ? (actual.startsWith("#!") ? 2 : 1) : ls.indexOf(textoLinea) + 1;
+    if (line < 1) return false;
+    const id = `${nextThreadId(parsedActual.comments, new Set(), prefijo)}.1`;
+    const next = await insertAboveLine(actual, lang, line, replies.flatMap((r) => renderReply(lang, "", id, r)));
     if (!next) return false;
     fs.writeFileSync(abs, next);
     return true;
@@ -261,6 +282,37 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
       }
     }
   }
+  // 5b. Buenas prácticas medibles (umbrales en .cai/config.json → practicas). Si se superan,
+  //     se pide UN plano de diseño (cómo separar la función o el archivo). Una vez por problema.
+  const met = medir(src, parsed);
+  const vios = violaciones(met, z.config.practicas);
+  const avisadas = (archivo.practicas ??= {});
+  for (const k of Object.keys(avisadas)) if (!vios.some((v) => v.clave === k)) delete avisadas[k]; // resuelto: si vuelve, se avisa de nuevo
+  for (const v of vios.filter((x) => !avisadas[x.clave]).slice(0, 2)) {
+    if (!puedeLlamar()) break;
+    const lineas = src.split("\n");
+    const foco = v.nivel === "funcion" ? (met.funciones.find((f) => v.clave === `funcion:${f.nombre}`) ?? null) : null;
+    const codigo = foco ? lineas.slice(foco.linea - 1, foco.linea - 1 + foco.lineas).join("\n") : src.slice(0, 12000);
+    const replies = await pedir(
+      [
+        `${rel} (${lang.id}). Programador: ${nivelProg}.`,
+        `Práctica que no se cumple (medida automáticamente): ${v.detalle}.`,
+        `Propón un PLANO para mejorar el diseño: ${v.nivel === "archivo" ? "cómo repartir este archivo (qué archivos nuevos, qué funciones va a cada uno y por qué)" : "cómo dividir esta función (qué funciones nuevas, qué recibe y devuelve cada una, en qué orden)"}. Sin código. Si en este caso concreto la práctica no aplica, dilo en una línea y por qué.`,
+        ctx,
+        estructura ? `docs/ESTRUCTURA.md:\n${estructura}` : "",
+        v.nivel === "archivo" ? `Funciones del archivo: ${met.funciones.map((f) => `${f.nombre} (${f.lineas} líneas)`).join(", ")}` : "",
+        `Código:\n${codigo}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      2,
+    );
+    if (await escribirSobre(foco ? lineas[foco.linea - 1]! : null, replies, "c")) {
+      avisadas[v.clave] = true;
+      res.acciones.push({ tipo: "diseno", detalle: v.detalle });
+    }
+  }
+
   // 6. Comentarios mientras avanzás: revisar las partes que TERMINASTE (cambiaron antes, en este
   //    guardado ya no las tocaste y compilan). Solo esas partes viajan a la IA.
   const regiones = regionesTop(src, parsed);
@@ -279,6 +331,19 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
   // La primera vez que se ve el archivo, lo existente cuenta como ya revisado (no se comenta lo viejo).
   if (primeraVez) for (const r of regiones) revisados[r.key] = r.hash;
   archivo.vistos = Object.fromEntries(regiones.map((r) => [r.key, r.hash]));
+  // Funciones exportadas que terminaste y no tienen tests: aviso sin IA (cómo pedirlos).
+  if (z.config.tests.avisarSinTests && terminadas.length) {
+    const avisadosT = (archivo.sinTests ??= {});
+    const candidatas = met.funciones.filter((f) => f.exportada && !avisadosT[f.nombre] && terminadas.some((r) => f.linea >= r.desde && f.linea <= r.hasta));
+    for (const f of funcionesSinTests(z, candidatas.map((x) => x.nombre)).slice(0, 2)) {
+      const fn = candidatas.find((x) => x.nombre === f)!;
+      const texto = `\`${f}\` todavía no tiene tests. Escribe "@ia? !tests" encima (o ejecuta: cai tests ${rel} ${f}) y te propongo casos en ${rutaTest(rel, z.config.tests.carpeta)}.`;
+      if (await escribirSobre(src.split("\n")[fn.linea - 1]!, [{ tipo: "pregunta", texto, links: [] }], "c")) {
+        avisadosT[f] = true;
+        res.acciones.push({ tipo: "sin-tests", detalle: f });
+      }
+    }
+  }
   const enfriado = !archivo.ultimaRevision || Date.now() - archivo.ultimaRevision > 60_000;
   if (cfg.revisar && terminadas.length && enfriado && puedeLlamar()) {
     const partes = terminadas.slice(0, 3);
@@ -300,7 +365,8 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
     });
     contar(costUsd);
     const actual = fs.readFileSync(abs, "utf8");
-    if (actual === src && data.hallazgos.length) {
+    // Se ancla por el texto de cada línea en el archivo actual (otros pasos pudieron agregar comentarios).
+    if (data.hallazgos.length) {
       let next = actual;
       const lineas = actual.split("\n");
       const parsedNow = await parse(actual, lang);
@@ -357,4 +423,6 @@ const REVISION_SYSTEM = `Eres el compañero de programación de ComplementAIry. 
 - Corrige lo que esté mal (issue), sugiere mejoras concretas (suggestion) y señala si no se cumplen sus reglas escritas. Como mucho 2 comentarios por parte, solo si aportan.
 - Si está bien, devuelve una lista vacía (o un único "praise" si algo está especialmente bien hecho).
 - Explica el porqué y da la pista o la pieza (con link a documentación oficial si estás seguro); nunca escribas la corrección en código.
-- Español neutro con tuteo, 1 a 2 oraciones por comentario. No cites números de línea; en "codigo" copia la línea exacta.`;
+- Español neutro con tuteo, 1 a 2 oraciones por comentario. No cites números de línea; en "codigo" copia la línea exacta.
+
+${CRITERIO}`;

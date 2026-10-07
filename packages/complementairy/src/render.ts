@@ -9,6 +9,8 @@ export interface Reply {
   tipo: string;
   texto: string;
   links?: string[];
+  /** Snippet en una sola línea, sin la ayuda de "Marca [x]..." (p. ej. casos de test en serie). */
+  breve?: boolean;
 }
 
 const WIDTH = 100;
@@ -38,6 +40,7 @@ export function renderReply(lang: LangSpec, indent: string, id: string, r: Reply
   if (r.tipo === "snippet" && lang.line) {
     const [llamada, ...resto] = r.texto.split(/\s+—\s+|\s+--\s+/);
     const first = `${indent}${lang.line} @guia[${id}] snippet [ ]: ${sanitizeGuia(llamada!.replace(/\s+/g, " ").trim())}`;
+    if (r.breve) return [first];
     const ayuda = `${resto.join(" — ")}${resto.length ? " " : ""}(Marca [x] para usarlo; puedes cambiar los valores o preguntar con @ia? debajo.)`;
     const extra = renderReply(lang, indent, id, { tipo: "x", texto: ayuda, links: r.links ?? [] }).map((l, i) => (i === 0 ? l.replace(`@guia[${id}] x:`, `@guia[${id}]  `) : l));
     return [first, ...extra];

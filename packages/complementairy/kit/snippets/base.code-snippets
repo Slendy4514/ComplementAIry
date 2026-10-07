@@ -83,6 +83,42 @@
     "description": "Clase con constructor",
     "body": ["export class ${1:Nombre} {", "\tconstructor(${2:args}) {", "\t\t$0", "\t}", "}"]
   },
+  "Importar (JS/TS)": {
+    "prefix": "importar",
+    "scope": "javascript,typescript,javascriptreact,typescriptreact",
+    "description": "Importar nombres de un módulo",
+    "body": ["import { ${1:nombres} } from \"${2:ruta}\";"]
+  },
+  "Vitest (imports)": {
+    "prefix": "vitest",
+    "scope": "javascript,typescript",
+    "description": "Imports de vitest para un archivo de tests",
+    "body": ["import { describe, expect, test } from \"vitest\";"]
+  },
+  "Test aproximado (vitest)": {
+    "prefix": "test-aprox",
+    "scope": "javascript,typescript",
+    "description": "Caso de test para números con decimales (toBeCloseTo)",
+    "body": ["test(\"${1:descripcion}\", () => {", "\texpect(${2:llamada}).toBeCloseTo(${3:esperado}, ${4:decimales});", "});"]
+  },
+  "Test de error (vitest)": {
+    "prefix": "test-error",
+    "scope": "javascript,typescript",
+    "description": "Caso de test que espera un error",
+    "body": ["test(\"${1:descripcion}\", () => {", "\texpect(() => ${2:llamada}).toThrow(${3:mensaje});", "});"]
+  },
+  "Python: importar": {
+    "prefix": "importar",
+    "scope": "python",
+    "description": "Importar nombres de un módulo",
+    "body": ["from ${1:modulo} import ${2:nombres}"]
+  },
+  "Python: test de error": {
+    "prefix": "test-error",
+    "scope": "python",
+    "description": "Test de pytest que espera una excepción",
+    "body": ["def test_${1:caso}():", "\twith pytest.raises(${3:Exception}):", "\t\t${2:llamada}"]
+  },
   "Python: función": {
     "prefix": "def",
     "scope": "python",

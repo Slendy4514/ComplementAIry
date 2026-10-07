@@ -35,7 +35,14 @@ export interface ProjectContext {
   proyecto: string;
   reglas: string;
   patrones: string;
+  /** Memoria del proyecto (.cai/conocimiento.md): módulos, respuestas del programador. */
+  conocimiento: string;
 }
+
+/** Reglas comunes a todos los prompts: no anclarse y preguntar cuando falta contexto. */
+export const CRITERIO = `Criterio:
+- No te ancles a cómo está hecho ahora: si hay un diseño o enfoque claramente mejor, propónlo con su porqué (aunque implique cambiar lo que el programador ya hizo), sin imponerlo.
+- Si te falta contexto para aconsejar bien (qué quiere lograr, restricciones, convenciones), haz una pregunta concreta (tipo "pregunta") en vez de suponer.`;
 
 export function projectContext(root: string, rel: string): ProjectContext {
   const dir = path.join(dataDir(root));
@@ -53,13 +60,15 @@ export function projectContext(root: string, rel: string): ProjectContext {
       }
     }
   }
-  return { proyecto, reglas: reglas.join("\n\n"), patrones: patronesTexto() };
+  const conocimiento = noHtmlComments(read(path.join(dir, "conocimiento.md"))).slice(0, 6000);
+  return { proyecto, reglas: reglas.join("\n\n"), patrones: patronesTexto(), conocimiento };
 }
 
 export function contextBlock(c: ProjectContext): string {
   const parts: string[] = [];
   if (c.proyecto) parts.push(`Qué busca el proyecto (escrito por el programador):\n${c.proyecto}`);
   if (c.reglas) parts.push(`Reglas de estilo y conducta del proyecto (escritas por el programador):\n${c.reglas}`);
+  if (c.conocimiento) parts.push(`Lo que ya se sabe del proyecto (memoria; incluye respuestas del programador):\n${c.conocimiento}`);
   if (c.patrones) parts.push(`Errores frecuentes de este programador (memoria del sistema; insistí en esto cuando aplique):\n${c.patrones}`);
   return parts.join("\n\n");
 }

@@ -2,7 +2,7 @@
   "name": "complementairy",
   "displayName": "ComplementAIry — tú programas, la IA te acompaña",
   "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "complementairy",
   "license": "UNLICENSED",
   "engines": {
@@ -58,6 +58,18 @@
       {
         "command": "cai.perfil",
         "title": "ComplementAIry: ver mi perfil"
+      },
+      {
+        "command": "cai.panorama",
+        "title": "ComplementAIry: panorama del proyecto (estado, sugerencias, preguntas)"
+      },
+      {
+        "command": "cai.tests",
+        "title": "ComplementAIry: proponer tests para la función actual"
+      },
+      {
+        "command": "cai.conocimiento",
+        "title": "ComplementAIry: abrir la memoria del proyecto (responder preguntas)"
       }
     ],
     "keybindings": [
@@ -84,6 +96,11 @@
         "key": "ctrl+alt+e",
         "mac": "cmd+alt+e",
         "when": "editorTextFocus"
+      },
+      {
+        "command": "cai.panorama",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p"
       }
     ],
     "configuration": {

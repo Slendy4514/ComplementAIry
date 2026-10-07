@@ -106,3 +106,33 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - `cai init` migra hooks, la sección de CLAUDE.md, las skills y los snippets base sin duplicar nada;
   - el volumen del perfil conserva su nombre (`aicode-perfil`) y se monta en `~/.cai`, así que no se pierden datos.
 - Selftest: 95/95.
+
+## Prácticas, tests, panorama y memoria del proyecto
+**Pedido del usuario:**
+- prácticas por defecto pero modificables;
+- acompañar mirando todo el proyecto, con un comando y un resumen de lo que pasa;
+- tests en otra carpeta;
+- que la IA pregunte cuando le falta contexto y vaya entendiendo el proyecto;
+- que no se ancle a cómo el usuario hizo las cosas.
+
+**Implementado:**
+- **Prácticas medibles** (`.cai/config.json` → `practicas`), medidas con el parser sin IA. Al superar un umbral, se pide un plano de diseño, una vez por problema.
+- **Tests:**
+  - aviso sin IA cuando una función exportada terminada no tiene tests;
+  - `!tests` y `cai tests` proponen casos apagados en `tests/`, con imports calculados por el script;
+  - los valores esperados se basan en la intención, y si hay duda la IA pregunta;
+  - los decimales usan `toBeCloseTo`;
+  - las descripciones se limpian de código.
+  - Prueba real: de 3 casos activados, 2 pasan y 1 falla (el bug pendiente).
+- **`cai panorama`:**
+  - estado, sugerencias, alternativas, riesgos y preguntas;
+  - las mediciones sin IA;
+  - código completo si el proyecto es chico (antes, sin él, la IA se equivocaba).
+- **Memoria** (`.cai/conocimiento.md`):
+  - resúmenes por módulo, actualizando solo lo que cambió, con el modelo rápido;
+  - las respuestas del usuario pasan a la memoria;
+  - como mucho 6 preguntas abiertas, sin repetir;
+  - todo se usa como contexto en cada consulta.
+- **Criterio en todos los prompts:** no anclarse y preguntar si falta contexto.
+- **Extensión:** Ctrl+Alt+P (panorama), proponer tests y abrir la memoria.
+- Selftest: 103/103.

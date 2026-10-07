@@ -197,6 +197,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
             "plano-proyecto": "te dejé una propuesta de arquitectura en docs/ESTRUCTURA.md",
             "plano-archivo": "te dejé el plano de este archivo",
             ayuda: "vi que esta parte te está costando: te dejé una pista",
+            comentario: "te dejé comentarios sobre lo que terminaste",
+            diseno: "te dejé una sugerencia de diseño",
+            "sin-tests": "esta función no tiene tests (pídelos con !tests)",
             resuelto: "¡resuelto!",
           };
           const txt = r.acciones.map((a) => msgs[a.tipo] ?? a.tipo).join(" · ");
@@ -211,6 +214,51 @@ export function activate(ctx: vscode.ExtensionContext): void {
       });
     }),
   );
+
+  const abrir = async (cwd: string, ...partes: string[]) => {
+    for (const dir of [".cai", ".aicode"]) {
+      const uri = vscode.Uri.joinPath(vscode.Uri.file(cwd), dir, ...partes);
+      try {
+        await vscode.workspace.fs.stat(uri);
+        await vscode.window.showTextDocument(uri, { preview: false });
+        return;
+      } catch {
+        /* probar la otra carpeta */
+      }
+    }
+  };
+  reg("cai.panorama", async () => {
+    const cwd = root(vscode.window.activeTextEditor?.document);
+    if (!cwd) return;
+    try {
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: mirando el proyecto completo…" }, () => run(["panorama"], cwd, "panorama"));
+      await abrir(cwd, "panorama.md");
+    } catch (e) {
+      vscode.window.showErrorMessage(`ComplementAIry: ${(e as Error).message}`);
+    }
+  });
+  reg("cai.conocimiento", async () => {
+    const cwd = root(vscode.window.activeTextEditor?.document);
+    if (cwd) await abrir(cwd, "conocimiento.md");
+  });
+  reg("cai.tests", async () => {
+    const ed = vscode.window.activeTextEditor;
+    const cwd = root(ed?.document);
+    if (!ed || !cwd) return;
+    // La función bajo el cursor: la última "function nombre" / "const nombre =" antes de la línea.
+    const antes = ed.document.getText(new vscode.Range(0, 0, ed.selection.active.line + 1, 0));
+    const m = [...antes.matchAll(/(?:function\s+|const\s+|def\s+)([A-Za-z_$][\w$]*)/g)].pop();
+    if (ed.document.isDirty) await ed.document.save();
+    try {
+      const out = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: proponiendo casos de prueba…" }, () =>
+        run(["tests", ed.document.uri.fsPath, ...(m ? [m[1]!] : [])], cwd, "tests"),
+      );
+      const archivo = /en (\S+\.(?:test\.\w+|py))/.exec(out)?.[1];
+      if (archivo) await vscode.window.showTextDocument(vscode.Uri.joinPath(vscode.Uri.file(cwd), archivo), { preview: false });
+    } catch (e) {
+      vscode.window.showErrorMessage(`ComplementAIry: ${(e as Error).message}`);
+    }
+  });
 
   decorate(vscode.window.activeTextEditor);
   ctx.subscriptions.push(

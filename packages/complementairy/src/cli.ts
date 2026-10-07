@@ -18,6 +18,8 @@ import { resolveMissing, runGuia } from "./tutor.js";
 import { watch } from "./watch.js";
 import { acompanar } from "./acompanante.js";
 import { planoProyecto } from "./plano.js";
+import { proponerTests } from "./tests.js";
+import { panorama } from "./panorama.js";
 import { leerUso } from "./llm.js";
 import { crearSnippet } from "./snippets.js";
 import { aplicarExpansion, biblioteca, paraLenguaje, planExpansion } from "./biblioteca.js";
@@ -36,6 +38,9 @@ const HELP = `ComplementAIry (cai) — tú programas, la IA te acompaña
                                     verificaciones deterministas + revisores de IA, como comentarios
   cai gate [archivos...] [--staged] [--rapido] [--mutacion]
                                     solo verificaciones deterministas (falla si hay problemas)
+  cai tests <archivo> [función]     propone casos de prueba (apagados) en la carpeta de tests
+  cai panorama [--sin-ia]           visión del proyecto completo: estado, sugerencias de diseño, alternativas,
+                                    preguntas para ti, prácticas medidas, funciones sin tests (en .cai/panorama.md)
   cai predecir <archivo>         preguntas "¿qué devuelve...?" sobre tus funciones
   cai check <archivo>            ejecuta tu código y compara con tus predicciones (@yo:)
   cai doctor [--instalar]        qué está listo, qué falta y cómo arreglarlo
@@ -329,6 +334,20 @@ async function main(argv: string[]): Promise<number> {
       const desc = argv.slice(1).join(" ").trim();
       const r = await planoProyecto(root, desc || undefined);
       console.log(`✓ ${path.relative(root, r.file)} con la propuesta de arquitectura · US$${r.costoUsd.toFixed(3)}\n  Pregunta o pide cambios con <!-- @ia? ... --> en ese archivo (Ctrl+Alt+G).`);
+      return 0;
+    }
+    case "panorama": {
+      const r = await panorama(root, { sinIa: argv.includes("--sin-ia"), log: (l) => console.log(l) });
+      for (const l of r.resumen) console.log(`· ${l}`);
+      console.log(`✓ ${path.relative(root, r.archivo)}${r.costoUsd ? ` · US$${r.costoUsd.toFixed(3)}` : ""}`);
+      return 0;
+    }
+    case "tests": {
+      if (!sub) throw new Error("uso: cai tests <archivo> [función]");
+      const r = await proponerTests(root, path.relative(root, path.resolve(sub)), rest.find((a) => !a.startsWith("--")));
+      console.log(`✓ ${r.casos} caso(s) propuestos en ${r.archivo}${r.preguntas ? ` (${r.preguntas} con pregunta para ti)` : ""} · US$${r.costoUsd.toFixed(3)}`);
+      for (const d of r.descartados) console.log(`  ! descartado: ${d}`);
+      console.log("  Revisa cada caso, ajusta el valor esperado y márcalo [x] (se convierte en test al guardar o con Ctrl+Alt+E).");
       return 0;
     }
     case "uso": {

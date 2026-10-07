@@ -20,6 +20,8 @@ export interface AskOptions {
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** Habilita Context7 (documentación actualizada de librerías) como herramienta de solo lectura. */
   context7?: boolean;
+  /** Todo el contexto ya va en el prompt: sin herramientas (más rápido y barato, sin exploración). */
+  sinHerramientas?: boolean;
 }
 
 export interface AskResult<T> {
@@ -36,8 +38,8 @@ const realLLM: LLM = async <T>(o: AskOptions): Promise<AskResult<T>> => {
     prompt: o.prompt,
     options: {
       cwd: o.cwd,
-      tools: READ_ONLY_TOOLS,
-      allowedTools: o.context7 ? [...READ_ONLY_TOOLS, "mcp__context7"] : READ_ONLY_TOOLS,
+      tools: o.sinHerramientas ? [] : READ_ONLY_TOOLS,
+      allowedTools: o.sinHerramientas ? [] : o.context7 ? [...READ_ONLY_TOOLS, "mcp__context7"] : READ_ONLY_TOOLS,
       ...(o.context7
         ? {
             mcpServers: {
@@ -52,7 +54,7 @@ const realLLM: LLM = async <T>(o: AskOptions): Promise<AskResult<T>> => {
       disallowedTools: ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "WebFetch", "WebSearch", "Task"],
       settingSources: [],
       persistSession: false,
-      maxTurns: 12,
+      maxTurns: o.sinHerramientas ? 4 : 16,
       systemPrompt: o.system,
       ...(o.model ? { model: o.model } : {}),
       ...(o.effort ? { effort: o.effort } : {}),

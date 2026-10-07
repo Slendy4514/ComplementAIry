@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse } from "./comments.js";
-import { contextBlock, projectContext } from "./context.js";
+import { contextBlock, projectContext, CRITERIO } from "./context.js";
+import { medir } from "./metricas.js";
+import { proponerTests } from "./tests.js";
 import { biblioteca, paraLenguaje, parseLlamada, type Snippet } from "./biblioteca.js";
 import { makeZoner, type Config } from "./config.js";
 import { fileIdentifiers, guardReplies } from "./guard.js";
@@ -57,7 +59,9 @@ Reglas:
 - Si el sistema indica que no hubo intento en código crítico, no avances: pide un intento (tipo "pregunta").
 - Adáptate a su nivel: aprendiz = explica términos; intermedio = directo; experto = mínimo y técnico.
 - Links: solo documentación oficial que conozcas con certeza. Si dudas de una URL, no la pongas.
-- No cites números de línea. Puedes leer el proyecto con Read/Grep/Glob. No intentes modificar nada.`;
+- No cites números de línea. Puedes leer el proyecto con Read/Grep/Glob. No intentes modificar nada.
+
+${CRITERIO}`;
 
 const NIVEL_BASE: Record<Nivel, number> = { aprendiz: 1, intermedio: 1, experto: 2 };
 /** Ajuste del perfil cuando un hilo se resuelve (desaparece del archivo), según el nivel que hizo falta. */
@@ -78,6 +82,7 @@ export const PEDIDOS: { re: RegExp; nivel: number; tipo: string; que: string }[]
   { re: /!ejemplo\b/i, nivel: 4, tipo: "ejemplo", que: "un ejemplo análogo de otro dominio" },
   { re: /!plano\b/i, nivel: 2, tipo: "plano", que: "el plano: qué funciones crear, qué hace cada una y en qué orden" },
   { re: /!snippets?\b/i, nivel: 2, tipo: "snippet", que: "qué snippets de la biblioteca usar y con qué valores" },
+  { re: /!tests?\b/i, nivel: 2, tipo: "tests", que: "casos de prueba" },
   {
     re: /!arquitectura\b/i,
     nivel: 2,
@@ -123,6 +128,8 @@ function numbered(src: string, mark: number, from = 0, to = Infinity): string {
 }
 
 interface Task {
+  /** `!tests`: en vez de responder, se proponen casos en el archivo de tests. */
+  tests?: string | true;
   thread: Thread;
   id: string;
   turn: number;
@@ -222,6 +229,12 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
     const row = t.anchor.row;
     const fileView = lines <= 400 ? numbered(src, row) : numbered(src, row, Math.max(0, row - 60), row + 60);
     const conversation = t.turns.map((x) => `${x.quien === "ia" ? "TUTOR" : x.intento ? "PROGRAMADOR (intento)" : "PROGRAMADOR"}: ${x.texto}`).join("\n");
+    if (pedido?.tipo === "tests") {
+      // Función que rodea la pregunta (si es exportada); si no, todo el archivo.
+      const fn = medir(src, parsed).funciones.filter((f) => f.exportada && f.linea <= row + 2 && f.linea + f.lineas >= row + 1).pop();
+      tasks.push({ tests: fn?.nombre ?? true, thread: t, id, turn: t.aiTurns + 1, level, sub: lastHuman, subIndex: 0, subTotal: 1, prompt: "" });
+      continue;
+    }
     subs.forEach((sub, i) => {
       tasks.push({
         thread: t,
@@ -269,13 +282,22 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
   const settled = await Promise.allSettled(
     tasks.map(async (task) => {
       const tag = `${task.id}${task.subTotal > 1 ? `:${task.subIndex + 1}` : ""}`;
+      if (task.tests) {
+        log(`  → [${tag}] casos de prueba${task.tests === true ? "" : ` para ${task.tests}`}`);
+        const r = await proponerTests(root, rel, task.tests === true ? undefined : task.tests);
+        result.costoUsd += r.costoUsd;
+        const texto = r.casos
+          ? `Te propuse ${r.casos} caso(s) en ${r.archivo}${r.preguntas ? `; en ${r.preguntas} te pregunto qué debería pasar` : ""}. Revisa cada uno, ajusta el valor esperado y márcalo [x] para convertirlo en test.`
+          : `No pude proponer casos válidos (${r.descartados.join("; ") || "sin funciones exportadas"}).`;
+        return { task, replies: [{ tipo: "pista", texto, links: [] }], level: task.level };
+      }
       log(`  → [${tag}] nivel ${task.level}: ${task.sub.slice(0, 70)}`);
       let prompt = task.prompt;
       for (let attempt = 0; attempt < 2; attempt++) {
         const { data, costUsd } = await ask<{ respuestas: Reply[]; nivel_usado: number }>({ kind: "guia", system: SYSTEM, prompt, schema: SCHEMA, cwd: root, ...iaOpts(z.config) });
         result.costoUsd += costUsd;
         const level = Math.min(task.level, data.nivel_usado || task.level);
-        const g = guardReplies(data.respuestas, task.level, userIds);
+        const g = guardReplies(Array.isArray(data?.respuestas) ? data.respuestas : [], task.level, userIds);
         // Sugerencias de snippet: solo de la biblioteca (determinista).
         g.ok = g.ok.filter((r) => {
           if (r.tipo !== "snippet") return true;

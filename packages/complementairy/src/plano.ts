@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config.js";
-import { contextBlock, projectContext } from "./context.js";
+import { contextBlock, projectContext, CRITERIO } from "./context.js";
 import { listFiles } from "./files.js";
 import { makeZoner } from "./config.js";
 import { ask } from "./llm.js";
@@ -42,7 +42,9 @@ const SYSTEM = `Eres el arquitecto de ComplementAIry. Propones una estructura CO
 - Lee el proyecto con Read/Grep/Glob (estructura actual, package.json, código existente) y respeta lo que ya existe.
 - Lo más simple que funcione para lo que describe el programador; explica el porqué de cada decisión en una frase.
 - Preguntas: solo decisiones que de verdad dependen del programador.
-- Español neutro con tuteo.`;
+- Español neutro con tuteo.
+
+${CRITERIO}`;
 
 type Plano = {
   resumen: string;

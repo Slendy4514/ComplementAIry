@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parse } from "./comments.js";
 import { loadConfig, makeZoner, dataDir } from "./config.js";
-import { contextBlock, projectContext, registrarPatron } from "./context.js";
+import { contextBlock, projectContext, registrarPatron, CRITERIO } from "./context.js";
 import { runGate, type Corrida, type Diag } from "./gate.js";
 import { langFor, type LangSpec } from "./lang.js";
 import { ask, evitada } from "./llm.js";
@@ -72,7 +72,9 @@ const SYSTEM = `Sos un revisor de código de ComplementAIry. El programador escr
 - No des la solución en código: describí el problema y la pista o la pieza (con link a documentación oficial si estás seguro de la URL).
 - Ignorá las preguntas abiertas del programador (comentarios @ia?): las responde el tutor, no la revisión.
 - Ignorá los comentarios @guia existentes.
-- Español neutro con tuteo (tú), 1 a 3 oraciones por hallazgo. No cites números de línea.`;
+- Español neutro con tuteo (tú), 1 a 3 oraciones por hallazgo. No cites números de línea.
+
+${CRITERIO}`;
 
 const CONSOLIDAR_SCHEMA = {
   type: "object",
@@ -96,6 +98,7 @@ async function consolidar(root: string, findings: Finding[], costo: (n: number) 
       system: CONSOLIDAR_SYSTEM,
       cwd: root,
       schema: CONSOLIDAR_SCHEMA,
+      sinHerramientas: true,
       ...iaOpts(loadConfig(root), true),
       prompt: findings.map((f, i) => `[${i}] (línea ${f.line}, ${f.fuente}, ${f.etiqueta}${f.bloqueante ? ", bloqueante" : ""}) ${f.texto}`).join("\n"),
     });

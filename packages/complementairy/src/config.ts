@@ -41,6 +41,24 @@ export interface Config {
     /** Nivel por carpeta: { "src/legacy/**": "silencioso", "src/nuevo/**": "activo" } (gana el primero que coincide). */
     porCarpeta: Record<string, "silencioso" | "normal" | "activo">;
   };
+  /**
+   * Buenas prácticas medibles (sin IA). Al superar un umbral, el acompañante te propone un plano
+   * para mejorar el diseño (una vez por problema). `null` desactiva una regla.
+   * Las prácticas en palabras van en .cai/reglas.md.
+   */
+  practicas: {
+    maxFuncionesArchivo: number | null;
+    maxLineasArchivo: number | null;
+    maxLineasFuncion: number | null;
+    maxAnidamiento: number | null;
+    maxParametros: number | null;
+  };
+  tests: {
+    /** Carpeta de tests (se replica la estructura de src). "" = junto al archivo. */
+    carpeta: string;
+    /** Avisar (sin IA) cuando terminás una función exportada que no tiene tests. */
+    avisarSinTests: boolean;
+  };
   ia: {
     /** Modelo para la guía y la revisión; vacío = el predeterminado de Claude Code. */
     modelo: string;
@@ -96,6 +114,8 @@ export const DEFAULT_CONFIG: Config = {
   snapshot: { ignorar: [], maxBytes: 1024 * 1024 },
   snippets: { modo: "ganado", lenguajes: [] },
   acompanar: { nivel: "normal", intentos: 3, maxLlamadasHora: 20, revisar: true, porCarpeta: {} },
+  practicas: { maxFuncionesArchivo: 12, maxLineasArchivo: 300, maxLineasFuncion: 40, maxAnidamiento: 3, maxParametros: 4 },
+  tests: { carpeta: "tests", avisarSinTests: true },
   ia: { modelo: "", context7: false, modeloRapido: "claude-haiku-4-5" },
 };
 
@@ -120,6 +140,8 @@ export function loadConfig(root: string): Config {
     snippets: { ...DEFAULT_CONFIG.snippets, ...raw.snippets },
     acompanar: { ...DEFAULT_CONFIG.acompanar, ...raw.acompanar },
     ia: { ...DEFAULT_CONFIG.ia, ...raw.ia },
+    practicas: { ...DEFAULT_CONFIG.practicas, ...raw.practicas },
+    tests: { ...DEFAULT_CONFIG.tests, ...raw.tests },
   };
 }
 
