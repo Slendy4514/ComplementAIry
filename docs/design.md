@@ -114,6 +114,22 @@ En la prueba real, de 3 casos activados pasaron 2 y falló 1, que era justo el b
 - No se anclan a cómo lo hiciste: si hay un enfoque claramente mejor, lo proponen con su porqué, sin imponerlo.
 - Si les falta contexto, preguntan en vez de suponer.
 
+### 3c. Proyectos ya armados: autoría y arranque guiado
+**`cai conocer`** (te lo ofrece `cai init` si el proyecto ya tiene código):
+1. **Escaneo sin IA:** stack, `package.json`, README, estructura y **quién escribió qué según git**.
+2. **Una consulta a la IA:** redacta borradores de `.cai/proyecto.md` y `.cai/reglas.md` (las convenciones que *se ven* en el código) y prepara hasta 5 preguntas, **cada una con su respuesta probable**.
+3. **En la terminal te pregunta de a una:** Enter acepta, un número elige otra opción, `-` la salta. Las respuestas quedan en la memoria y en `proyecto.md`. Sin terminal, las preguntas quedan en `.cai/conocimiento.md`.
+4. **No pisa lo que ya escribiste:** si había contenido, deja `*.borrador.md`.
+
+**Autoría** (`.cai/config.json` → `autoria`):
+
+| Valor | Qué significa | Qué cambia |
+|---|---|---|
+| `heredado` | código que no escribiste tú | la IA te lo explica sin atribuírtelo; no cuenta en tu perfil ni en tus errores frecuentes; el acompañante no comenta salvo `acompanarHeredado: true` |
+| `terceros` | librerías copiadas o código generado | se ignora en el acompañante y el panorama |
+
+`cai origen` muestra lo marcado y sugiere, según git, las carpetas que nunca tocaste.
+
 ### 4. Revisar al terminar
 **`Ctrl+Alt+R`** (o `cai revisar archivo.ts`):
 1. **Verificaciones deterministas:** tipos, lint, tests relacionados, reglas de arquitectura, tus reglas mecánicas (`.cai/reglas.json`) y, en zonas críticas, **mutation testing**, que muestra qué cambios de tu código no detecta ningún test.

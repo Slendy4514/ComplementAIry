@@ -47,6 +47,8 @@ cai init .                             # hooks, configuración, snippets base, t
 cai doctor --instalar                  # herramientas del lenguaje (tsc, eslint, vitest, stryker / mypy, ruff, pytest...)
 cai perfil set javascript intermedio   # tu nivel por tema
 ```
+**Proyecto ya armado:** `cai init .` te ofrece `cai conocer`, que analiza el proyecto, redacta borradores de `.cai/proyecto.md` y `.cai/reglas.md` (las convenciones que se ven en el código) y te hace unas pocas preguntas con la respuesta probable ya puesta (Enter para aceptar). También detecta, según git, qué carpetas no escribiste tú, para marcarlas como `heredado`: la IA no te atribuye ese código ni lo cuenta en tu perfil.
+
 Después escribe con tus palabras `.cai/proyecto.md` (qué buscas) y `.cai/reglas.md` (cómo escribes). Las prácticas medibles (largo de funciones, anidamiento...) vienen activas por defecto y se ajustan en `.cai/config.json` → `practicas`. Al guardar el primer archivo, el acompañante propone la arquitectura del proyecto.
 
 ## Uso diario

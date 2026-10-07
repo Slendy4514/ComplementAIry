@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse } from "./comments.js";
-import { loadConfig, makeZoner, dataDir } from "./config.js";
+import { dataDir, loadConfig, makeZoner, notaOrigen, origenDe } from "./config.js";
 import { contextBlock, projectContext, registrarPatron, CRITERIO } from "./context.js";
 import { runGate, type Corrida, type Diag } from "./gate.js";
 import { langFor, type LangSpec } from "./lang.js";
@@ -162,6 +162,8 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
   if (!lang) throw new Error(`tipo de archivo sin soporte: ${rel}`);
   const z = makeZoner(root);
   const res: ReviewResult = { insertados: 0, omitidos: [], corridas: [], bloqueantes: 0, costoUsd: 0 };
+  const origen = origenDe(z.config, rel);
+  const propio = origen === "propio";
 
   // 1. Sensores deterministas.
   log(`cai: verificaciones deterministas de ${rel}...`);
@@ -176,7 +178,7 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
     links: [],
     fuente: d.tool,
   }));
-  for (const d of gate.diags) registrarPatron(`${d.tool}/${d.code ?? "general"}`, d.msg);
+  if (propio) for (const d of gate.diags) registrarPatron(`${d.tool}/${d.code ?? "general"}`, d.msg);
 
   // 2. Revisores de IA, en paralelo, uno por foco.
   const src0 = fs.readFileSync(abs, "utf8");
@@ -229,6 +231,7 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
             ...iaOpts(z.config),
             prompt: [
               `Foco de esta revisión: ${r.foco}.`,
+              notaOrigen(origen),
               `Archivo: ${rel} (${lang.id})${z.isCritical(abs) ? " — ZONA CRÍTICA" : ""}. Programador: ${nivel} en ${lang.id}.`,
               contextBlock(ctx),
               gate.diags.length ? `Ya detectado por herramientas (no lo repitas):\n${gate.diags.map((d) => `- línea ${d.line}: ${d.msg}`).join("\n")}` : "",
@@ -239,7 +242,7 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
           });
           res.costoUsd += costUsd;
           return data.hallazgos.map((h) => {
-            registrarPatron(`${r.id}/${h.categoria}`, h.texto);
+            if (propio) registrarPatron(`${r.id}/${h.categoria}`, h.texto);
             return { line: findLine(lines0, h.codigo), etiqueta: h.etiqueta, bloqueante: h.bloqueante, texto: h.texto, links: h.links, fuente: r.id };
           });
         } catch (e) {
@@ -290,7 +293,9 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
 
   // 4. Perfil: la revisión es evidencia de cuánto domina el tema.
   const issues = findings.filter((f) => f.etiqueta === "issue").length;
-  if (issues) registrar(lang.id, -0.01 * Math.min(issues, 5), `revisión: ${issues} problema(s) en ${rel}`);
+  if (!propio) {
+    /* código heredado o de terceros: no cuenta en tu perfil */
+  } else if (issues) registrar(lang.id, -0.01 * Math.min(issues, 5), `revisión: ${issues} problema(s) en ${rel}`);
   else if (src0.split("\n").length > 15) registrar(lang.id, 0.02, `revisión sin problemas en ${rel}`);
   return res;
 }

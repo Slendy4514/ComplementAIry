@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { codeOnly, parse } from "./comments.js";
-import { dataDir, makeZoner } from "./config.js";
+import { dataDir, makeZoner, origenDe } from "./config.js";
 import { contextBlock, CRITERIO, loadPatrones, projectContext } from "./context.js";
 import { listFiles } from "./files.js";
 import { langFor } from "./lang.js";
@@ -87,13 +87,13 @@ ${CRITERIO}`;
 
 // --- Memoria del proyecto (.cai/conocimiento.md) -----------------------------------
 
-interface Memoria {
+export interface Memoria {
   respondidas: string[];
   abiertas: { p: string; r: string }[];
   notas: string;
 }
 
-function leerMemoria(file: string): Memoria {
+export function leerMemoria(file: string): Memoria {
   const m: Memoria = { respondidas: [], abiertas: [], notas: "" };
   if (!fs.existsSync(file)) return m;
   const txt = fs.readFileSync(file, "utf8");
@@ -163,6 +163,7 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
   for (const rel of listFiles(z)) {
     const lang = langFor(rel);
     if (!lang || NO_CODIGO.has(lang.id) || (carpetaTests && rel.startsWith(carpetaTests + "/")) || /(\.test\.|\.spec\.|(^|\/)test_)/.test(rel)) continue;
+    if (origenDe(z.config, rel) === "terceros") continue;
     let src: string;
     try {
       src = fs.readFileSync(path.join(root, rel), "utf8");
@@ -261,7 +262,7 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
         mem.notas ? `Notas del programador:\n${mem.notas}` : "",
         mem.respondidas.length ? `Lo que el programador ya respondió:\n- ${mem.respondidas.join("\n- ")}` : "",
         mem.abiertas.length ? `Preguntas que ya le hiciste y aún no responde (NO las repitas ni reformules):\n- ${mem.abiertas.map((a) => a.p).join("\n- ")}` : "",
-        `Módulos (${archivos.length}):\n${archivos.map((a) => `- ${a.rel} (${a.lineas} líneas, ${a.funciones} funciones): ${resumenes[a.rel]?.resumen ?? "(sin resumen)"}`).join("\n")}`,
+        `Módulos (${archivos.length}):\n${archivos.map((a) => `- ${a.rel}${origenDe(z.config, a.rel) === "heredado" ? " [HEREDADO: no lo escribió el programador]" : ""} (${a.lineas} líneas, ${a.funciones} funciones): ${resumenes[a.rel]?.resumen ?? "(sin resumen)"}`).join("\n")}`,
         // Proyecto chico: el código real (más preciso que los resúmenes). Grande: solo resúmenes.
         totalCodigo <= 30_000 ? `Código completo:\n${archivos.map((a) => `=== ${a.rel}\n${a.codigo}`).join("\n\n")}` : "",
         `Tests: carpeta configurada "${carpetaTests || "(junto al código)"}"; archivos de test existentes: ${testsExistentes.length ? testsExistentes.join(", ") : "ninguno"}.`,
@@ -321,4 +322,19 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
     mem.abiertas.length ? `${mem.abiertas.length} pregunta(s) para ti en ${path.relative(root, memFile)}` : "",
   ].filter(Boolean);
   return { archivo: out, costoUsd: costo, resumen };
+}
+
+/** Modifica la memoria del proyecto conservando los resúmenes de módulos ya calculados. */
+export function actualizarMemoria(root: string, f: (m: Memoria) => void): void {
+  const dir = dataDir(root);
+  const memFile = path.join(dir, "conocimiento.md");
+  let resumenes: Record<string, { hash: string; resumen: string }> = {};
+  try {
+    resumenes = (JSON.parse(fs.readFileSync(path.join(dir, "cache", "panorama.json"), "utf8")) as { resumenes: typeof resumenes }).resumenes ?? {};
+  } catch {
+    /* sin panorama todavía */
+  }
+  const m = leerMemoria(memFile);
+  f(m);
+  escribirMemoria(memFile, resumenes, m);
 }

@@ -3,7 +3,7 @@ import picomatch from "picomatch";
 import path from "node:path";
 import { aplicarExpansion, biblioteca, paraLenguaje, parseLlamada, planExpansion } from "./biblioteca.js";
 import { codeOnly, parse } from "./comments.js";
-import { makeZoner, dataDir } from "./config.js";
+import { dataDir, makeZoner, notaOrigen, origenDe } from "./config.js";
 import { contextBlock, projectContext, registrarPatron, CRITERIO } from "./context.js";
 import { runGate } from "./gate.js";
 import { fileIdentifiers, guardReplies } from "./guard.js";
@@ -112,9 +112,12 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
   if (!lang || !fs.existsSync(abs)) return res;
   const z = makeZoner(root);
   if (z.zoneOf(abs) === "protegida") return res;
+  const origen = origenDe(z.config, rel);
+  if (origen === "terceros") return res; // librerías copiadas / código generado: no se acompaña
+  const propio = origen === "propio";
   const base = z.config.acompanar;
   const porCarpeta = Object.entries(base.porCarpeta ?? {}).find(([g]) => picomatch(g, { dot: true })(rel));
-  const cfg = { ...base, nivel: porCarpeta ? porCarpeta[1] : base.nivel };
+  const cfg = { ...base, nivel: porCarpeta ? porCarpeta[1] : !propio && !z.config.autoria.acompanarHeredado ? ("silencioso" as const) : base.nivel };
 
   // 1. Snippets que activaste con [x] (o tus @snippet: no; esos van con Ctrl+Alt+E).
   {
@@ -166,7 +169,7 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
   const libTexto = libreria.map((s) => `- ${s.nombre}: ${s.descripcion}${marcadores(s).length ? ` (marcadores: ${marcadores(s).join(", ")})` : ""}`).join("\n");
   const nivelProg = nivelDe(puntaje(loadPerfil(), lang.id));
   const critical = z.isCritical(abs);
-  const ctx = contextBlock(projectContext(root, rel));
+  const ctx = [notaOrigen(origen), contextBlock(projectContext(root, rel))].filter(Boolean).join("\n\n");
   const estructura = fs.existsSync(path.join(root, "docs", "ESTRUCTURA.md")) ? fs.readFileSync(path.join(root, "docs", "ESTRUCTURA.md"), "utf8").slice(0, 6000) : "";
   const userIds = fileIdentifiers(parsed.root, src);
 
@@ -250,7 +253,7 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
   // Regiones que ya no tienen errores: resueltas.
   for (const [key, st] of Object.entries(archivo.regiones)) {
     if (porRegion.has(key)) continue;
-    if (st.fallos >= 2) {
+    if (st.fallos >= 2 && propio) {
       registrar(lang.id, st.ayudado ? 0.02 : 0.05, st.ayudado ? "resolvió un error con ayuda" : "resolvió un error por su cuenta tras varios intentos");
       res.acciones.push({ tipo: "resuelto", detalle: key });
     }
@@ -381,7 +384,7 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
         const block = renderReply(lang, "", `${id}.${++k}`, { tipo: "revision", texto: `${h.etiqueta}${h.bloqueante ? " (blocking)" : ""}: ${h.texto}`, links: h.links });
         const ins = await insertAboveLine(next, lang, line, block);
         if (ins) next = ins;
-        registrarPatron(`acompanante/${h.categoria}`, h.texto);
+        if (propio) registrarPatron(`acompanante/${h.categoria}`, h.texto);
       }
       if (next !== actual) {
         fs.writeFileSync(abs, next);

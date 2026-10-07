@@ -144,3 +144,17 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - el release incluye `complementairy.tgz` y `complementairy.vsix`;
   - la feature está en `ghcr.io/slendy4514/complementairy/complementairy` (tags `0`, `0.3`, `0.3.0` y `latest`), con acceso público.
 - **Próximas versiones:** `git tag vX.Y.Z && git push origin vX.Y.Z`. La extensión avisa en los contenedores y se actualiza con Rebuild.
+
+## Proyectos ya armados: autoría y `cai conocer` (v0.4.0)
+- **Pedido:** indicar qué código hizo el usuario y cuál no, y que el `init` de un proyecto existente lo ayude con preguntas, sin abrumarlo con pensar todo de cero.
+- **Autoría** (`autoria.heredado` / `autoria.terceros`):
+  - se sugiere sin IA, a partir del historial de git;
+  - el código heredado no se le atribuye al usuario ni cuenta en su perfil, y el acompañante no lo comenta salvo que se active;
+  - el código de terceros se ignora.
+- **`cai conocer`** (lo ofrece `init` si ya hay código):
+  - redacta borradores de proyecto.md y reglas.md;
+  - hace hasta 5 preguntas, cada una con su respuesta sugerida;
+  - pide confirmación antes de marcar la autoría;
+  - no pisa lo que el usuario ya escribió.
+  - Prueba real: buen borrador, 9 convenciones correctas y 5 preguntas útiles, por US$0,13.
+- Selftest: 109/109.

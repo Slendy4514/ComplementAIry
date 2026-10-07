@@ -53,6 +53,17 @@ export interface Config {
     maxAnidamiento: number | null;
     maxParametros: number | null;
   };
+  /**
+   * Quién escribió qué. "heredado": código del proyecto que no escribiste vos (la IA no te lo atribuye,
+   * no cuenta en tu perfil y el acompañante no comenta salvo que lo pidas). "terceros": librerías
+   * copiadas, código generado (se ignora en revisiones y panorama). El resto es "propio".
+   */
+  autoria: {
+    heredado: string[];
+    terceros: string[];
+    /** Que el acompañante también comente el código heredado. */
+    acompanarHeredado: boolean;
+  };
   tests: {
     /** Carpeta de tests (se replica la estructura de src). "" = junto al archivo. */
     carpeta: string;
@@ -115,6 +126,7 @@ export const DEFAULT_CONFIG: Config = {
   snippets: { modo: "ganado", lenguajes: [] },
   acompanar: { nivel: "normal", intentos: 3, maxLlamadasHora: 20, revisar: true, porCarpeta: {} },
   practicas: { maxFuncionesArchivo: 12, maxLineasArchivo: 300, maxLineasFuncion: 40, maxAnidamiento: 3, maxParametros: 4 },
+  autoria: { heredado: [], terceros: [], acompanarHeredado: false },
   tests: { carpeta: "tests", avisarSinTests: true },
   ia: { modelo: "", context7: false, modeloRapido: "claude-haiku-4-5" },
 };
@@ -142,6 +154,7 @@ export function loadConfig(root: string): Config {
     ia: { ...DEFAULT_CONFIG.ia, ...raw.ia },
     practicas: { ...DEFAULT_CONFIG.practicas, ...raw.practicas },
     tests: { ...DEFAULT_CONFIG.tests, ...raw.tests },
+    autoria: { ...DEFAULT_CONFIG.autoria, ...raw.autoria },
   };
 }
 
@@ -178,4 +191,21 @@ export function makeZoner(root: string, config: Config = loadConfig(root)): Zone
     isCritical: (abs) => critical(rel(abs)),
     isIgnored: (r) => ignored(r),
   };
+}
+
+export type Origen = "propio" | "heredado" | "terceros";
+
+/** De quién es un archivo según `autoria` en .cai/config.json. */
+export function origenDe(config: Config, rel: string): Origen {
+  const m = (globs: string[]) => globs.length > 0 && picomatch(globs, { dot: true })(rel);
+  if (m(config.autoria.terceros)) return "terceros";
+  if (m(config.autoria.heredado)) return "heredado";
+  return "propio";
+}
+
+/** Frase para los prompts cuando el código no es del programador. */
+export function notaOrigen(o: Origen): string {
+  if (o === "heredado") return "IMPORTANTE: este archivo es código HEREDADO (no lo escribió el programador). No le atribuyas sus problemas; explícale cómo funciona, qué riesgos tiene y qué convendría mejorar si lo toca.";
+  if (o === "terceros") return "Este archivo es de terceros (librería copiada o código generado): no lo critiques; solo explica cómo usarlo.";
+  return "";
 }

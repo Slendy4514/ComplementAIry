@@ -20,6 +20,9 @@ import { acompanar } from "./acompanante.js";
 import { planoProyecto } from "./plano.js";
 import { proponerTests } from "./tests.js";
 import { panorama } from "./panorama.js";
+import { conContenido, conocer, sugerirAutoria } from "./conocer.js";
+import { createInterface } from "node:readline/promises";
+import { dataDir, loadConfig, origenDe } from "./config.js";
 import { leerUso } from "./llm.js";
 import { crearSnippet } from "./snippets.js";
 import { aplicarExpansion, biblioteca, paraLenguaje, planExpansion } from "./biblioteca.js";
@@ -38,6 +41,9 @@ const HELP = `ComplementAIry (cai) — tú programas, la IA te acompaña
                                     verificaciones deterministas + revisores de IA, como comentarios
   cai gate [archivos...] [--staged] [--rapido] [--mutacion]
                                     solo verificaciones deterministas (falla si hay problemas)
+  cai conocer [--sin-preguntas]     proyecto ya armado: analiza, redacta proyecto.md/reglas.md y te pregunta
+                                    (con respuestas sugeridas); detecta qué código no escribiste (git)
+  cai origen                        quién escribió qué (según git) y cómo está marcado en .cai/config.json
   cai tests <archivo> [función]     propone casos de prueba (apagados) en la carpeta de tests
   cai panorama [--sin-ia]           visión del proyecto completo: estado, sugerencias de diseño, alternativas,
                                     preguntas para ti, prácticas medidas, funciones sin tests (en .cai/panorama.md)
@@ -112,6 +118,16 @@ async function main(argv: string[]): Promise<number> {
       const target = path.resolve(sub ?? ".");
       const { changes } = init(target);
       console.log(`cai instalado en ${target}:\n` + changes.map((c) => `  · ${c}`).join("\n"));
+      // Proyecto ya armado y sin proyecto.md: ofrecer el arranque guiado.
+      const yaArmado = listFiles(makeZoner(target)).filter((f) => langFor(f) && !/\.(md|ya?ml|toml|json)$/i.test(f)).length >= 3;
+      if (yaArmado && !conContenido(path.join(dataDir(target), "proyecto.md"))) {
+        if (process.stdin.isTTY && target === path.resolve(root)) {
+          const rl = createInterface({ input: process.stdin, output: process.stdout });
+          const r = (await rl.question("\nEste proyecto ya tiene código. ¿Lo analizo para ayudarte a llenar proyecto.md y reglas.md con unas pocas preguntas? [S/n] ")).trim().toLowerCase();
+          rl.close();
+          if (r === "" || r.startsWith("s")) return main(["conocer"]);
+        } else console.log("\nEste proyecto ya tiene código: corre `cai conocer` para que te ayude a llenar proyecto.md y reglas.md.");
+      }
       console.log(
         `\nPróximos pasos:\n` +
           `  1. Completá .cai/proyecto.md y .cai/reglas.md con tus palabras.\n` +
@@ -334,6 +350,41 @@ async function main(argv: string[]): Promise<number> {
       const desc = argv.slice(1).join(" ").trim();
       const r = await planoProyecto(root, desc || undefined);
       console.log(`✓ ${path.relative(root, r.file)} con la propuesta de arquitectura · US$${r.costoUsd.toFixed(3)}\n  Pregunta o pide cambios con <!-- @ia? ... --> en ese archivo (Ctrl+Alt+G).`);
+      return 0;
+    }
+    case "conocer": {
+      const tty = process.stdin.isTTY && !argv.includes("--sin-preguntas");
+      const rl = tty ? createInterface({ input: process.stdin, output: process.stdout }) : null;
+      try {
+        const r = await conocer(root, { log: (l) => console.log(l), ...(rl ? { preguntar: (t: string) => rl.question(t) } : {}) });
+        console.log(`\n${r.resumen}`);
+        for (const e of r.escritos) console.log(`✓ ${e}`);
+        if (r.autoriaAplicada.length) console.log(`  marcado: ${r.autoriaAplicada.map((a) => `${a.glob} (${a.tipo})`).join(", ")}`);
+        if (!rl && r.autoriaSugerida.length) console.log(`  sugerencia de autoría (agrégala en .cai/config.json → autoria): ${r.autoriaSugerida.map((a) => `${a.glob} → ${a.tipo}`).join(", ")}`);
+        if (r.pendientes) console.log(`  ${r.pendientes} pregunta(s) para responder en .cai/conocimiento.md (después de "R:")`);
+        if (r.escritos.some((e) => e.includes(".borrador."))) console.log("  Como ya tenías contenido, dejé borradores (*.borrador.md) para que combines lo que quieras.");
+        console.log(`  · US$${r.costoUsd.toFixed(3)}`);
+      } finally {
+        rl?.close();
+      }
+      return 0;
+    }
+    case "origen": {
+      const z0 = makeZoner(root);
+      const archivos = listFiles(z0);
+      const { autoria, resumen } = sugerirAutoria(root, archivos);
+      const cfg = loadConfig(root);
+      console.log(`Autoría (${resumen})`);
+      console.log(`  heredado: ${cfg.autoria.heredado.join(", ") || "(nada)"}`);
+      console.log(`  terceros: ${cfg.autoria.terceros.join(", ") || "(nada)"}`);
+      const nuevas = autoria.filter((a) => !cfg.autoria[a.tipo].includes(a.glob));
+      if (nuevas.length) {
+        console.log("\nSugerencias (sin IA, según git y nombres de carpeta):");
+        for (const a of nuevas) console.log(`  ${a.glob} → ${a.tipo}: ${a.motivo}`);
+        console.log('\nPara aplicarlas: .cai/config.json → "autoria": { "heredado": [...], "terceros": [...] }  (o cai conocer)');
+      }
+      const ejemplo = archivos.filter((f) => langFor(f)).slice(0, 5);
+      if (ejemplo.length) console.log(`\nEjemplo: ${ejemplo.map((f) => `${f} = ${origenDe(cfg, f)}`).join(", ")}`);
       return 0;
     }
     case "panorama": {

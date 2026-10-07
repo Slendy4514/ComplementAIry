@@ -5,7 +5,7 @@ import { contextBlock, projectContext, CRITERIO } from "./context.js";
 import { medir } from "./metricas.js";
 import { proponerTests } from "./tests.js";
 import { biblioteca, paraLenguaje, parseLlamada, type Snippet } from "./biblioteca.js";
-import { makeZoner, type Config } from "./config.js";
+import { makeZoner, notaOrigen, origenDe, type Config } from "./config.js";
 import { fileIdentifiers, guardReplies } from "./guard.js";
 import { langFor } from "./lang.js";
 import { ask } from "./llm.js";
@@ -246,6 +246,7 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
         subTotal: subs.length,
         prompt: [
           `Archivo: ${rel} (${lang.id})${critical ? " — ZONA CRÍTICA" : ""}`,
+          notaOrigen(origenDe(z.config, rel)),
           `Programador: ${nivelProg} en ${lang.id}. Temas del archivo: ${temas.join(", ")}.`,
           modo === "directo" ? `MODO DIRECTO.${level > 2 ? ` Pidió más detalle: puedes llegar a pasos en palabras${level > 3 ? " o un ejemplo análogo de otro dominio" : ""}.` : ""}` : `MODO ESCALERA. Nivel MÁXIMO permitido de la escalera: ${level}.`,
           `(nivel interno: ${level})`,

@@ -21,6 +21,8 @@ import { aplicarExpansion, pedidoDe, planExpansion } from "./biblioteca.js";
 import { acompanar } from "./acompanante.js";
 import { init } from "./init.js";
 import { panorama } from "./panorama.js";
+import { conocer, sugerirAutoria } from "./conocer.js";
+import { execFileSync } from "node:child_process";
 import { guardReplies } from "./guard.js";
 import { verifyCommentOnly } from "./verify.js";
 import { langFor } from "./lang.js";
@@ -920,6 +922,116 @@ CASES.push(
       const calls = fakeLLM(() => said("x"));
       await runGuia(r, "src/g.ts");
       return calls[0]!.prompt.includes("CLP, sin decimales") && calls[0]!.system.includes("No te ancles");
+    },
+  },
+);
+
+// --- Proyectos ya armados: autoría y arranque guiado --------------------------------------
+const git = (r: string, args: string[], env: Record<string, string> = {}) => execFileSync("git", args, { cwd: r, stdio: "ignore", env: { ...process.env, ...env } });
+const conocerFake = (o: AskOptions) =>
+  o.kind === "conocer"
+    ? {
+        resumen: "Simulador de préstamos.",
+        proyecto: "Calcula cuotas de préstamos para una fundación.",
+        reglas: ["Funciones exportadas con nombres en español", "Errores con RangeError y mensaje explicativo"],
+        preguntas: [
+          { pregunta: "¿Quién usa el simulador?", sugerencia: "El equipo de la fundación", opciones: ["Clientes finales", "Ambos"] },
+          { pregunta: "¿Qué es lo más crítico?", sugerencia: "Que la cuota sea exacta", opciones: ["Que sea rápido", "Que sea fácil de usar"] },
+        ],
+      }
+    : said("x");
+CASES.push(
+  {
+    name: "autoría: según git, lo que nunca tocaste se sugiere como heredado; vendor/ como terceros (sin IA)",
+    run: async (r) => {
+      git(r, ["init", "-q"]);
+      git(r, ["config", "user.email", "yo@ejemplo.cl"]);
+      git(r, ["config", "user.name", "Yo"]);
+      fs.mkdirSync(path.join(r, "legacy"), { recursive: true });
+      fs.mkdirSync(path.join(r, "vendor"), { recursive: true });
+      for (const n of ["a", "b", "c"]) fs.writeFileSync(path.join(r, `legacy/${n}.ts`), `export const ${n} = 1;\n`);
+      fs.writeFileSync(path.join(r, "vendor/lib.js"), "x\n");
+      const otro = { GIT_AUTHOR_NAME: "Otra", GIT_AUTHOR_EMAIL: "otra@ejemplo.cl", GIT_COMMITTER_NAME: "Otra", GIT_COMMITTER_EMAIL: "otra@ejemplo.cl" };
+      git(r, ["add", "legacy", "vendor"]);
+      git(r, ["commit", "-qm", "viejo"], otro);
+      git(r, ["add", "-A"]);
+      git(r, ["commit", "-qm", "mío"]);
+      const { autoria } = sugerirAutoria(r, ["legacy/a.ts", "legacy/b.ts", "legacy/c.ts", "vendor/lib.js", "src/cuota.ts"]);
+      return autoria.some((a) => a.glob === "legacy/**" && a.tipo === "heredado") && autoria.some((a) => a.glob === "vendor/**" && a.tipo === "terceros") && !autoria.some((a) => a.glob.startsWith("src"));
+    },
+  },
+  {
+    name: "conocer (sin terminal): borradores de proyecto.md y reglas.md; preguntas con sugerencia quedan en la memoria",
+    run: async (r) => {
+      fakeLLM(conocerFake);
+      const res = await conocer(r);
+      const proyecto = fs.readFileSync(path.join(r, ".cai/proyecto.md"), "utf8");
+      const reglas = fs.readFileSync(path.join(r, ".cai/reglas.md"), "utf8");
+      const mem = fs.readFileSync(path.join(r, ".cai/conocimiento.md"), "utf8");
+      return proyecto.includes("Calcula cuotas") && reglas.includes("- Errores con RangeError") && mem.includes("¿Quién usa el simulador? (sugerencia: El equipo de la fundación)") && res.pendientes === 2;
+    },
+  },
+  {
+    name: "conocer (con terminal): Enter acepta la sugerencia, un número elige opción, y la autoría se marca solo si confirmas",
+    run: async (r) => {
+      git(r, ["init", "-q"]);
+      git(r, ["config", "user.email", "yo@ejemplo.cl"]);
+      fs.mkdirSync(path.join(r, "legacy"), { recursive: true });
+      for (const n of ["a", "b", "c"]) fs.writeFileSync(path.join(r, `legacy/${n}.ts`), `export const ${n} = 1;\n`);
+      git(r, ["add", "legacy"]);
+      git(r, ["commit", "-qm", "viejo"], { GIT_AUTHOR_NAME: "Otra", GIT_AUTHOR_EMAIL: "otra@x.cl", GIT_COMMITTER_NAME: "Otra", GIT_COMMITTER_EMAIL: "otra@x.cl" });
+      git(r, ["add", "-A"]);
+      git(r, ["commit", "-qm", "mío"], { GIT_AUTHOR_NAME: "Yo", GIT_COMMITTER_NAME: "Yo" });
+      fakeLLM(conocerFake);
+      const respuestas = ["", "2", "s"];
+      const res = await conocer(r, { preguntar: async () => respuestas.shift() ?? "" });
+      const proyecto = fs.readFileSync(path.join(r, ".cai/proyecto.md"), "utf8");
+      const cfg = JSON.parse(fs.readFileSync(path.join(r, ".cai/config.json"), "utf8")) as { autoria: { heredado: string[] } };
+      const mem = fs.readFileSync(path.join(r, ".cai/conocimiento.md"), "utf8");
+      return (
+        proyecto.includes("¿Quién usa el simulador? → El equipo de la fundación") &&
+        proyecto.includes("¿Qué es lo más crítico? → Que sea fácil de usar") &&
+        cfg.autoria.heredado.includes("legacy/**") &&
+        mem.includes("→ El equipo de la fundación") &&
+        res.pendientes === 0
+      );
+    },
+  },
+  {
+    name: "conocer: si proyecto.md ya tiene tu contenido, no lo pisa (deja proyecto.borrador.md)",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, ".cai/proyecto.md"), "# Qué busca\n\nMi texto.\n");
+      fakeLLM(conocerFake);
+      await conocer(r);
+      return fs.readFileSync(path.join(r, ".cai/proyecto.md"), "utf8").includes("Mi texto.") && fs.existsSync(path.join(r, ".cai/proyecto.borrador.md"));
+    },
+  },
+  {
+    name: "autoría: el código heredado no cuenta en tu perfil ni en tus errores frecuentes, y la IA sabe que no es tuyo",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ autoria: { heredado: ["legacy/**"] } }));
+      fs.mkdirSync(path.join(r, "legacy"), { recursive: true });
+      fs.writeFileSync(path.join(r, "legacy/v.ts"), "export function v(a: number) {\n  return 10 / a;\n}\n");
+      const calls = fakeLLM(() => ({ hallazgos: [{ codigo: "  return 10 / a;", etiqueta: "issue", bloqueante: true, categoria: "division", texto: "a puede ser 0", links: [] }] }));
+      await runReview(r, "legacy/v.ts", { solo: ["bugs"] });
+      const perfil = loadPerfil().temas.typescript;
+      const patrones = fs.existsSync(path.join(process.env.CAI_HOME!, "patrones.json")) ? fs.readFileSync(path.join(process.env.CAI_HOME!, "patrones.json"), "utf8") : "";
+      return calls[0]!.prompt.includes("HEREDADO") && !perfil && !patrones.includes("division");
+    },
+  },
+  {
+    name: "autoría: en código heredado el acompañante no interrumpe (salvo que lo actives) y terceros se ignora en el panorama",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ autoria: { heredado: ["legacy/**"], terceros: ["vendor/**"] } }));
+      fs.mkdirSync(path.join(r, "legacy"), { recursive: true });
+      fs.mkdirSync(path.join(r, "vendor"), { recursive: true });
+      fs.writeFileSync(path.join(r, "legacy/n.ts"), "");
+      fs.writeFileSync(path.join(r, "vendor/lib.ts"), "export const lib = 1;\n");
+      const calls = fakeLLM((o) => (o.kind === "panorama:resumen" ? { resumenes: [] } : { estado: "x", sugerencias: [], alternativas: [], riesgos: [], preguntas: [], respuestas: [] }));
+      await acompanar(r, "legacy/n.ts");
+      const sinAcompanar = calls.length === 0;
+      await panorama(r);
+      return sinAcompanar && !calls.some((c) => c.prompt.includes("vendor/lib.ts"));
     },
   },
 );
