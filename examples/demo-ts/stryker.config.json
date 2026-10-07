@@ -1,0 +1,1 @@
+{ "testRunner": "vitest", "plugins": ["@stryker-mutator/vitest-runner"], "reporters": ["json", "clear-text"], "coverageAnalysis": "perTest" }

@@ -1,0 +1,21 @@
+{
+  "zonas": {
+    "delegadas": [],
+    "criticas": []
+  },
+  "bash": {
+    "permitir": []
+  },
+  "snapshot": {
+    "ignorar": [],
+    "maxBytes": 1048576
+  },
+  "snippets": {
+    "modo": "ganado",
+    "lenguajes": []
+  },
+  "ia": {
+    "modelo": "",
+    "context7": false
+  }
+}

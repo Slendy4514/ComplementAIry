@@ -1,0 +1,1 @@
+{"name":"demo-ts","private":true,"type":"module","devDependencies":{"@eslint/js":"^10.0.1","@stryker-mutator/core":"^10.0.0","@stryker-mutator/vitest-runner":"^10.0.0","eslint":"^10.12.0","tsx":"^4.23.15","typescript":"^6.0.3","typescript-eslint":"^8.71.1","vitest":"^5.0.3"}}

@@ -1,0 +1,15 @@
+{
+  "$comentario": "Reglas deterministas: se verifican con expresiones regulares, sin IA. 'archivos' son globs.",
+  "reglas": [
+    {
+      "id": "sin-console-log",
+      "descripcion": "No dejar console.log en el código",
+      "patron": "console\\.log\\(",
+      "archivos": [
+        "src/**/*.ts",
+        "src/**/*.js"
+      ],
+      "activa": false
+    }
+  ]
+}

@@ -1,0 +1,149 @@
+{
+  "name": "aicode",
+  "displayName": "AICode — la IA guía, vos programás",
+  "description": "Atajos y resaltado para AICode: la IA responde con comentarios @guia y revisa tu código sin escribirlo.",
+  "version": "0.3.0",
+  "publisher": "aicode-local",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Education",
+    "Linters",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "repository": {
+    "type": "git",
+    "url": "https://example.invalid/aicode"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "aicode.expandir",
+        "title": "AICode: expandir snippet (o elegir uno de la biblioteca)"
+      },
+      {
+        "command": "aicode.guia",
+        "title": "AICode: responder mis @ia? de este archivo"
+      },
+      {
+        "command": "aicode.revisar",
+        "title": "AICode: revisar este archivo"
+      },
+      {
+        "command": "aicode.predecir",
+        "title": "AICode: preguntas de predicción (¿qué devuelve...?)"
+      },
+      {
+        "command": "aicode.check",
+        "title": "AICode: comprobar mis predicciones"
+      },
+      {
+        "command": "aicode.limpiar",
+        "title": "AICode: limpiar comentarios de conversación"
+      },
+      {
+        "command": "aicode.snippet",
+        "title": "AICode: crear snippet propio desde la selección"
+      },
+      {
+        "command": "aicode.explica",
+        "title": "AICode: explicar comando seleccionado (terminal)"
+      },
+      {
+        "command": "aicode.perfil",
+        "title": "AICode: ver mi perfil"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "aicode.guia",
+        "key": "ctrl+alt+g",
+        "mac": "cmd+alt+g",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "aicode.revisar",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "aicode.snippet",
+        "key": "ctrl+alt+s",
+        "mac": "cmd+alt+s",
+        "when": "editorHasSelection"
+      },
+      {
+        "command": "aicode.expandir",
+        "key": "ctrl+alt+e",
+        "mac": "cmd+alt+e",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "AICode",
+      "properties": {
+        "aicode.comando": {
+          "type": "string",
+          "default": "aicode",
+          "description": "Comando para invocar la CLI de AICode."
+        },
+        "aicode.resaltar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Resaltar comentarios @guia, @ia? y @yo:."
+        },
+        "aicode.acompanar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Al guardar: expandir snippets activados [x], responder @ia?, proponer planos y ofrecer ayuda si una función sigue con errores (según .aicode/config.json → acompanar)."
+        }
+      }
+    },
+    "colors": [
+      {
+        "id": "aicode.guiaFondo",
+        "description": "Fondo de los comentarios @guia",
+        "defaults": {
+          "dark": "#3b82f61a",
+          "light": "#3b82f614",
+          "highContrast": "#3b82f633"
+        }
+      },
+      {
+        "id": "aicode.humanoFondo",
+        "description": "Fondo de los comentarios @ia? / @yo:",
+        "defaults": {
+          "dark": "#f59e0b1f",
+          "light": "#f59e0b1a",
+          "highContrast": "#f59e0b33"
+        }
+      },
+      {
+        "id": "aicode.bloqueante",
+        "description": "Borde de revisiones bloqueantes",
+        "defaults": {
+          "dark": "#ef4444",
+          "light": "#dc2626",
+          "highContrast": "#ef4444"
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "package": "pnpm build && vsce package --no-dependencies --allow-missing-repository -o aicode.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "20",
+    "@types/vscode": "1.90.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^6"
+  }
+}

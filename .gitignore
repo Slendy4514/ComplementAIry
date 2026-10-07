@@ -1,0 +1,19 @@
+# Dependencias y builds
+node_modules/
+packages/aicode/dist/
+packages/vscode-aicode/out/
+*.vsix
+dist/
+*.tgz
+
+# Estado local de AICode (se regenera)
+.aicode/cache/
+
+# Transcripciones de chats de Claude (privadas; respaldo local para rebuilds)
+.claude-backup/
+.claude/settings.local.json
+
+# Artefactos de pruebas
+reports/
+.stryker-tmp/
+coverage/
