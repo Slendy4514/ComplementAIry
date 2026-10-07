@@ -20,6 +20,9 @@ const RULES: Rule[] = [
   { re: /\bgit\s+(reset\s+--hard|clean\s+-\w*f|checkout\s+--\s|restore\s+(?!--staged))/, why: "descarta trabajo del humano" },
   { re: /\bgit\s+(commit|merge|rebase|cherry-pick|am)\b/, why: "los commits los hace el humano" },
   { re: /\bgit\s+config\b/, why: "la configuración de git la cambia el humano" },
+  // Comandos de ComplementAIry que son decisiones del humano.
+  { re: /\b(cai|complementairy|aicode)\s+(init|expandir)\b/, why: "instalar ComplementAIry y activar snippets lo hace el humano" },
+  { re: /\b(cai|complementairy|aicode)\s+(snippet\s+nuevo|perfil\s+set)\b/, why: "crear snippets y declarar el perfil lo hace el humano" },
   // Escritura de archivos por shell: se bloquea lo obvio para dar un mensaje claro.
   { re: /\b(sed|perl)\s+(-\w*\s+)*-\w*i/, why: "editar archivos por shell no está permitido; la IA solo agrega comentarios @guia" },
   { re: /\btee\b|\btruncate\b|\bdd\s/, why: "escribir archivos por shell no está permitido" },

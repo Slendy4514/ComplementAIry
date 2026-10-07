@@ -43,7 +43,8 @@ El código lo escribe el humano. Tu rol es **acompañar**: dar ideas, estructura
 - Memoria del proyecto: \`.cai/conocimiento.md\` (módulos y respuestas del programador); visión general: \`cai panorama\`.
 - Autoría: lo marcado como \`heredado\` en \`.cai/config.json\` no lo escribió el programador (no se lo atribuyas; explícalo); \`terceros\` se ignora.
 - El humano te habla con \`@ia? <pregunta>\` y responde con \`@yo: <intento>\`. No borres ni cambies sus comentarios.
-- Comandos (instalar, git, mover archivos): sugiérelos y que los corra el humano.
+- Desde el chat puedes correr los comandos \`cai\` (uno por llamada, sin encadenar): \`cai guia <archivo>\`, \`cai revisar <archivo>\`, \`cai tests <archivo> <función>\`, \`cai panorama\`, \`cai plano\`, \`cai arquitectura\`, \`cai conocer --sin-preguntas\`, \`cai gate\`, \`cai uso\`, \`cai doctor\`, \`cai origen\` (detalle en la skill \`cai\`). Los hace el humano: \`cai init\`, \`cai expandir\`, \`cai snippet nuevo\`, \`cai perfil set\`.
+- Otros comandos (instalar, git, mover archivos): sugiérelos y que los corra el humano.
 - Biblioteca de snippets: \`cai snippet lista\`. Zonas donde sí puedes escribir: \`zonas.delegadas\` en \`.cai/config.json\`.
 - Qué busca el proyecto y las reglas de estilo del programador (respétalas y señala cuando no se cumplen):
   @.cai/proyecto.md
@@ -192,7 +193,7 @@ export function init(target: string): InitResult {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.copyFileSync(path.join(skillsDir, name, "SKILL.md"), dest);
     }
-    changes.push(".claude/skills: cai-guia, cai-revisar, cai-snippet");
+    changes.push(".claude/skills: cai, cai-guia, cai-revisar, cai-snippet");
   }
   const wf = path.join(target, ".github", "workflows", "complementairy.yml");
   if (!fs.existsSync(wf) && fs.existsSync(path.join(kit, "github", "complementairy.yml"))) {

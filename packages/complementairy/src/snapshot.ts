@@ -28,7 +28,35 @@ function watched(z: Zoner): string[] {
   return [...listFiles(z), ...extra];
 }
 
-export function takeSnapshot(z: Zoner, id: string): void {
+/** Clave reservada del manifiesto donde se guarda el comando (no es una ruta posible). */
+const CMD = "\u0000comando";
+
+/**
+ * Archivos que un comando de ComplementAIry (ejecutado por la IA desde el chat) puede generar.
+ * Solo si el comando es UNA llamada a cai, sin encadenar nada (&&, ;, |, >, $(...)).
+ */
+export function generadosPor(comando: string): ((rel: string, antes: Buffer | null) => boolean) | null {
+  const m = /^\s*(?:cai|complementairy|aicode)\s+([\w-]+)(?:\s+[^;&|<>`$()\n]*)?$/.exec(comando);
+  if (!m) return null;
+  const datos = (rel: string) => /^\.(cai|aicode)\//.test(rel);
+  const plantilla = (b: Buffer | null) => !b || b.toString("utf8").replace(/<!--[\s\S]*?-->/g, "").replace(/^#.*$/gm, "").trim() === "";
+  switch (m[1]) {
+    case "panorama":
+      return (rel) => datos(rel) && /\/(panorama|conocimiento)\.md$/.test(rel);
+    case "conocer":
+      // proyecto.md / reglas.md solo si estaban vacíos (si no, el comando escribe *.borrador.md).
+      return (rel, antes) => datos(rel) && (/\/(conocimiento|proyecto\.borrador|reglas\.borrador)\.md$/.test(rel) || (/\/(proyecto|reglas)\.md$/.test(rel) && plantilla(antes)));
+    case "plano":
+      return (rel) => rel === "docs/ESTRUCTURA.md";
+    case "arquitectura":
+    case "adr":
+      return (rel) => /^docs\/adr\/[^/]+\.md$/.test(rel);
+    default:
+      return null;
+  }
+}
+
+export function takeSnapshot(z: Zoner, id: string, comando = ""): void {
   const blobs = path.join(cacheDir(z.root), "blobs");
   fs.mkdirSync(blobs, { recursive: true });
   const manifest: Manifest = {};
@@ -49,6 +77,7 @@ export function takeSnapshot(z: Zoner, id: string): void {
   }
   const snaps = path.join(cacheDir(z.root), "snap");
   fs.mkdirSync(snaps, { recursive: true });
+  if (comando) manifest[CMD] = comando;
   fs.writeFileSync(path.join(snaps, `${safeId(id)}.json`), JSON.stringify(manifest));
 }
 
@@ -92,6 +121,9 @@ export async function checkSnapshot(z: Zoner, id: string): Promise<Action[]> {
     fs.writeFileSync(dest, buf);
   };
 
+  const comando = before[CMD] ?? "";
+  delete before[CMD];
+  const permitido = generadosPor(comando);
   for (const f of new Set([...Object.keys(before), ...now.keys()])) {
     try {
       await checkOne(f);
@@ -108,6 +140,7 @@ export async function checkSnapshot(z: Zoner, id: string): Promise<Action[]> {
     if (oldHash && cur && sha1(cur) === oldHash) return;
     const zone = z.zoneOf(abs);
     if (zone === "delegada") return;
+    if (permitido && permitido(f, oldHash ? fs.readFileSync(path.join(blobs, oldHash)) : null)) return; // salida de un comando de cai
     if (zone === "snippets" && cur && snippetPolicy(z, cur.toString("utf8")).allowed) return;
     const oldBuf = oldHash ? fs.readFileSync(path.join(blobs, oldHash)) : null;
 

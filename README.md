@@ -66,6 +66,12 @@ Después escribe con tus palabras `.cai/proyecto.md` (qué buscas) y `.cai/regla
 | Memoria del proyecto (responder preguntas) | Ctrl+Shift+P → "memoria del proyecto" | `.cai/conocimiento.md` |
 | Consumo de IA | — | `cai uso` |
 
+### Desde el chat de Claude Code
+En un proyecto con `cai init`, el chat de Claude Code también es ComplementAIry:
+- **Sabe usarlo:** viene con la skill `cai`, que indica qué comando corresponde a cada pedido, más `cai-guia`, `cai-revisar` y `cai-snippet`. La sección de `CLAUDE.md` le explica las reglas.
+- **Corre los mismos comandos que los atajos.** Por ejemplo, "revisa src/cuota.ts" lleva a `cai revisar`, "¿cómo sigo?" a `cai panorama` y "tests para calcularCuota" a `cai tests`. Lo que esos comandos escriben (`panorama.md`, `conocimiento.md`, ADRs, `ESTRUCTURA.md`) se conserva, solo si el comando es **una sola llamada a `cai`, sin encadenar**.
+- **No puede escribir tu código:** los hooks lo bloquean. Tampoco puede activar snippets (`cai expandir`), instalar (`cai init`), crear snippets ni declarar tu perfil: eso lo haces tú.
+
 ## Qué IA usa y cómo ahorra tokens
 **Modelo:**
 - Usa el que tengas por defecto en Claude Code. Para cambiarlo, edita `.cai/config.json` → `"ia": { "modelo": "claude-sonnet-5-5" }`.

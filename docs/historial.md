@@ -158,3 +158,10 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - no pisa lo que el usuario ya escribió.
   - Prueba real: buen borrador, 9 convenciones correctas y 5 preguntas útiles, por US$0,13.
 - Selftest: 109/109.
+
+## Usar ComplementAIry desde el chat de Claude Code (v0.4.1)
+- **Bug encontrado al revisarlo:** si el chat corría `cai panorama`, `cai plano`, `cai arquitectura` o `cai conocer`, los hooks revertían lo que escribían, porque `.cai/` y `docs/` están protegidos.
+- **Arreglo determinista:** si el comando es una sola llamada a `cai`, sin encadenar nada, se permiten solo los archivos que ese comando genera. `proyecto.md` y `reglas.md` se permiten únicamente si estaban vacíos.
+- **Siguen siendo del humano:** `cai init`, `cai expandir`, `cai snippet nuevo` y `cai perfil set` quedan bloqueados para la IA.
+- **Skill nueva `cai`:** indica qué comando corresponde a cada pedido. Las otras skills ahora corren los comandos en vez de pedirle al humano que apriete el atajo.
+- Selftest: 114/114.

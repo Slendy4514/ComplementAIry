@@ -1036,6 +1036,59 @@ CASES.push(
   },
 );
 
+// --- Usar ComplementAIry desde el chat de Claude Code ------------------------------------
+CASES.push(
+  {
+    name: "chat: 'cai panorama' por Bash deja panorama.md y conocimiento.md (sus archivos), sin revertirlos",
+    run: async (r) => {
+      fakeLLM((o) => (o.kind === "panorama:resumen" ? { resumenes: [] } : { estado: "ok", sugerencias: [], alternativas: [], riesgos: [], preguntas: ["¿Moneda?"] }));
+      await bash(r, "cai panorama", "c1");
+      await panorama(r);
+      const out = await postBash(r, "c1");
+      return out === null && fs.existsSync(path.join(r, ".cai/panorama.md")) && fs.existsSync(path.join(r, ".cai/conocimiento.md"));
+    },
+  },
+  {
+    name: "[seg] chat: un comando cai encadenado (&&) no habilita escribir en .cai/ (se revierte)",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, ".cai/conocimiento.md"), "# x\n");
+      await bash(r, "cai panorama && echo listo", "c2");
+      fs.writeFileSync(path.join(r, ".cai/conocimiento.md"), "# x\n- P: ¿a?\n  R: inventada por la IA\n");
+      const out = await postBash(r, "c2");
+      return out?.decision === "block" && !fs.readFileSync(path.join(r, ".cai/conocimiento.md"), "utf8").includes("inventada");
+    },
+  },
+  {
+    name: "[seg] chat: 'cai panorama' no habilita tocar config.json ni reglas.md",
+    run: async (r) => {
+      await bash(r, "cai panorama", "c3");
+      fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ zonas: { delegadas: ["**"] } }));
+      const out = await postBash(r, "c3");
+      return out?.decision === "block" && !fs.readFileSync(path.join(r, ".cai/config.json"), "utf8").includes('"**"');
+    },
+  },
+  {
+    name: "[seg] chat: 'cai conocer' solo escribe proyecto.md si estaba vacío (si no, debe ser .borrador)",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, ".cai/proyecto.md"), "# Qué busca\n\nTexto del humano.\n");
+      await bash(r, "cai conocer --sin-preguntas", "c4");
+      fs.writeFileSync(path.join(r, ".cai/proyecto.md"), "# Qué busca\n\nReemplazado por la IA.\n");
+      fs.writeFileSync(path.join(r, ".cai/proyecto.borrador.md"), "# borrador\n");
+      const out = await postBash(r, "c4");
+      return out?.decision === "block" && fs.readFileSync(path.join(r, ".cai/proyecto.md"), "utf8").includes("Texto del humano") && fs.existsSync(path.join(r, ".cai/proyecto.borrador.md"));
+    },
+  },
+  {
+    name: "[seg] chat: activar snippets, init, crear snippets y declarar perfil son del humano (bloqueados)",
+    run: async (r) =>
+      denied(await bash(r, "cai expandir src/cuota.ts")) &&
+      denied(await bash(r, "cai init .")) &&
+      denied(await bash(r, "cai snippet nuevo x")) &&
+      denied(await bash(r, "complementairy perfil set typescript experto")) &&
+      !denied(await bash(r, "cai revisar src/cuota.ts")),
+  },
+);
+
 export async function runSelftest(log: (s: string) => void = console.log): Promise<boolean> {
   let ok = 0;
   for (const c of CASES) {

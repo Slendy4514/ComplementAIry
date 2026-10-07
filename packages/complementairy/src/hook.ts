@@ -146,7 +146,7 @@ export async function runHook(input: HookInput, root: string): Promise<HookOutpu
       if (!v.ok) return deny(`comando bloqueado: ${v.why}. Si hace falta, sugerile al humano el comando y que lo corra él.`);
       // Un comando anterior sin verificar (se interrumpió antes del PostToolUse): se verifica ahora.
       const pendientes = await checkLeftovers(z);
-      takeSnapshot(z, input.tool_use_id ?? "bash");
+      takeSnapshot(z, input.tool_use_id ?? "bash", cmd);
       return pendientes.length
         ? { systemMessage: `[cai] Se revirtieron cambios de un comando anterior que no se había verificado:\n${pendientes.map((a) => `- ${a.file}: ${a.action}`).join("\n")}` }
         : null;
