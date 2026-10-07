@@ -97,9 +97,14 @@ export function init(target: string): InitResult {
   fs.writeFileSync(hookFile, `#!/bin/sh\n# cai: rechaza commits con comentarios de conversación pendientes o que no pasan las verificaciones rápidas.\n${caiCommand()} guia check --staged || exit 1\nexec ${caiCommand()} gate --staged --rapido\n`, { mode: 0o755 });
   changes.push(".githooks/pre-commit");
   try {
-    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: target, stdio: "ignore" });
-    execFileSync("git", ["config", "core.hooksPath", ".githooks"], { cwd: target, stdio: "ignore" });
-    changes.push("git config core.hooksPath .githooks");
+    const top = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: target, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+    // Solo si el proyecto ES la raíz del repo: si está dentro de otro repo, no se toca la config del repo padre.
+    if (fs.realpathSync(top) === fs.realpathSync(target)) {
+      execFileSync("git", ["config", "core.hooksPath", ".githooks"], { cwd: target, stdio: "ignore" });
+      changes.push("git config core.hooksPath .githooks");
+    } else {
+      changes.push(`(está dentro del repo ${top}: no se activó el pre-commit para no cambiar ese repo)`);
+    }
   } catch {
     changes.push("(no es repo git: cuando hagas `git init`, corré `git config core.hooksPath .githooks`)");
   }
