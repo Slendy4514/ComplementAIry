@@ -9,7 +9,7 @@
   "mounts": [
     "source=pnpm-store-${devcontainerId},target=/home/node/.local/share/pnpm/store,type=volume",
     "source=claude-config-${devcontainerId},target=/home/node/.claude,type=volume",
-    "source=aicode-perfil,target=/home/node/.aicode,type=volume"
+    "source=aicode-perfil,target=/home/node/.cai,type=volume"
   ],
 
   "customizations": {
@@ -29,5 +29,5 @@
 
   "forwardPorts": [3000],
   "postCreateCommand": "sh .devcontainer/post-create.sh",
-  "postAttachCommand": "[ -f packages/vscode-aicode/aicode.vsix ] && code --install-extension packages/vscode-aicode/aicode.vsix --force >/dev/null 2>&1 || true"
+  "postAttachCommand": "[ -f packages/vscode-complementairy/complementairy.vsix ] && code --install-extension packages/vscode-complementairy/complementairy.vsix --force >/dev/null 2>&1 || true"
 }

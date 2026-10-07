@@ -1,0 +1,17 @@
+# ComplementAIry en CI: repite las verificaciones deterministas y rechaza comentarios de conversación olvidados.
+# Requiere que el paquete cai esté disponible: publicalo (npm) o definí la variable CAI_PKG
+# con la URL de un tarball (`pnpm pack` en packages/complementairy).
+name: cai
+on: [push, pull_request]
+jobs:
+  cai:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: corepack enable && pnpm install --frozen-lockfile
+        if: hashFiles('pnpm-lock.yaml') != ''
+      - run: npm i -g ${{ vars.CAI_PKG || 'cai' }}
+      - run: cai guia check
+      - run: cai gate

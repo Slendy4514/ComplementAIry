@@ -6,14 +6,14 @@ Este proyecto corre dentro de un Dev Container (Docker).
 - En su lugar: agregá la línea RUN apt-get install -y <paquete> en .devcontainer/Dockerfile, y avisame que hace falta correr "Rebuild Container" en VSCode para que tome efecto.
 - Paquetes de Node (pnpm add algo) SÍ persisten normalmente. Esos instalalos sin pedir permiso, no hace falta avisar.
 
-# Proyecto AICode
+# Proyecto ComplementAIry
 
 - Antes de trabajar, leé `docs/historial.md` (decisiones y preferencias del usuario) y `docs/design.md` (diseño y estado de cada fase).
-- El código de la CLI está en `packages/aicode`. Para verificar: `pnpm build && pnpm test && node dist/cli.js selftest`.
+- El código de la CLI está en `packages/complementairy`. Para verificar: `pnpm build && pnpm test && node dist/cli.js selftest`.
 - Al terminar una sesión larga, actualizá `docs/historial.md` y el respaldo: `cp -r ~/.claude/projects ~/.claude/plans .claude-backup/`.
 
-<!-- aicode:inicio -->
-## AICode: la IA guía, el humano programa
+<!-- cai:inicio -->
+## ComplementAIry: la IA guía, el humano programa
 
 En este proyecto el código lo escribe el humano. Tu rol es **guiar, enseñar y revisar**:
 
@@ -25,8 +25,8 @@ En este proyecto el código lo escribe el humano. Tu rol es **guiar, enseñar y 
 - El humano te habla con `@ia? <pregunta>` y responde con `@yo: <intento>`. No borres ni cambies sus comentarios.
 - No des la solución completa de entrada: empezá por la pista más chica útil.
 - Si hace falta un comando (instalar, git, mover archivos), sugerilo y que lo corra el humano.
-- Zonas donde sí podés escribir: `zonas.delegadas` en `.aicode/config.json`.
+- Zonas donde sí podés escribir: `zonas.delegadas` en `.cai/config.json`.
 - Qué busca el proyecto y las reglas de estilo del programador (respetalas y señalá cuando no se cumplen):
-  @.aicode/proyecto.md
-  @.aicode/reglas.md
-<!-- aicode:fin -->
+  @.cai/proyecto.md
+  @.cai/reglas.md
+<!-- cai:fin -->

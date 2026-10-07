@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "aicode hook",
+            "command": "cai hook",
             "timeout": 60
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "aicode hook",
+            "command": "cai hook",
             "timeout": 60
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "aicode hook",
+            "command": "cai hook",
             "timeout": 60
           }
         ]

@@ -15,18 +15,18 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: CLI
-        working-directory: packages/aicode
+        working-directory: packages/complementairy
         run: |
           pnpm install && pnpm build && node dist/cli.js selftest
           pnpm pack --pack-destination ../../release
-          mv ../../release/aicode-*.tgz ../../release/aicode.tgz
+          mv ../../release/complementairy-*.tgz ../../release/complementairy.tgz
       - name: Extensión de VSCode
-        working-directory: packages/vscode-aicode
+        working-directory: packages/vscode-complementairy
         run: |
           pnpm install && pnpm build
-          npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository -o ../../release/aicode.vsix
+          npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository -o ../../release/complementairy.vsix
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/aicode.tgz
-            release/aicode.vsix
+            release/complementairy.tgz
+            release/complementairy.vsix

@@ -1,4 +1,4 @@
 #!/bin/sh
-# aicode: rechaza commits con comentarios de conversación pendientes o que no pasan las verificaciones rápidas.
-aicode guia check --staged || exit 1
-exec aicode gate --staged --rapido
+# cai: rechaza commits con comentarios de conversación pendientes o que no pasan las verificaciones rápidas.
+cai guia check --staged || exit 1
+exec cai gate --staged --rapido

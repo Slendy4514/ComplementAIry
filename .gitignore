@@ -1,13 +1,13 @@
 # Dependencias y builds
 node_modules/
-packages/aicode/dist/
-packages/vscode-aicode/out/
+packages/complementairy/dist/
+packages/vscode-complementairy/out/
 *.vsix
 dist/
 *.tgz
 
-# Estado local de AICode (se regenera)
-.aicode/cache/
+# Estado local de ComplementAIry (se regenera)
+.cai/cache/
 
 # Transcripciones de chats de Claude (privadas; respaldo local para rebuilds)
 .claude-backup/

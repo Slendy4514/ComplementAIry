@@ -1,6 +1,6 @@
 # Investigación: programar con IA sin dejar de pensar
 
-Fecha: octubre 2026. Este documento resume la investigación que sustenta el diseño de AICode ([design.md](design.md)). Tiene dos partes:
+Fecha: octubre 2026. Este documento resume la investigación que sustenta el diseño de ComplementAIry ([design.md](design.md)). Tiene dos partes:
 
 1. **Lado IA:** qué herramientas hacen que una IA de programación (Claude Code) trabaje mejor y de forma más confiable.
 2. **Lado humano:** qué dice la evidencia sobre aprender y mantener la habilidad cuando se programa con IA.
@@ -64,7 +64,7 @@ Recomendación general: 3 a 6 MCPs bien elegidos. Hoy la carga diferida de herra
 - **BMAD:** agentes con roles (analista, PM, arquitecto...). Proceso pesado.
 - **Agent OS:** extrae las convenciones del código existente.
 
-Evaluación: ordenan el proceso, pero **no hacen cumplir nada** y suponen que la IA implementa. AICode toma la idea de escribir la intención primero, no el framework.
+Evaluación: ordenan el proceso, pero **no hacen cumplir nada** y suponen que la IA implementa. ComplementAIry toma la idea de escribir la intención primero, no el framework.
 
 ### 1.6 Verificación mecánica ("harness engineering")
 Böckeler (martinfowler.com, 2026) define al agente como **modelo + arnés**. El arnés tiene:
@@ -143,7 +143,7 @@ Herramientas concretas (TS / Python):
 | A favor | Cualquier editor; se ven donde se trabaja; se mueven con el código | No ensucian el código; se limpian fácil |
 | En contra | Basura olvidada, desactualización, ruido en git | El anclaje se pierde; depende del editor |
 
-Mitigaciones adoptadas en AICode:
+Mitigaciones adoptadas en ComplementAIry:
 - un prefijo único (`@guia`);
 - un pre-commit que rechaza los comentarios pendientes;
 - un comando de limpieza;

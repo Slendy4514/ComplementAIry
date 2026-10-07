@@ -1,4 +1,4 @@
-.aicode/cache/
+.cai/cache/
 node_modules/
 reports/
 .stryker-tmp/

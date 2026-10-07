@@ -1,5 +1,5 @@
-<!-- aicode:inicio -->
-## AICode: el humano programa, la IA acompaña
+<!-- cai:inicio -->
+## ComplementAIry: el humano programa, la IA acompaña
 
 El código lo escribe el humano. Tu rol es **acompañar**: dar ideas, estructura, piezas y revisión.
 
@@ -13,8 +13,8 @@ El código lo escribe el humano. Tu rol es **acompañar**: dar ideas, estructura
 - Escalones a pedido: `!pista`, `!piezas`, `!pseudo`, `!ejemplo`, `!plano`, `!snippet`, `!arquitectura`.
 - El humano te habla con `@ia? <pregunta>` y responde con `@yo: <intento>`. No borres ni cambies sus comentarios.
 - Comandos (instalar, git, mover archivos): sugiérelos y que los corra el humano.
-- Biblioteca de snippets: `aicode snippet lista`. Zonas donde sí puedes escribir: `zonas.delegadas` en `.aicode/config.json`.
+- Biblioteca de snippets: `cai snippet lista`. Zonas donde sí puedes escribir: `zonas.delegadas` en `.cai/config.json`.
 - Qué busca el proyecto y las reglas de estilo del programador (respétalas y señala cuando no se cumplen):
-  @.aicode/proyecto.md
-  @.aicode/reglas.md
-<!-- aicode:fin -->
+  @.cai/proyecto.md
+  @.cai/reglas.md
+<!-- cai:fin -->

@@ -1,0 +1,31 @@
+{
+  "name": "complementairy",
+  "version": "0.2.0",
+  "description": "ComplementAIry: tú programas, la IA te acompaña con comentarios; nunca escribe tu código.",
+  "type": "module",
+  "bin": {
+    "complementairy": "dist/cli.js",
+    "cai": "dist/cli.js",
+    "aicode": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.292",
+    "picomatch": "^4.0.7",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "0.20.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/picomatch": "^4.0.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

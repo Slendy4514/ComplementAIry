@@ -2,9 +2,9 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "AICode: guía",
+      "label": "ComplementAIry: guía",
       "type": "shell",
-      "command": "aicode guia \"${file}\"",
+      "command": "cai guia \"${file}\"",
       "presentation": {
         "reveal": "silent",
         "panel": "shared",
@@ -13,9 +13,9 @@
       "problemMatcher": []
     },
     {
-      "label": "AICode: revisar",
+      "label": "ComplementAIry: revisar",
       "type": "shell",
-      "command": "aicode revisar \"${file}\"",
+      "command": "cai revisar \"${file}\"",
       "presentation": {
         "reveal": "silent",
         "panel": "shared",
@@ -24,9 +24,9 @@
       "problemMatcher": []
     },
     {
-      "label": "AICode: limpiar",
+      "label": "ComplementAIry: limpiar",
       "type": "shell",
-      "command": "aicode guia clean",
+      "command": "cai guia clean",
       "presentation": {
         "reveal": "silent",
         "panel": "shared",

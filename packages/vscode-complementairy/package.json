@@ -1,0 +1,149 @@
+{
+  "name": "complementairy",
+  "displayName": "ComplementAIry — tú programas, la IA te acompaña",
+  "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
+  "version": "0.3.0",
+  "publisher": "complementairy",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Education",
+    "Linters",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "repository": {
+    "type": "git",
+    "url": "https://example.invalid/cai"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "cai.expandir",
+        "title": "ComplementAIry: expandir snippet (o elegir uno de la biblioteca)"
+      },
+      {
+        "command": "cai.guia",
+        "title": "ComplementAIry: responder mis @ia? de este archivo"
+      },
+      {
+        "command": "cai.revisar",
+        "title": "ComplementAIry: revisar este archivo"
+      },
+      {
+        "command": "cai.predecir",
+        "title": "ComplementAIry: preguntas de predicción (¿qué devuelve...?)"
+      },
+      {
+        "command": "cai.check",
+        "title": "ComplementAIry: comprobar mis predicciones"
+      },
+      {
+        "command": "cai.limpiar",
+        "title": "ComplementAIry: limpiar comentarios de conversación"
+      },
+      {
+        "command": "cai.snippet",
+        "title": "ComplementAIry: crear snippet propio desde la selección"
+      },
+      {
+        "command": "cai.explica",
+        "title": "ComplementAIry: explicar comando seleccionado (terminal)"
+      },
+      {
+        "command": "cai.perfil",
+        "title": "ComplementAIry: ver mi perfil"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "cai.guia",
+        "key": "ctrl+alt+g",
+        "mac": "cmd+alt+g",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "cai.revisar",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "cai.snippet",
+        "key": "ctrl+alt+s",
+        "mac": "cmd+alt+s",
+        "when": "editorHasSelection"
+      },
+      {
+        "command": "cai.expandir",
+        "key": "ctrl+alt+e",
+        "mac": "cmd+alt+e",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "ComplementAIry",
+      "properties": {
+        "cai.comando": {
+          "type": "string",
+          "default": "cai",
+          "description": "Comando para invocar la CLI de ComplementAIry."
+        },
+        "cai.resaltar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Resaltar comentarios @guia, @ia? y @yo:."
+        },
+        "cai.acompanar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Al guardar: expandir snippets activados [x], responder @ia?, proponer planos y ofrecer ayuda si una función sigue con errores (según .cai/config.json → acompanar)."
+        }
+      }
+    },
+    "colors": [
+      {
+        "id": "cai.guiaFondo",
+        "description": "Fondo de los comentarios @guia",
+        "defaults": {
+          "dark": "#3b82f61a",
+          "light": "#3b82f614",
+          "highContrast": "#3b82f633"
+        }
+      },
+      {
+        "id": "cai.humanoFondo",
+        "description": "Fondo de los comentarios @ia? / @yo:",
+        "defaults": {
+          "dark": "#f59e0b1f",
+          "light": "#f59e0b1a",
+          "highContrast": "#f59e0b33"
+        }
+      },
+      {
+        "id": "cai.bloqueante",
+        "description": "Borde de revisiones bloqueantes",
+        "defaults": {
+          "dark": "#ef4444",
+          "light": "#dc2626",
+          "highContrast": "#ef4444"
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "package": "pnpm build && vsce package --no-dependencies --allow-missing-repository -o complementairy.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "20",
+    "@types/vscode": "1.90.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^6"
+  }
+}

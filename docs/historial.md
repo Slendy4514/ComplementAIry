@@ -93,3 +93,16 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - un release por tag que publica `aicode.tgz` y `aicode.vsix`;
   - el README con la instalación para otros proyectos.
   - La instalación desde el `.tgz` en un entorno limpio se verificó: 93/93.
+
+## Cambio de nombre: AICode → ComplementAIry
+- El usuario eligió **ComplementAIry**: la IA *complementa* al humano. Se le advirtió que el nombre es largo para la terminal y que el juego de palabras se pierde en minúsculas, así que se acordó un comando corto.
+- **Comando:** `cai` (también `complementairy`).
+- **Carpetas:** `.cai/` en el proyecto y `~/.cai` para el perfil.
+- **Paquetes:** `packages/complementairy` y `packages/vscode-complementairy`.
+- **Extensión:** `complementairy.complementairy`, con los comandos `cai.*`.
+- **Compatibilidad:**
+  - el comando `aicode` sigue disponible;
+  - los proyectos con `.aicode/` se leen y quedan protegidos;
+  - `cai init` migra hooks, la sección de CLAUDE.md, las skills y los snippets base sin duplicar nada;
+  - el volumen del perfil conserva su nombre (`aicode-perfil`) y se monta en `~/.cai`, así que no se pierden datos.
+- Selftest: 95/95.
