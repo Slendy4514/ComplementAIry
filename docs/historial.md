@@ -136,3 +136,11 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
 - **Criterio en todos los prompts:** no anclarse y preguntar si falta contexto.
 - **Extensión:** Ctrl+Alt+P (panorama), proponer tests y abrir la memoria.
 - Selftest: 103/103.
+
+## Publicado en GitHub (2026-10-07)
+- Repositorio público: https://github.com/Slendy4514/ComplementAIry (licencia MIT). Los commits usan el correo privado `noreply` de GitHub.
+- v0.3.0 publicada:
+  - el CI y el release pasaron en GitHub Actions;
+  - el release incluye `complementairy.tgz` y `complementairy.vsix`;
+  - la feature está en `ghcr.io/slendy4514/complementairy/complementairy` (tags `0`, `0.3`, `0.3.0` y `latest`), con acceso público.
+- **Próximas versiones:** `git tag vX.Y.Z && git push origin vX.Y.Z`. La extensión avisa en los contenedores y se actualiza con Rebuild.
