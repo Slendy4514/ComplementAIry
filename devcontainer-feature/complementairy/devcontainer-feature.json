@@ -1,0 +1,19 @@
+{
+  "id": "complementairy",
+  "version": "0.2.0",
+  "name": "ComplementAIry",
+  "description": "Tú programas, la IA te acompaña: comando `cai` y extensión de VSCode de ComplementAIry en el contenedor.",
+  "documentationURL": "https://github.com/<usuario>/ComplementAIry",
+  "options": {
+    "extension": {
+      "type": "boolean",
+      "default": true,
+      "description": "Instalar la extensión de VSCode al conectarse al contenedor."
+    }
+  },
+  "installsAfter": [
+    "ghcr.io/devcontainers/features/node",
+    "ghcr.io/devcontainers/features/common-utils"
+  ],
+  "postAttachCommand": "/usr/local/share/complementairy/al-conectar.sh"
+}
