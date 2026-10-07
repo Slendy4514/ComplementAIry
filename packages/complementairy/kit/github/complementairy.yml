@@ -1,6 +1,6 @@
 # ComplementAIry en CI: repite las verificaciones deterministas y rechaza comentarios de conversación olvidados.
 # Requiere la variable de repositorio CAI_PKG con la URL del paquete, p. ej.:
-#   https://github.com/<usuario>/ComplementAIry/releases/latest/download/complementairy.tgz
+#   https://github.com/Slendy4514/ComplementAIry/releases/latest/download/complementairy.tgz
 name: cai
 on: [push, pull_request]
 jobs:

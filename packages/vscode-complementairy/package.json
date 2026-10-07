@@ -4,7 +4,7 @@
   "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
   "version": "0.3.0",
   "publisher": "complementairy",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -19,7 +19,7 @@
   "main": "./out/extension.js",
   "repository": {
     "type": "git",
-    "url": "https://example.invalid/cai"
+    "url": "https://github.com/Slendy4514/ComplementAIry"
   },
   "contributes": {
     "commands": [
@@ -171,5 +171,6 @@
     "@types/vscode": "1.90.0",
     "@vscode/vsce": "^4.0.0",
     "typescript": "^6"
-  }
+  },
+  "homepage": "https://github.com/Slendy4514/ComplementAIry"
 }

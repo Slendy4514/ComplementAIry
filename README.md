@@ -22,16 +22,16 @@ La IA **no puede escribir tu código**: lo impiden hooks deterministas. El códi
 
 ### Opción A: clonar (para desarrollar ComplementAIry o probar lo último)
 ```bash
-git clone https://github.com/<tu-usuario>/ComplementAIry.git
+git clone https://github.com/Slendy4514/ComplementAIry.git
 cd ComplementAIry && sh scripts/instalar.sh
 ```
 Deja el comando `cai` global (enlazado al repo: cada `pnpm build` se aplica al instante) e instala la extensión de VSCode.
 
 ### Opción B: en todos tus devcontainers, desde GitHub (recomendado)
-1. Sube el repo a GitHub (público) y crea un release: `git tag v0.3.0 && git push --tags`. El workflow publica la feature en `ghcr.io/<tu-usuario>/complementairy/complementairy`, con la CLI y la extensión adentro.
+1. Sube el repo a GitHub (público) y crea un release: `git tag v0.3.0 && git push --tags`. El workflow publica la feature en `ghcr.io/Slendy4514/complementairy/complementairy`, con la CLI y la extensión adentro.
 2. En la configuración de VSCode de **tu computador** (User Settings JSON):
    ```jsonc
-   "dev.containers.defaultFeatures": { "ghcr.io/<tu-usuario>/complementairy/complementairy:0": {} },
+   "dev.containers.defaultFeatures": { "ghcr.io/Slendy4514/complementairy/complementairy:0": {} },
    "dev.containers.defaultExtensions": ["anthropic.claude-code"]
    ```
    Desde ahí, cualquier devcontainer que construyas trae ComplementAIry. Para un solo proyecto, pon esa línea en `"features"` de su `devcontainer.json`.

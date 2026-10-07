@@ -4,12 +4,12 @@ Feature de devcontainer: al construir el contenedor instala el comando `cai` y l
 
 ## Desde GitHub (recomendado)
 Al crear un tag en el repo (`git tag v0.3.0 && git push --tags`), el workflow `release` publica la feature en
-`ghcr.io/<tu-usuario>/complementairy/complementairy`.
+`ghcr.io/Slendy4514/complementairy/complementairy`.
 
 **En un proyecto**, en `.devcontainer/devcontainer.json`:
 ```jsonc
 "features": {
-  "ghcr.io/<tu-usuario>/complementairy/complementairy:0": {}
+  "ghcr.io/Slendy4514/complementairy/complementairy:0": {}
 },
 "customizations": { "vscode": { "extensions": ["anthropic.claude-code"] } }
 ```
@@ -18,7 +18,7 @@ Al crear un tag en el repo (`git tag v0.3.0 && git push --tags`), el workflow `r
 (`Ctrl+Shift+P` → "Preferences: Open User Settings (JSON)"):
 ```jsonc
 "dev.containers.defaultFeatures": {
-  "ghcr.io/<tu-usuario>/complementairy/complementairy:0": {}
+  "ghcr.io/Slendy4514/complementairy/complementairy:0": {}
 },
 "dev.containers.defaultExtensions": ["anthropic.claude-code"]
 ```
