@@ -27,16 +27,17 @@ cd ComplementAIry && sh scripts/instalar.sh
 ```
 Deja el comando `cai` global (enlazado al repo: cada `pnpm build` se aplica al instante) e instala la extensión de VSCode.
 
-### Opción B: en el devcontainer de otro proyecto (versión publicada)
-Crea un release con `git tag v0.2.0 && git push --tags`. El workflow `release` publica `complementairy.tgz` y `complementairy.vsix`. Después, en el `.devcontainer/Dockerfile` del otro proyecto:
-```dockerfile
-RUN npm i -g https://github.com/<tu-usuario>/ComplementAIry/releases/latest/download/complementairy.tgz
-```
-Para la extensión, agrega a `devcontainer.json` → `"postAttachCommand"`:
-```bash
-curl -sL -o /tmp/complementairy.vsix https://github.com/<tu-usuario>/ComplementAIry/releases/latest/download/complementairy.vsix && code --install-extension /tmp/complementairy.vsix --force
-```
-> Si el repo es **privado**, esas URLs piden autenticación. En ese caso usa la opción A dentro del contenedor, o descarga los archivos con `gh release download`.
+### Opción B: en todos tus devcontainers, desde GitHub (recomendado)
+1. Sube el repo a GitHub (público) y crea un release: `git tag v0.3.0 && git push --tags`. El workflow publica la feature en `ghcr.io/<tu-usuario>/complementairy/complementairy`, con la CLI y la extensión adentro.
+2. En la configuración de VSCode de **tu computador** (User Settings JSON):
+   ```jsonc
+   "dev.containers.defaultFeatures": { "ghcr.io/<tu-usuario>/complementairy/complementairy:0": {} },
+   "dev.containers.defaultExtensions": ["anthropic.claude-code"]
+   ```
+   Desde ahí, cualquier devcontainer que construyas trae ComplementAIry. Para un solo proyecto, pon esa línea en `"features"` de su `devcontainer.json`.
+3. **Actualizaciones:** cuando publiques un tag nuevo, la extensión te avisa y ofrece "Reconstruir ahora".
+
+Detalles y la alternativa sin GitHub: [devcontainer-feature/complementairy/README.md](devcontainer-feature/complementairy/README.md).
 
 ### En cada proyecto
 ```bash

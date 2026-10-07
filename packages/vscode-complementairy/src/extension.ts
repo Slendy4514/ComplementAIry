@@ -260,6 +260,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   });
 
+  reg("cai.buscarActualizacion", () => revisarActualizacion(ctx, true));
+  void revisarActualizacion(ctx, false);
+
   decorate(vscode.window.activeTextEditor);
   ctx.subscriptions.push(
     output,
@@ -271,6 +274,58 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }),
     vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration("cai") && decorate(vscode.window.activeTextEditor)),
   );
+}
+
+// --- Aviso de versión nueva (consulta el último release del repositorio de GitHub) ------
+
+function esMayor(a: string, b: string): boolean {
+  const pa = a.split(/[.-]/).map((x) => Number.parseInt(x, 10) || 0);
+  const pb = b.split(/[.-]/).map((x) => Number.parseInt(x, 10) || 0);
+  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) > (pb[i] ?? 0);
+  return false;
+}
+
+async function revisarActualizacion(ctx: vscode.ExtensionContext, aPedido: boolean): Promise<void> {
+  const pkg = ctx.extension.packageJSON as { version: string; repository?: string | { url?: string } };
+  const url = typeof pkg.repository === "string" ? pkg.repository : (pkg.repository?.url ?? "");
+  const repo = /github\.com[/:]([^/]+)\/([^/.#]+)/.exec(url);
+  if (!repo) {
+    if (aPedido) vscode.window.showInformationMessage("ComplementAIry: esta versión no viene de un release de GitHub; no hay dónde buscar actualizaciones.");
+    return;
+  }
+  if (!aPedido) {
+    if (!vscode.workspace.getConfiguration("cai").get<boolean>("avisarActualizaciones", true)) return;
+    const ultima = ctx.globalState.get<number>("cai.ultimaRevision") ?? 0;
+    if (Date.now() - ultima < 6 * 3600_000) return;
+  }
+  await ctx.globalState.update("cai.ultimaRevision", Date.now());
+  try {
+    const r = await fetch(`https://api.github.com/repos/${repo[1]}/${repo[2]}/releases/latest`, {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "complementairy" },
+    });
+    if (!r.ok) {
+      if (aPedido) vscode.window.showWarningMessage(`ComplementAIry: no pude consultar GitHub (${r.status}): todavía no hay releases publicados o el repositorio es privado.`);
+      return;
+    }
+    const rel = (await r.json()) as { tag_name: string; html_url: string };
+    const nueva = rel.tag_name.replace(/^v/, "");
+    if (!esMayor(nueva, pkg.version)) {
+      if (aPedido) vscode.window.showInformationMessage(`ComplementAIry está al día (${pkg.version}).`);
+      return;
+    }
+    if (!aPedido && ctx.globalState.get<string>("cai.omitida") === nueva) return;
+    const op = await vscode.window.showInformationMessage(
+      `ComplementAIry ${nueva} está disponible (tienes ${pkg.version}). Se actualiza al reconstruir el contenedor.`,
+      "Reconstruir ahora",
+      "Ver cambios",
+      "Omitir esta versión",
+    );
+    if (op === "Reconstruir ahora") await vscode.commands.executeCommand("remote-containers.rebuildContainer");
+    else if (op === "Ver cambios") await vscode.env.openExternal(vscode.Uri.parse(rel.html_url));
+    else if (op === "Omitir esta versión") await ctx.globalState.update("cai.omitida", nueva);
+  } catch (e) {
+    if (aPedido) vscode.window.showWarningMessage(`ComplementAIry: no pude buscar actualizaciones (${(e as Error).message}).`);
+  }
 }
 
 export function deactivate(): void {}

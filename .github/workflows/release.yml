@@ -1,10 +1,14 @@
-# Al crear un tag vX.Y.Z publica en GitHub Releases el paquete de la CLI (.tgz) y la extensión (.vsix).
+# Al crear un tag vX.Y.Z:
+#  1. Publica en GitHub Releases la CLI (complementairy.tgz) y la extensión (complementairy.vsix).
+#  2. Publica la feature de devcontainer en ghcr.io/<dueño>/complementairy/complementairy (con ambas adentro).
+# Uso: git tag v0.3.0 && git push --tags
 name: release
 on:
   push:
     tags: ["v*"]
 permissions:
   contents: write
+  packages: write
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -14,17 +18,47 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
+
+      - name: Versión y repositorio desde el tag
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          for f in packages/complementairy/package.json packages/vscode-complementairy/package.json devcontainer-feature/complementairy/devcontainer-feature.json; do
+            jq --arg v "$V" '.version = $v' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+          done
+          # La extensión consulta este repositorio para avisar cuando hay una versión nueva.
+          f=packages/vscode-complementairy/package.json
+          jq --arg r "https://github.com/${GITHUB_REPOSITORY}" '.repository = { "type": "git", "url": $r }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+          f=devcontainer-feature/complementairy/devcontainer-feature.json
+          jq --arg r "https://github.com/${GITHUB_REPOSITORY}" '.documentationURL = $r' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+
       - name: CLI
         working-directory: packages/complementairy
         run: |
           pnpm install && pnpm build && node dist/cli.js selftest
           pnpm pack --pack-destination ../../release
           mv ../../release/complementairy-*.tgz ../../release/complementairy.tgz
+
       - name: Extensión de VSCode
         working-directory: packages/vscode-complementairy
         run: |
           pnpm install && pnpm build
-          npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository -o ../../release/complementairy.vsix
+          npx --yes @vscode/vsce package --no-dependencies -o ../../release/complementairy.vsix
+
+      - name: Armar la feature (con la CLI y la extensión adentro)
+        run: |
+          mkdir -p feature-src/complementairy
+          cp devcontainer-feature/complementairy/* feature-src/complementairy/
+          cp release/complementairy.tgz release/complementairy.vsix feature-src/complementairy/
+
+      - name: Publicar la feature en ghcr.io
+        uses: devcontainers/action@v1
+        with:
+          publish-features: "true"
+          base-path-to-features: "./feature-src"
+          generate-docs: "false"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: softprops/action-gh-release@v2
         with:
           files: |
