@@ -42,6 +42,11 @@ export interface Config {
     porCarpeta: Record<string, "silencioso" | "normal" | "activo">;
   };
   /**
+   * Dónde se muestra lo que dice la IA: "notas" (hilos de VSCode al costado del código; el archivo no
+   * se toca) o "comentarios" (comentarios @guia dentro del archivo, para terminal y otros editores).
+   */
+  vista: "notas" | "comentarios";
+  /**
    * Buenas prácticas medibles (sin IA). Al superar un umbral, el acompañante te propone un plano
    * para mejorar el diseño (una vez por problema). `null` desactiva una regla.
    * Las prácticas en palabras van en .cai/reglas.md.
@@ -75,8 +80,13 @@ export interface Config {
     modelo: string;
     /** Documentación actualizada de librerías vía Context7 (MCP), para que no invente APIs. */
     context7: boolean;
-    /** Modelo para tareas simples (consolidar revisiones, decidir duplicados). Vacío = el principal. */
+    /** (Compatibilidad) modelo para tareas simples; ahora se usa ia.modelos.chico. */
     modeloRapido: string;
+    /**
+     * Modelo por tamaño de tarea, todos vía Claude Code (tu sesión): chico = una función,
+     * mediano = un archivo, grande = el proyecto. "" = el modelo por defecto de Claude Code.
+     */
+    modelos: { chico: string; mediano: string; grande: string };
   };
 }
 
@@ -128,7 +138,8 @@ export const DEFAULT_CONFIG: Config = {
   practicas: { maxFuncionesArchivo: 12, maxLineasArchivo: 300, maxLineasFuncion: 40, maxAnidamiento: 3, maxParametros: 4 },
   autoria: { heredado: [], terceros: [], acompanarHeredado: false },
   tests: { carpeta: "tests", avisarSinTests: true },
-  ia: { modelo: "", context7: false, modeloRapido: "claude-haiku-4-5" },
+  ia: { modelo: "", context7: false, modeloRapido: "", modelos: { chico: "claude-haiku-4-5", mediano: "claude-sonnet-5-5", grande: "claude-opus-5-5" } },
+  vista: "notas",
 };
 
 /**
@@ -151,7 +162,8 @@ export function loadConfig(root: string): Config {
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...raw.snapshot },
     snippets: { ...DEFAULT_CONFIG.snippets, ...raw.snippets },
     acompanar: { ...DEFAULT_CONFIG.acompanar, ...raw.acompanar },
-    ia: { ...DEFAULT_CONFIG.ia, ...raw.ia },
+    ia: { ...DEFAULT_CONFIG.ia, ...raw.ia, modelos: { ...DEFAULT_CONFIG.ia.modelos, ...raw.ia?.modelos } },
+    vista: raw.vista ?? (process.env.CAI_VISTA === "comentarios" || process.env.CAI_VISTA === "notas" ? process.env.CAI_VISTA : DEFAULT_CONFIG.vista),
     practicas: { ...DEFAULT_CONFIG.practicas, ...raw.practicas },
     tests: { ...DEFAULT_CONFIG.tests, ...raw.tests },
     autoria: { ...DEFAULT_CONFIG.autoria, ...raw.autoria },

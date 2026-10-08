@@ -97,7 +97,7 @@ export async function proponerTests(root: string, rel: string, funcion?: string)
     system: SYSTEM,
     cwd: root,
     schema: SCHEMA,
-    ...iaOpts(z.config),
+    ...iaOpts(z.config, "mediano"),
     prompt: [
       `Archivo: ${rel} (${lang.id}). Funciones exportadas: ${[...exportadas].join(", ")}.`,
       funcion ? `Propón casos SOLO para ${funcion}.` : "Propón casos para las funciones más importantes.",

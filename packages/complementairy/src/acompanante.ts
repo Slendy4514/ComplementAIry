@@ -13,8 +13,11 @@ import { planoProyecto } from "./plano.js";
 import { funcionesSinTests, medir, rutaTest, violaciones } from "./metricas.js";
 import { loadPerfil, nivelDe, puntaje, registrar } from "./profile.js";
 import { insertAboveLine, renderReply, type Reply } from "./render.js";
+import { publicar } from "./salida.js";
+import { dejarPendiente, ocupar, tomarPendiente } from "./ocupado.js";
+import { planoArchivo } from "./planoArchivo.js";
 import { findThreads, nextThreadId, regionesTop, regionOf } from "./threads.js";
-import { iaOpts, marcadores, runGuia, TIPOS } from "./tutor.js";
+import { iaOpts, marcadores, runGuia, TIPOS, type Tamano } from "./tutor.js";
 import type { SyntaxNode } from "./parser.js";
 
 /**
@@ -105,7 +108,26 @@ function syntaxErrors(root: SyntaxNode | null): { line: number; msg: string }[] 
 
 const lineOffset = (src: string, line: number) => src.split("\n").slice(0, line - 1).join("\n").length + (line > 1 ? 1 : 0);
 
-export async function acompanar(root: string, rel: string, log: (s: string) => void = () => {}): Promise<{ acciones: Accion[]; costoUsd: number }> {
+export async function acompanar(root: string, rel: string, log: (s: string) => void = () => {}): Promise<{ acciones: Accion[]; costoUsd: number; pendiente?: boolean }> {
+  // Un pedido a la vez por archivo: si ya hay uno en curso, queda UNO en espera (no se acumulan).
+  const lock = ocupar(root, rel, "acompañando");
+  if (!lock.ok) {
+    dejarPendiente(root, rel);
+    return { acciones: [], costoUsd: 0, pendiente: true };
+  }
+  try {
+    let r = await acompanarUnaVez(root, rel, log);
+    if (tomarPendiente(root, rel)) {
+      const otra = await acompanarUnaVez(root, rel, log);
+      r = { acciones: [...r.acciones, ...otra.acciones], costoUsd: r.costoUsd + otra.costoUsd };
+    }
+    return r;
+  } finally {
+    lock.liberar();
+  }
+}
+
+async function acompanarUnaVez(root: string, rel: string, log: (s: string) => void): Promise<{ acciones: Accion[]; costoUsd: number }> {
   const abs = path.join(root, rel);
   const lang = langFor(rel);
   const res = { acciones: [] as Accion[], costoUsd: 0 };
@@ -173,15 +195,39 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
   const estructura = fs.existsSync(path.join(root, "docs", "ESTRUCTURA.md")) ? fs.readFileSync(path.join(root, "docs", "ESTRUCTURA.md"), "utf8").slice(0, 6000) : "";
   const userIds = fileIdentifiers(parsed.root, src);
 
-  const pedir = async (prompt: string, nivel: number): Promise<Reply[]> => {
-    const { data, costUsd } = await ask<{ respuestas: Reply[] }>({ kind: "acompanar", system: SYSTEM, prompt, schema: SCHEMA, cwd: root, ...iaOpts(z.config) });
+  const pedir = async (prompt: string, nivel: number, tamano: Tamano = "chico"): Promise<Reply[]> => {
+    const { data, costUsd } = await ask<{ respuestas: Reply[] }>({ kind: "acompanar", system: SYSTEM, prompt, schema: SCHEMA, cwd: root, ...iaOpts(z.config, tamano) });
     contar(costUsd);
     const g = guardReplies(Array.isArray(data?.respuestas) ? data.respuestas : [], nivel, userIds);
     return g.ok.filter((r) => r.tipo !== "snippet" || libreria.some((s) => s.nombre === parseLlamada(r.texto)?.nombre));
   };
 
   /** Escribe solo si el archivo no cambió mientras la IA pensaba (si cambió, se reintenta al próximo guardado). */
+  const enNotas = z.config.vista === "notas";
+  /** Vista notas: cada respuesta del acompañante es una nota en esa línea (el archivo no se toca). */
+  const anotar = async (line: number, replies: Reply[], extra: { titulo?: string; bloqueante?: boolean } = {}): Promise<boolean> => {
+    if (!replies.length) return false;
+    const actual = fs.readFileSync(abs, "utf8");
+    const textoLinea = (actual.split(/\r?\n/)[line - 1] ?? "").trim();
+    const r = await publicar(
+      root,
+      rel,
+      replies.map((x, i) => ({
+        ancla: { linea: line, texto: textoLinea },
+        tipo: x.tipo,
+        texto: x.texto,
+        links: x.links ?? [],
+        ...(i === 0 && extra.titulo ? { titulo: extra.titulo } : {}),
+        bloqueante: !!extra.bloqueante,
+        origen: "acompanante",
+        ...(x.tipo === "snippet" ? { snippets: [{ llamada: x.texto.split(/\s+—\s+|\s+--\s+/)[0]!.trim(), despues: "" }] } : {}),
+      })),
+      { vista: "notas" },
+    );
+    return r.notas.length > 0;
+  };
   const escribir = async (line: number, replies: Reply[], prefijo: string): Promise<boolean> => {
+    if (enNotas) return anotar(line, replies);
     const actual = fs.readFileSync(abs, "utf8");
     if (actual !== src || !replies.length) return false;
     const id = `${nextThreadId(parsed.comments, new Set(), prefijo)}.1`;
@@ -195,6 +241,11 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
   /** Como `escribir`, pero ancla por el texto de la línea en el archivo ACTUAL (null = arriba del todo). */
   const escribirSobre = async (textoLinea: string | null, replies: Reply[], prefijo: string): Promise<boolean> => {
     if (!replies.length) return false;
+    if (enNotas) {
+      const ls = fs.readFileSync(abs, "utf8").split(/\r?\n/);
+      const l = textoLinea === null ? 1 : ls.indexOf(textoLinea) + 1;
+      return l > 0 && anotar(l, replies);
+    }
     const actual = fs.readFileSync(abs, "utf8");
     const parsedActual = await parse(actual, lang);
     const ls = actual.split("\n");
@@ -210,7 +261,13 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
   // 4. Archivo nuevo o casi vacío: plano del archivo (una vez).
   const codigo = codeOnly(src, parsed.comments).split("\n").filter((l) => l.trim()).length;
   const yaTienePlano = /@guia\[[^\]]+\] plano:/.test(src);
-  if (codigo <= 2 && !yaTienePlano && !archivo.planoOfrecido && puedeLlamar()) {
+  if (codigo <= 2 && !yaTienePlano && !archivo.planoOfrecido && puedeLlamar() && enNotas) {
+    // Vista notas: plano estructurado (resumen + notas por función + tareas para lo que falta).
+    archivo.planoOfrecido = true;
+    const r = await planoArchivo(root, rel);
+    contar(r.costoUsd);
+    res.acciones.push({ tipo: "plano-archivo", detalle: `${rel}${r.tareas ? ` (${r.tareas} tarea(s))` : ""}` });
+  } else if (codigo <= 2 && !yaTienePlano && !archivo.planoOfrecido && puedeLlamar()) {
     archivo.planoOfrecido = true;
     const hermanos = fs.readdirSync(path.dirname(abs)).filter((f) => f !== path.basename(abs)).slice(0, 30);
     const replies = await pedir(
@@ -357,7 +414,7 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
       system: REVISION_SYSTEM,
       cwd: root,
       schema: REVISION_SCHEMA,
-      ...iaOpts(z.config),
+      ...iaOpts(z.config, "chico"),
       prompt: [
         `${rel} (${lang.id})${critical ? " — ZONA CRÍTICA" : ""}. Programador: ${nivelProg}.`,
         ctx,
@@ -369,7 +426,16 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
     contar(costUsd);
     const actual = fs.readFileSync(abs, "utf8");
     // Se ancla por el texto de cada línea en el archivo actual (otros pasos pudieron agregar comentarios).
-    if (data.hallazgos.length) {
+    if (data.hallazgos.length && enNotas) {
+      const lineasN = actual.split(/\r?\n/);
+      let n = 0;
+      for (const h of data.hallazgos.slice(0, 2 * partes.length)) {
+        const line = lineasN.findIndex((l) => l.trim() === h.codigo.trim()) + 1;
+        if (line > 0 && (await anotar(line, [{ tipo: "revision", texto: `${h.etiqueta}${h.bloqueante ? " (blocking)" : ""}: ${h.texto}`, links: h.links }], { titulo: `${h.etiqueta}: ${h.texto.split(/[.:\n]/)[0]!.slice(0, 60)}`, bloqueante: h.bloqueante }))) n++;
+        if (propio) registrarPatron(`acompanante/${h.categoria}`, h.texto);
+      }
+      if (n) res.acciones.push({ tipo: "comentario", detalle: `${n} nota(s) sobre ${partes.map((p) => p.key.slice(0, 40)).join(", ")}` });
+    } else if (data.hallazgos.length) {
       let next = actual;
       const lineas = actual.split("\n");
       const parsedNow = await parse(actual, lang);

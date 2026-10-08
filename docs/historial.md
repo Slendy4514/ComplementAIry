@@ -176,3 +176,23 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - `post-create.sh` ahora tiene pasos independientes (avisa y sigue), y `npm link` reintenta con sudo;
   - `post-attach.sh` instala la extensión de la misma forma robusta.
 - **El chat no se pierde en un rebuild:** `~/.claude` es un volumen que se conserva entre reconstrucciones, y además está el respaldo en `.claude-backup/`, que se restaura solo si el volumen está vacío.
+
+## v0.5: experiencia de uso (2026-10-08)
+- **Lo que reportó el usuario al probarlo en `Files.js`:** el autoguardado chocaba con los comentarios que escribía la IA; demasiado texto y listas `1) 2)` pegadas; restos de un snippet ya expandido; no se sabía si la IA estaba pensando y se podían lanzar revisiones encima; lo de una función no quedaba junto a ella; no quedaba claro por dónde seguir; quería modelos por tamaño; snippets insertados dentro de la función.
+- **Decisiones del usuario:** vista **Notas** por defecto en VSCode; modelos **Haiku / Sonnet / Opus**, todos a través de Claude Code; notas **clicables** (pedir pseudocódigo y demás con un botón), escribir en la nota y que la IA responda, y seleccionar código para preguntar.
+- **Hecho:**
+  - notas fuera del archivo, re-anclaje sin IA y salida única notas/comentarios;
+  - `cai responder`, `cai notas`, `cai siguiente`, `cai tareas`, `cai plano --archivo`, `cai snippet cuerpo` y `revisar --ediciones --json`;
+  - bloqueo por archivo con un pedido en espera;
+  - plano de archivo estructurado con tareas que se marcan solas;
+  - listas en líneas separadas y arreglo del resto huérfano al expandir;
+  - modelos por tamaño (`ia.modelos`).
+- **Extensión:**
+  - notas como hilos con botones y caja de respuesta;
+  - panel "Siguiente paso" con tareas y notas;
+  - barra de estado con cancelar y silenciar;
+  - "pensando…" en la línea;
+  - CodeLens, hover y Problemas;
+  - "Insertar aquí" para snippets;
+  - preguntar sobre la selección.
+- Selftest: 127/127.

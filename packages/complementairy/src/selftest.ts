@@ -1,3 +1,11 @@
+import crypto from "node:crypto";
+import { cargarNotas, guardarNotas, mensaje, nuevaNota } from "./notas.js";
+import { responderNota } from "./responder.js";
+import { conBloqueo, enCurso, ocupar } from "./ocupado.js";
+import { actualizarTareas, agregarTareas, cargarTareas, guardarDiagnosticos, siguiente } from "./siguiente.js";
+import { planoArchivo } from "./planoArchivo.js";
+import { separarListas } from "./render.js";
+import { iaOpts } from "./tutor.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1089,11 +1097,194 @@ CASES.push(
   },
 );
 
+// --- v0.5: notas, bloqueo, siguiente paso, formato y modelos por tamaño ---------------------
+const conNotas = (r: string, extra: object = {}) => fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ vista: "notas", ...extra }));
+const sha = (f: string) => crypto.createHash("sha1").update(fs.readFileSync(f)).digest("hex");
+const respNota = (texto = "pensá en X", extra: object = {}) => ({ titulo: "Validar meses", que_hacer: "Agrega la validación al inicio", respuestas: [{ tipo: "pista", texto, links: [], codigo: "" }], nivel_usado: 2, ...extra });
+CASES.push(
+  {
+    name: "notas: un @ia? del archivo se responde en una nota y el archivo NO se toca",
+    run: async (r) => {
+      conNotas(r);
+      const f = path.join(r, "src/n.ts");
+      fs.writeFileSync(f, "export function f(m: number) {\n  // @ia? ¿cómo valido m?\n  return m;\n}\n");
+      const antes = sha(f);
+      const calls = fakeLLM(() => respNota());
+      await runGuia(r, "src/n.ts");
+      await runGuia(r, "src/n.ts"); // ya respondida: no vuelve a llamar
+      const notas = cargarNotas(r, "src/n.ts");
+      return sha(f) === antes && calls.length === 1 && notas.length === 1 && notas[0]!.ancla.texto === "return m;" && notas[0]!.hilo.length === 2 && notas[0]!.accion.includes("validación");
+    },
+  },
+  {
+    name: "notas: botón 'pseudo' pide ese escalón; 'no entiendo' sube uno; 'tests' propone casos",
+    run: async (r) => {
+      conNotas(r);
+      const calls = fakeLLM((o) => (o.kind === "tests" ? { casos: [{ tipo: "normal", descripcion: "uno", llamada: "cuota(1, 1)", esperado: "1", duda: "" }] } : respNota()));
+      const a = await responderNota(r, { archivo: "src/cuota.ts", linea: 3, pedido: "pseudo" });
+      await responderNota(r, { archivo: "src/cuota.ts", notaId: a.nota.id, texto: "no entiendo" });
+      const b = await responderNota(r, { archivo: "src/cuota.ts", notaId: a.nota.id, pedido: "tests" });
+      const lv = calls.filter((c) => c.kind === "responder").map(levelIn);
+      return lv[0] === 3 && lv[1] === 4 && b.nota.hilo.some((m) => m.texto.includes("tests/cuota.test.ts"));
+    },
+  },
+  {
+    name: "notas: seleccionar código y preguntar crea una nota en esa línea con la selección como contexto",
+    run: async (r) => {
+      conNotas(r);
+      const calls = fakeLLM(() => respNota());
+      const { nota } = await responderNota(r, { archivo: "src/cuota.ts", linea: 3, seleccion: "return monto / meses;", texto: "¿y si meses es 0?" });
+      return nota.ancla.texto === "return monto / meses;" && calls[0]!.prompt.includes("Sobre esta parte") && nota.hilo[0]!.quien === "tu";
+    },
+  },
+  {
+    name: "notas: se re-anclan solas al insertar líneas arriba; si su línea desaparece quedan 'desancladas' (no se pierden)",
+    run: async (r) => {
+      conNotas(r);
+      fakeLLM(() => respNota());
+      await responderNota(r, { archivo: "src/cuota.ts", linea: 3, texto: "?" });
+      const f = path.join(r, "src/cuota.ts");
+      fs.writeFileSync(f, "// nuevo\n// nuevo\n" + TS);
+      const movida = cargarNotas(r, "src/cuota.ts")[0]!.ancla.linea === 5;
+      fs.writeFileSync(f, "export const x = 1;\n");
+      const n = cargarNotas(r, "src/cuota.ts")[0]!;
+      return movida && !!n.desanclada && n.estado === "abierta";
+    },
+  },
+  {
+    name: "notas: la revisión y el acompañante dejan notas (no comentarios) y el archivo queda igual",
+    run: async (r) => {
+      conNotas(r, { tests: { avisarSinTests: false } });
+      const f = path.join(r, "src/rv.ts");
+      fs.writeFileSync(f, "export function a(x: number) {\n  return 10 / x;\n}\n");
+      const antes = sha(f);
+      fakeLLM((o) => (o.kind === "revisar:consolidar" ? { mantener: [0] } : { hallazgos: [{ codigo: "  return 10 / x;", etiqueta: "issue", bloqueante: true, categoria: "div", texto: "x puede ser 0", links: [] }] }));
+      const res = await runReview(r, "src/rv.ts", { solo: ["bugs"] });
+      const notas = cargarNotas(r, "src/rv.ts");
+      return sha(f) === antes && res.insertados === 1 && notas[0]!.bloqueante && notas[0]!.ancla.texto === "return 10 / x;";
+    },
+  },
+  {
+    name: "notas: una predicción se comprueba ejecutando el código al responderla en la nota (sin IA)",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "package.json"), JSON.stringify({ type: "module" }));
+      const notas = cargarNotas(r, "src/cuota.ts");
+      const n = nuevaNota(notas, { archivo: "src/cuota.ts", ancla: { linea: 1, texto: "" }, tipo: "prediccion", titulo: "p", origen: "predecir", prediccion: { expresion: "cuota(10, 2)", funcion: "cuota" } });
+      guardarNotas(r, "src/cuota.ts", notas);
+      const calls = fakeLLM(() => respNota());
+      const out = await responderNota(r, { archivo: "src/cuota.ts", notaId: n.id, texto: "5" });
+      const ultimo = out.nota.hilo[out.nota.hilo.length - 1]!.texto;
+      return calls.length === 0 && (ultimo.includes("Correcto") || ultimo.includes("No pude ejecutar"));
+    },
+  },
+  {
+    name: "bloqueo: un segundo pedido sobre el mismo archivo se rechaza; el acompañante deja UNO en espera",
+    run: async (r) => {
+      const f = path.join(r, ".cai/cache/ocupado");
+      fs.mkdirSync(f, { recursive: true });
+      // Simula otro proceso vivo (el padre de este) revisando el archivo.
+      const clave = crypto.createHash("sha1").update("src/cuota.ts").digest("hex").slice(0, 12);
+      fs.writeFileSync(path.join(f, `${clave}.json`), JSON.stringify({ pid: process.ppid, tarea: "revisando", archivo: "src/cuota.ts", desde: new Date().toISOString() }));
+      const otro = ocupar(r, "src/cuota.ts", "respondiendo");
+      const res = await acompanar(r, "src/cuota.ts");
+      const pendiente = fs.readdirSync(f).some((x) => x.endsWith(".pendiente"));
+      // Un bloqueo de un proceso muerto se limpia solo.
+      fs.writeFileSync(path.join(f, `${clave}.json`), JSON.stringify({ pid: 999999, tarea: "x", archivo: "src/cuota.ts", desde: new Date().toISOString() }));
+      const libre = ocupar(r, "src/cuota.ts", "y");
+      if (libre.ok) libre.liberar();
+      return !otro.ok && !!res.pendiente && pendiente && libre.ok && enCurso(r).length === 0;
+    },
+  },
+  {
+    name: "siguiente: el orden es determinista (responder > arreglar > tareas > bloqueantes > notas)",
+    run: async (r) => {
+      conNotas(r);
+      const notas = cargarNotas(r, "src/cuota.ts");
+      nuevaNota(notas, { archivo: "src/cuota.ts", ancla: { linea: 2, texto: "" }, tipo: "revision", titulo: "normal", origen: "revisar", accion: "leer" });
+      nuevaNota(notas, { archivo: "src/cuota.ts", ancla: { linea: 2, texto: "" }, tipo: "revision", titulo: "grave", origen: "revisar", bloqueante: true });
+      nuevaNota(notas, { archivo: "src/cuota.ts", ancla: { linea: 1, texto: "" }, tipo: "prediccion", titulo: "pred", origen: "predecir", prediccion: { expresion: "cuota(1,1)", funcion: "cuota" }, hilo: [mensaje("ia", "¿qué devuelve?")] });
+      guardarNotas(r, "src/cuota.ts", notas);
+      guardarDiagnosticos(r, "src/cuota.ts", [{ archivo: "src/cuota.ts", linea: 3, msg: "[tipos] error" }]);
+      agregarTareas(r, [{ titulo: "Crear validar", archivo: "src/cuota.ts", funcion: "validar", origen: "plano" }]);
+      const p = await siguiente(r);
+      const tipos = p.map((x) => x.tipo);
+      return tipos[0] === "responder" && tipos.indexOf("arreglar") < tipos.indexOf("tarea") && tipos.indexOf("tarea") < tipos.indexOf("bloqueante") && tipos.indexOf("bloqueante") < tipos.indexOf("nota");
+    },
+  },
+  {
+    name: "tareas: la de 'crear X' se marca hecha sola cuando la función aparece en el archivo",
+    run: async (r) => {
+      agregarTareas(r, [{ titulo: "Crear validar", archivo: "src/cuota.ts", funcion: "validar", origen: "plano" }]);
+      const antes = (await actualizarTareas(r))[0]!.hecha;
+      fs.appendFileSync(path.join(r, "src/cuota.ts"), "export function validar(m: number) {\n  return m > 0;\n}\n");
+      return !antes && (await actualizarTareas(r))[0]!.hecha;
+    },
+  },
+  {
+    name: "plano de archivo: resumen + nota junto a la función existente + tareas para las que faltan",
+    run: async (r) => {
+      conNotas(r);
+      fakeLLM(() => ({
+        resumen: "Cálculo de cuotas.",
+        funciones: [
+          { nombre: "cuota", que_hace: "Calcula la cuota.", recibe: "monto, meses", devuelve: "number", cuida: "meses = 0", snippet: "" },
+          { nombre: "validarMeses", que_hace: "Valida meses.", recibe: "meses", devuelve: "void", cuida: "no entero", snippet: "fnexport nombre=validarMeses args=meses" },
+        ],
+        orden: "Empieza por validarMeses.",
+      }));
+      const res = await planoArchivo(r, "src/cuota.ts");
+      const notas = cargarNotas(r, "src/cuota.ts");
+      const tareas = cargarTareas(r);
+      return res.tareas === 1 && tareas[0]!.funcion === "validarMeses" && notas.some((n) => n.titulo === "Plano del archivo") && notas.some((n) => n.ancla.funcion === "cuota");
+    },
+  },
+  {
+    name: "formato: las listas 1) 2) y '- ' quedan en líneas separadas",
+    run: async () => separarListas("Pasos: 1) uno. 2) dos. Cuida: - a. - b.") === "Pasos:\n1) uno.\n2) dos. Cuida:\n- a.\n- b.",
+  },
+  {
+    name: "expandir: una sugerencia se lleva TODAS sus líneas (continuaciones y docs:) y respeta el ítem siguiente",
+    run: async (r) => {
+      const src = "// @guia[c1.1] snippet [x]: fn nombre=a\n// @guia[c1.1]   para algo\n// @guia[c1.1]   y más\n// @guia[c1.1] docs: https://x.dev\n// @guia[c1.1] pista: sigo aquí\nlet z;\n";
+      const out = aplicarExpansion(src, await planExpansion(r, "src/e.ts", src, 1));
+      return !out.includes("para algo") && !out.includes("y más") && !out.includes("docs:") && out.includes("pista: sigo aquí") && out.includes("const a = (args) => {");
+    },
+  },
+  {
+    name: "bloqueo: un pedido tuyo espera al acompañante (autoguardado) en vez de rechazarse; las notas se escriben atómicas",
+    run: async (r) => {
+      const d = path.join(r, ".cai/cache/ocupado");
+      fs.mkdirSync(d, { recursive: true });
+      const clave = crypto.createHash("sha1").update("src/cuota.ts").digest("hex").slice(0, 12);
+      const f = path.join(d, `${clave}.json`);
+      fs.writeFileSync(f, JSON.stringify({ pid: process.ppid, tarea: "acompañando", archivo: "src/cuota.ts", desde: new Date().toISOString() }));
+      setTimeout(() => fs.rmSync(f, { force: true }), 700);
+      const t0 = Date.now();
+      const ok = await conBloqueo(r, "src/cuota.ts", "respondiendo", async () => true);
+      guardarNotas(r, "src/cuota.ts", []);
+      const restos = fs.readdirSync(path.join(r, ".cai/notas")).filter((x) => x.endsWith(".tmp"));
+      return ok && Date.now() - t0 >= 600 && restos.length === 0;
+    },
+  },
+  {
+    name: "modelos por tamaño: chico = Haiku, mediano = Sonnet, grande = Opus (configurables)",
+    run: async (r) => {
+      const cfg = (await import("./config.js")).loadConfig(r);
+      const a = iaOpts(cfg, "chico").model === "claude-haiku-4-5" && iaOpts(cfg, "mediano").model === "claude-sonnet-5-5" && iaOpts(cfg, "grande").model === "claude-opus-5-5";
+      fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ ia: { modelos: { mediano: "otro-modelo" } } }));
+      const cfg2 = (await import("./config.js")).loadConfig(r);
+      return a && iaOpts(cfg2, "mediano").model === "otro-modelo" && iaOpts(cfg2, "chico").model === "claude-haiku-4-5";
+    },
+  },
+);
+
 export async function runSelftest(log: (s: string) => void = console.log): Promise<boolean> {
   let ok = 0;
   for (const c of CASES) {
     const root = project();
     process.env.CAI_HOME = path.join(root, ".home");
+    process.env.CAI_VISTA = "comentarios"; // los escenarios clásicos usan comentarios; los de notas lo declaran
     let pass = false;
     try {
       pass = await c.run(root);

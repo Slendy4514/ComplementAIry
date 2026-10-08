@@ -1,0 +1,145 @@
+import fs from "node:fs";
+import path from "node:path";
+import { parse } from "./comments.js";
+import { dataDir } from "./config.js";
+import { langFor } from "./lang.js";
+import { medir } from "./metricas.js";
+import { todasLasNotas } from "./notas.js";
+import { leerMemoria } from "./panorama.js";
+
+/**
+ * "▶ Siguiente paso": una sola cosa que hacer ahora, elegida SIN IA con un orden fijo:
+ *   1. lo que espera tu respuesta (predicciones, preguntas de la memoria)
+ *   2. verificaciones que fallan (tipos, lint, tests, reglas)
+ *   3. tareas del plano sin hacer
+ *   4. notas bloqueantes
+ *   5. el resto de las notas abiertas
+ */
+
+export interface Diagnostico {
+  archivo: string;
+  linea: number;
+  msg: string;
+}
+
+export interface Tarea {
+  id: string;
+  titulo: string;
+  archivo?: string;
+  /** Si se indica, la tarea se marca hecha sola cuando la función aparece en el archivo. */
+  funcion?: string;
+  hecha: boolean;
+  origen: "plano" | "panorama" | "manual";
+  creada: string;
+}
+
+export interface Paso {
+  prioridad: number;
+  tipo: "responder" | "arreglar" | "tarea" | "bloqueante" | "nota";
+  titulo: string;
+  accion: string;
+  archivo?: string;
+  linea?: number;
+  ref?: string;
+}
+
+const diagFile = (root: string) => path.join(dataDir(root), "cache", "diagnosticos.json");
+const tareasFile = (root: string) => path.join(dataDir(root), "tareas.json");
+
+export function guardarDiagnosticos(root: string, rel: string, diags: Diagnostico[]): void {
+  let todo: Record<string, { fecha: string; diags: Diagnostico[] }> = {};
+  try {
+    todo = JSON.parse(fs.readFileSync(diagFile(root), "utf8")) as typeof todo;
+  } catch {
+    /* primera vez */
+  }
+  if (diags.length) todo[rel] = { fecha: new Date().toISOString(), diags };
+  else delete todo[rel];
+  fs.mkdirSync(path.dirname(diagFile(root)), { recursive: true });
+  fs.writeFileSync(diagFile(root), JSON.stringify(todo, null, 2));
+}
+
+export function cargarTareas(root: string): Tarea[] {
+  try {
+    return (JSON.parse(fs.readFileSync(tareasFile(root), "utf8")) as { tareas: Tarea[] }).tareas ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export function guardarTareas(root: string, tareas: Tarea[]): void {
+  fs.mkdirSync(path.dirname(tareasFile(root)), { recursive: true });
+  const tmp = `${tareasFile(root)}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify({ version: 1, tareas }, null, 2));
+  fs.renameSync(tmp, tareasFile(root));
+}
+
+export function agregarTareas(root: string, nuevas: Omit<Tarea, "id" | "hecha" | "creada">[]): number {
+  const tareas = cargarTareas(root);
+  let n = 0;
+  for (const t of nuevas) {
+    if (tareas.some((x) => x.titulo === t.titulo && x.archivo === t.archivo)) continue;
+    const max = Math.max(0, ...tareas.map((x) => Number(/^t(\d+)$/.exec(x.id)?.[1] ?? 0)));
+    tareas.push({ ...t, id: `t${max + 1}`, hecha: false, creada: new Date().toISOString() });
+    n++;
+  }
+  guardarTareas(root, tareas);
+  return n;
+}
+
+/** Marca hechas, sin IA, las tareas cuya función ya existe en su archivo. */
+export async function actualizarTareas(root: string): Promise<Tarea[]> {
+  const tareas = cargarTareas(root);
+  let cambio = false;
+  for (const t of tareas.filter((x) => !x.hecha && x.funcion && x.archivo)) {
+    const abs = path.join(root, t.archivo!);
+    const lang = langFor(t.archivo!);
+    if (!lang || !fs.existsSync(abs)) continue;
+    const src = fs.readFileSync(abs, "utf8");
+    if (medir(src, await parse(src, lang)).funciones.some((f) => f.nombre === t.funcion)) {
+      t.hecha = true;
+      cambio = true;
+    }
+  }
+  if (cambio) guardarTareas(root, tareas);
+  return tareas;
+}
+
+export async function siguiente(root: string): Promise<Paso[]> {
+  const pasos: Paso[] = [];
+  const notas = todasLasNotas(root).filter((n) => n.estado === "abierta");
+
+  // 1. Lo que espera tu respuesta.
+  for (const n of notas.filter((x) => x.prediccion && x.hilo[x.hilo.length - 1]?.quien === "ia"))
+    pasos.push({ prioridad: 1, tipo: "responder", titulo: n.titulo, accion: "Responde la predicción en la nota (sin ejecutar el código)", archivo: n.archivo, linea: n.ancla.linea, ref: n.id });
+  const mem = leerMemoria(path.join(dataDir(root), "conocimiento.md"));
+  if (mem.abiertas.length)
+    pasos.push({ prioridad: 1, tipo: "responder", titulo: `${mem.abiertas.length} pregunta(s) sobre el proyecto`, accion: `Responde después de "R:": ${mem.abiertas[0]!.p}`, archivo: path.relative(root, path.join(dataDir(root), "conocimiento.md")) });
+
+  // 2. Verificaciones que fallan.
+  try {
+    const diags = JSON.parse(fs.readFileSync(diagFile(root), "utf8")) as Record<string, { diags: Diagnostico[] }>;
+    for (const [rel, d] of Object.entries(diags))
+      for (const x of d.diags.slice(0, 3)) pasos.push({ prioridad: 2, tipo: "arreglar", titulo: x.msg.slice(0, 80), accion: `Arregla esto en ${x.archivo || rel}:${x.linea}`, archivo: x.archivo || rel, linea: x.linea });
+  } catch {
+    /* sin diagnósticos */
+  }
+
+  // 3. Tareas del plano.
+  for (const t of (await actualizarTareas(root)).filter((x) => !x.hecha))
+    pasos.push({ prioridad: 3, tipo: "tarea", titulo: t.titulo, accion: t.funcion ? `Crea \`${t.funcion}\` en ${t.archivo}` : t.titulo, ...(t.archivo ? { archivo: t.archivo } : {}), ref: t.id });
+
+  // 4 y 5. Notas.
+  for (const n of notas.filter((x) => !x.prediccion))
+    pasos.push({
+      prioridad: n.bloqueante ? 4 : 5,
+      tipo: n.bloqueante ? "bloqueante" : "nota",
+      titulo: n.titulo,
+      accion: n.accion || "Lee la nota y decide qué hacer",
+      archivo: n.archivo,
+      linea: n.ancla.linea,
+      ref: n.id,
+    });
+
+  return pasos.sort((a, b) => a.prioridad - b.prioridad);
+}

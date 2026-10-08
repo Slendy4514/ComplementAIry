@@ -40,14 +40,27 @@ export function generadosPor(comando: string): ((rel: string, antes: Buffer | nu
   if (!m) return null;
   const datos = (rel: string) => /^\.(cai|aicode)\//.test(rel);
   const plantilla = (b: Buffer | null) => !b || b.toString("utf8").replace(/<!--[\s\S]*?-->/g, "").replace(/^#.*$/gm, "").trim() === "";
+  const notasYTareas = (rel: string) => /^\.(cai|aicode)\/(notas\/[^/]+\.json|tareas\.json)$/.test(rel);
   switch (m[1]) {
+    case "guia":
+    case "revisar":
+    case "responder":
+    case "notas":
+    case "predecir":
+    case "check":
+    case "acompanar":
+    case "siguiente":
+    case "tareas":
+      return (rel) => notasYTareas(rel);
+    case "tests":
+      return (rel) => notasYTareas(rel); // el archivo de tests nuevo/ampliado ya pasa por "solo comentarios"
     case "panorama":
-      return (rel) => datos(rel) && /\/(panorama|conocimiento)\.md$/.test(rel);
+      return (rel) => (datos(rel) && /\/(panorama|conocimiento)\.md$/.test(rel)) || notasYTareas(rel);
     case "conocer":
       // proyecto.md / reglas.md solo si estaban vacíos (si no, el comando escribe *.borrador.md).
       return (rel, antes) => datos(rel) && (/\/(conocimiento|proyecto\.borrador|reglas\.borrador)\.md$/.test(rel) || (/\/(proyecto|reglas)\.md$/.test(rel) && plantilla(antes)));
     case "plano":
-      return (rel) => rel === "docs/ESTRUCTURA.md";
+      return (rel) => rel === "docs/ESTRUCTURA.md" || notasYTareas(rel);
     case "arquitectura":
     case "adr":
       return (rel) => /^docs\/adr\/[^/]+\.md$/.test(rel);

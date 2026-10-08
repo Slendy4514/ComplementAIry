@@ -8,6 +8,7 @@ import { langFor } from "./lang.js";
 import { ask } from "./llm.js";
 import { registrar } from "./profile.js";
 import { eolOf, renderReply } from "./render.js";
+import { cargarNotas, guardarNotas, mensaje, nuevaNota } from "./notas.js";
 import { guiaId, nextThreadId } from "./threads.js";
 import { iaOpts } from "./tutor.js";
 import { verifyCommentOnly } from "./verify.js";
@@ -17,7 +18,7 @@ import { verifyCommentOnly } from "./verify.js";
  * La comparación no la hace la IA: se ejecuta tu código y se compara. Determinista.
  */
 
-interface Prediccion {
+export interface Prediccion {
   expresion: string;
   funcion: string;
 }
@@ -96,7 +97,7 @@ export async function runPredecir(root: string, rel: string): Promise<{ creadas:
     system: SYSTEM,
     cwd: root,
     schema: SCHEMA,
-    ...iaOpts(z.config),
+    ...iaOpts(z.config, "mediano"),
     prompt: `Archivo ${rel} (${lang.id}). Funciones exportadas: ${[...exported].join(", ")}.\n\n${src}`,
   });
   const avisos: string[] = [];
@@ -123,6 +124,25 @@ export async function runPredecir(root: string, rel: string): Promise<{ creadas:
       return (v.length > 0 && t.includes(v)) || (!real.ok && /\b(error|lanza|throw)/i.test(t)) || /devuelve|da como resultado|=\s*-?\d/i.test(t);
     };
     const porQue = delata(q.por_que) ? "" : ` (${q.por_que.replace(/[.\s]+$/, "")})`;
+    if (z.config.vista === "notas") {
+      // Vista notas: la pregunta es una nota; respondes en su caja y se comprueba ejecutando el código.
+      const ls = src.split(/\r?\n/);
+      const d = ls.findIndex((l) => new RegExp(`(function\\s*\\*?\\s*|const\\s+|def\\s+)${fn.replace(/\$/g, "\\$")}\\b`).test(l));
+      const notas = cargarNotas(root, rel, src);
+      nuevaNota(notas, {
+        archivo: rel,
+        ancla: { linea: d + 1 || 1, texto: (ls[d] ?? ls[0] ?? "").trim(), funcion: fn },
+        tipo: "prediccion",
+        titulo: `¿Qué devuelve ${q.expresion.trim()}?`.slice(0, 80),
+        accion: "Responde aquí el valor (sin ejecutar el código), o \"error\" si crees que falla",
+        origen: "predecir",
+        prediccion: { expresion: q.expresion.trim(), funcion: fn },
+        hilo: [mensaje("ia", `**🎯 Predicción** · Sin ejecutarlo: ¿qué devuelve \`${q.expresion.trim()}\`?${porQue}\n\nResponde en esta nota con el valor (o "error").`)],
+      });
+      guardarNotas(root, rel, notas);
+      creadas++;
+      continue;
+    }
     const id = nextThreadId(parsed.comments, taken, "p");
     taken.add(id);
     const nl = eolOf(out);
@@ -148,7 +168,7 @@ export async function runPredecir(root: string, rel: string): Promise<{ creadas:
   return { creadas, costoUsd: costUsd, avisos };
 }
 
-interface Ejecucion {
+export interface Ejecucion {
   ok: boolean;
   valor?: unknown;
   error?: string;
@@ -156,7 +176,7 @@ interface Ejecucion {
   infra?: boolean;
 }
 
-function ejecutar(root: string, rel: string, langId: string, p: Prediccion): Ejecucion {
+export function ejecutar(root: string, rel: string, langId: string, p: Prediccion): Ejecucion {
   const tmp = path.join(dataDir(root), "cache", `run-${crypto.randomBytes(4).toString("hex")}`);
   fs.mkdirSync(path.dirname(tmp), { recursive: true });
   try {

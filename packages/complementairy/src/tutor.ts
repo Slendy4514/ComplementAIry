@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { parse } from "./comments.js";
 import { contextBlock, projectContext, CRITERIO } from "./context.js";
+import { cargarNotas } from "./notas.js";
+import { responderNota } from "./responder.js";
 import { medir } from "./metricas.js";
 import { proponerTests } from "./tests.js";
 import { biblioteca, paraLenguaje, parseLlamada, type Snippet } from "./biblioteca.js";
@@ -41,7 +43,7 @@ const SCHEMA = {
   },
 };
 
-const SYSTEM = `Eres el tutor de ComplementAIry. El programador escribe su código; tú le das ideas, estructura y piezas con comentarios. NUNCA escribes código de su archivo.
+export const SYSTEM = `Eres el tutor de ComplementAIry. El programador escribe su código; tú le das ideas, estructura y piezas con comentarios. NUNCA escribes código de su archivo.
 
 Hay dos modos (el sistema te dice cuál):
 - DIRECTO (lo normal): ayuda útil de inmediato, sin hacerlo esperar. Según lo que pida:
@@ -63,17 +65,23 @@ Reglas:
 
 ${CRITERIO}`;
 
-const NIVEL_BASE: Record<Nivel, number> = { aprendiz: 1, intermedio: 1, experto: 2 };
+export const NIVEL_BASE: Record<Nivel, number> = { aprendiz: 1, intermedio: 1, experto: 2 };
 /** Ajuste del perfil cuando un hilo se resuelve (desaparece del archivo), según el nivel que hizo falta. */
 const DELTA_RESUELTO = [0, 0.08, 0.04, 0, -0.04];
 
-/** Opciones de IA que vienen de .cai/config.json. */
-export function iaOpts(c: Config, rapido = false): { model?: string; context7?: boolean } {
-  const model = rapido && c.ia.modeloRapido ? c.ia.modeloRapido : c.ia.modelo;
-  return { ...(model ? { model } : {}), ...(c.ia.context7 && !rapido ? { context7: true } : {}) };
+export type Tamano = "chico" | "mediano" | "grande";
+
+/**
+ * Opciones de IA según el tamaño de la tarea (.cai/config.json → ia.modelos):
+ * chico = una función, mediano = un archivo, grande = el proyecto. `true` (compatibilidad) = chico.
+ */
+export function iaOpts(c: Config, tamano: Tamano | boolean = "mediano"): { model?: string; context7?: boolean } {
+  const t: Tamano = tamano === true ? "chico" : tamano === false ? "mediano" : tamano;
+  const legado = t === "chico" ? c.ia.modeloRapido || c.ia.modelo : c.ia.modelo;
+  const model = c.ia.modelos?.[t] || legado;
+  return { ...(model ? { model } : {}), ...(c.ia.context7 && t !== "chico" ? { context7: true } : {}) };
 }
 
-/** Divide "¿A? ¿B?" en preguntas, solo en un "?" seguido de otra pregunta y fuera de `código`. */
 /** Escalones y formatos que el humano puede pedir directamente en un @ia?. */
 export const PEDIDOS: { re: RegExp; nivel: number; tipo: string; que: string }[] = [
   { re: /!pista\b/i, nivel: 1, tipo: "pista", que: "una pista o pregunta guía, nada más" },
@@ -178,6 +186,9 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
   const bibliotecaTexto = libreria
     .map((sn) => `- ${sn.nombre}: ${sn.descripcion}${marcadores(sn).length ? ` (marcadores: ${marcadores(sn).join(", ")})` : ""}`)
     .join("\n");
+
+  // Vista "notas": las preguntas @ia? del archivo se responden en notas (el archivo no se toca).
+  if (z.config.vista === "notas") return guiaEnNotas(root, rel, src, threads, result, log);
 
   // 1. Hilos que ya no están en el archivo: el humano los resolvió y los borró.
   result.resueltos = resolveMissing(estado, rel, new Set(threads.map((t) => t.id).filter((x): x is string => !!x)));
@@ -295,7 +306,7 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
       log(`  → [${tag}] nivel ${task.level}: ${task.sub.slice(0, 70)}`);
       let prompt = task.prompt;
       for (let attempt = 0; attempt < 2; attempt++) {
-        const { data, costUsd } = await ask<{ respuestas: Reply[]; nivel_usado: number }>({ kind: "guia", system: SYSTEM, prompt, schema: SCHEMA, cwd: root, ...iaOpts(z.config) });
+        const { data, costUsd } = await ask<{ respuestas: Reply[]; nivel_usado: number }>({ kind: "guia", system: SYSTEM, prompt, schema: SCHEMA, cwd: root, ...iaOpts(z.config, "mediano") });
         result.costoUsd += costUsd;
         const level = Math.min(task.level, data.nivel_usado || task.level);
         const g = guardReplies(Array.isArray(data?.respuestas) ? data.respuestas : [], task.level, userIds);
@@ -370,5 +381,41 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
   if (!v.ok) throw new Error(`no se escribió ${rel}: la inserción no pasó la verificación (${v.reasons.join("; ")})`);
   if (next !== current) fs.writeFileSync(abs, next);
   saveEstado(root, estado);
+  return result;
+}
+
+/** @ia? escritos en el archivo → conversación en una nota anclada al código que sigue. */
+async function guiaEnNotas(root: string, rel: string, src: string, threads: Thread[], result: GuiaResult, log: (s: string) => void): Promise<GuiaResult> {
+  const lineas = src.split(/\r?\n/);
+  const notas = cargarNotas(root, rel, src);
+  for (const t of threads) {
+    const humanos = t.turns.filter((x) => x.quien === "humano");
+    const fuente = `ia?:${t.anchor.text.trim()}`;
+    const nota = notas.find((n) => n.fuente === fuente);
+    const ya = nota?.turnos ?? 0;
+    if (humanos.length <= ya) continue;
+    // Ancla: la primera línea de código después del hilo.
+    let linea = t.last.row + 2;
+    while (linea <= lineas.length && /^\s*(\/\/|#|--|\/\*|\*|<!--|$)/.test(lineas[linea - 1]!)) linea++;
+    if (linea > lineas.length) linea = t.anchor.row + 1;
+    try {
+      const r = await responderNota(
+        root,
+        {
+          archivo: rel,
+          ...(nota ? { notaId: nota.id } : { linea }),
+          texto: humanos.slice(ya).map((x) => x.texto).join("\n"),
+          origen: "pregunta",
+          fuente,
+          turnos: humanos.length,
+        },
+        log,
+      );
+      result.costoUsd += r.costoUsd;
+      result.respondidos++;
+    } catch (e) {
+      result.avisos.push(e instanceof Error ? e.message : String(e));
+    }
+  }
   return result;
 }

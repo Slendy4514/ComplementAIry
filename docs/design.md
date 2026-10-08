@@ -31,7 +31,7 @@ Se configura en `.cai/config.json`, en `"acompanar": { "nivel": "normal", "inten
 - `porCarpeta`: un nivel distinto por carpeta (gana el primero que coincide).
 - `revisar: false`: apaga los comentarios automáticos.
 
-**Ahorro de tokens:** las decisiones son deterministas, y solo viaja a la IA lo que cambió (huella por función o clase). Hay un modelo rápido para tareas simples, caché de prompts y límites por hora. `cai uso` muestra el consumo y cuántas llamadas se evitaron. Detalles en el [README](../README.md#qué-ia-usa-y-cómo-ahorra-tokens).
+**Ahorro de tokens:** las decisiones son deterministas, y solo viaja a la IA lo que cambió (huella por función o clase). Los modelos van por tamaño de tarea (chico, mediano y grande: Haiku, Sonnet y Opus por defecto), caché de prompts y límites por hora. `cai uso` muestra el consumo y cuántas llamadas se evitaron. Detalles en el [README](../README.md#qué-ia-usa-y-cómo-ahorra-tokens).
 
 ### 2. Preguntar: directo, o el escalón que elijas
 ```ts
@@ -279,6 +279,22 @@ packages/vscode-complementairy/             extensión de VSCode
 examples/demo-ts/                   proyecto de prueba con todo instalado
 ```
 
+## Notas: lo que dice la IA, fuera del código (v0.5)
+**Problema que resuelve:** la IA escribía comentarios en el archivo, en disco, mientras el usuario editaba. Con autoguardado las dos escrituras se pisaban, y el archivo se llenaba de texto.
+
+**Cómo funciona:**
+- Todo lo que dice la IA (respuestas, revisión, acompañante, plano, predicciones) se guarda como **notas** en `.cai/notas/<archivo>.json`. Una salida única (`salida.ts → publicar`) decide si van a notas o a comentarios (`"vista"` en `.cai/config.json`; por defecto notas).
+- **Ancla sin IA:** cada nota guarda la línea, su texto y la función. Cuando el código se mueve, se re-ancla por el texto y la función; si no encuentra su lugar queda "desanclada", visible, nunca se pierde.
+- **Conversación:** `cai responder` (botones = mismos pedidos que `!pista`, `!pseudo`, `!tests`…; "no entiendo" sube un escalón; las predicciones se comprueban ejecutando, sin IA). Los `@ia?` escritos en el archivo se convierten en notas.
+- **Un pedido a la vez por archivo:** `.cai/cache/ocupado/` (pid, tarea, línea, hora). Un segundo pedido se rechaza con un aviso (código 3); el acompañante deja **uno** en espera. Los bloqueos de procesos muertos se limpian solos. La extensión lo lee para mostrar "pensando…", aunque el pedido venga del chat.
+- **Siguiente paso, sin IA:** `cai siguiente` ordena: 1) lo que espera tu respuesta, 2) verificaciones que fallan, 3) tareas del plano, 4) notas bloqueantes, 5) el resto. Las tareas "crear X" se marcan hechas solas cuando la función aparece.
+- **Plano de archivo estructurado:** un resumen breve arriba, una nota junto a cada función que existe y una tarea por cada función que falta.
+- **Snippets donde van:** cada snippet sugerido guarda la línea después de la cual va; "Insertar aquí" (solo con tu clic) lo pone ahí, un nivel adentro si la línea abre un bloque.
+
+**En VSCode:** hilos de la API de comentarios (botones, caja de respuesta, "+" en el margen), CodeLens por función, hover, Problemas para lo bloqueante, panel lateral y barra de estado con cancelar y silenciar 30 min.
+
+**Límite conocido:** en modo comentarios, `guia` y el acompañante siguen escribiendo en disco (solo `revisar` se aplica sobre el buffer desde VSCode). Con autoguardado conviene el modo notas.
+
 ## Estado
 | Fase | Contenido | Estado |
 |---|---|---|
@@ -289,6 +305,7 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 | 5 | Gates por stack, mutation testing, `revisar` con consolidación, `predecir`/`check`, `doctor`, reglas mecánicas | ✅ |
 | 6 | Terminal (`explica`, `pregunta`, `corre`, `error`, `shell`), `arquitectura`, ADRs, revisor de arquitectura | ✅ |
 | 7 | Extensión de VSCode | ✅ · adaptador de Honcho: pendiente (opcional; ver abajo) |
+| 8 (v0.5) | Notas fuera del archivo, botones, panel "Siguiente paso", bloqueo por archivo, "pensando…", modelos por tamaño | ✅ |
 
 **Honcho:** el perfil y la memoria hoy son archivos locales legibles, que es lo que pide el principio de transparencia. Conectar Honcho, un servicio externo de modelado de usuario, requiere una cuenta y una API key tuyas, y envía datos de tu forma de programar a un tercero. Queda para cuando lo decidas.
 

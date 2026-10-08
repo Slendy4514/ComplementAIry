@@ -2,7 +2,7 @@
   "name": "complementairy",
   "displayName": "ComplementAIry — tú programas, la IA te acompaña",
   "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "publisher": "complementairy",
   "license": "MIT",
   "engines": {
@@ -74,6 +74,93 @@
       {
         "command": "cai.buscarActualizacion",
         "title": "ComplementAIry: buscar actualizaciones"
+      },
+      {
+        "command": "cai.preguntar",
+        "title": "ComplementAIry: preguntar sobre la selección o esta línea"
+      },
+      {
+        "command": "cai.pedirAqui",
+        "title": "ComplementAIry: pedir ayuda para esta parte (pista, pseudocódigo, tests…)"
+      },
+      {
+        "command": "cai.siguiente",
+        "title": "ComplementAIry: siguiente paso"
+      },
+      {
+        "command": "cai.plano",
+        "title": "ComplementAIry: plano de este archivo"
+      },
+      {
+        "command": "cai.responderIa",
+        "title": "ComplementAIry: responder los @ia? escritos en este archivo"
+      },
+      {
+        "command": "cai.estado",
+        "title": "ComplementAIry: qué está haciendo la IA (cancelar, silenciar)"
+      },
+      {
+        "command": "cai.silenciar",
+        "title": "ComplementAIry: silenciar / reactivar el acompañante (30 min)"
+      },
+      {
+        "command": "cai.panel.refrescar",
+        "title": "Refrescar",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "cai.nota.responder",
+        "title": "Enviar"
+      },
+      {
+        "command": "cai.nota.pista",
+        "title": "💡 Pista"
+      },
+      {
+        "command": "cai.nota.piezas",
+        "title": "🧩 Piezas"
+      },
+      {
+        "command": "cai.nota.pseudo",
+        "title": "📝 Pseudocódigo"
+      },
+      {
+        "command": "cai.nota.ejemplo",
+        "title": "🔁 Ejemplo"
+      },
+      {
+        "command": "cai.nota.tests",
+        "title": "🧪 Tests"
+      },
+      {
+        "command": "cai.nota.plano",
+        "title": "🗺️ Plano"
+      },
+      {
+        "command": "cai.nota.explica",
+        "title": "❓ Explícame"
+      },
+      {
+        "command": "cai.nota.resolver",
+        "title": "✓ Resuelta",
+        "icon": "$(check)"
+      },
+      {
+        "command": "cai.nota.insertar",
+        "title": "Insertar snippet aquí",
+        "icon": "$(insert)"
+      },
+      {
+        "command": "cai.nota.pedir",
+        "title": "Pedir"
+      },
+      {
+        "command": "cai.nota.abrir",
+        "title": "Abrir nota"
+      },
+      {
+        "command": "cai.irA",
+        "title": "Ir"
       }
     ],
     "keybindings": [
@@ -105,6 +192,11 @@
         "command": "cai.panorama",
         "key": "ctrl+alt+p",
         "mac": "cmd+alt+p"
+      },
+      {
+        "command": "cai.siguiente",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n"
       }
     ],
     "configuration": {
@@ -123,12 +215,32 @@
         "cai.acompanar": {
           "type": "boolean",
           "default": true,
-          "description": "Al guardar: expandir snippets activados [x], responder @ia?, proponer planos y ofrecer ayuda si una función sigue con errores (según .cai/config.json → acompanar)."
+          "description": "Al guardar: responder, proponer planos y ofrecer ayuda si una función sigue con errores (según .cai/config.json → acompanar). Se puede silenciar 30 min desde la barra de estado."
         },
         "cai.avisarActualizaciones": {
           "type": "boolean",
           "default": true,
           "description": "Avisar cuando haya una versión nueva de ComplementAIry en el repositorio de GitHub."
+        },
+        "cai.vista": {
+          "type": "string",
+          "enum": [
+            "proyecto",
+            "notas",
+            "comentarios"
+          ],
+          "default": "proyecto",
+          "enumDescriptions": [
+            "Lo que diga .cai/config.json (si no dice nada: notas)",
+            "Notas en la línea exacta (hilos con botones); el archivo no se toca",
+            "Comentarios @guia dentro del archivo, como antes"
+          ],
+          "description": "Dónde se muestra lo que dice la IA."
+        },
+        "cai.codelens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Mostrar 💬 notas · 💡 Ayuda · 🧪 Tests sobre cada función (modo notas)."
         }
       }
     },
@@ -160,7 +272,156 @@
           "highContrast": "#ef4444"
         }
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "complementairy",
+          "title": "ComplementAIry",
+          "icon": "media/cai.svg"
+        }
+      ]
+    },
+    "views": {
+      "complementairy": [
+        {
+          "id": "cai.panel",
+          "name": "Siguiente paso",
+          "icon": "media/cai.svg"
+        }
+      ]
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "cai.nota.responder",
+          "when": "false"
+        },
+        {
+          "command": "cai.nota.pista",
+          "when": "false"
+        },
+        {
+          "command": "cai.nota.piezas",
+          "when": "false"
+        },
+        {
+          "command": "cai.nota.pseudo",
+          "when": "false"
+        },
+        {
+          "command": "cai.nota.ejemplo",
+          "when": "false"
+        },
+        {
+          "command": "cai.nota.tests",
+          "when": "false"
+        },
+        {
+          "command": "cai.nota.plano",
+          "when": "false"
+        },
+        {
+          "command": "cai.nota.explica",
+          "when": "false"
+        },
+        {
+          "command": "cai.nota.resolver",
+          "when": "false"
+        },
+        {
+          "command": "cai.nota.insertar",
+          "when": "false"
+        },
+        {
+          "command": "cai.nota.pedir",
+          "when": "false"
+        },
+        {
+          "command": "cai.nota.abrir",
+          "when": "false"
+        },
+        {
+          "command": "cai.irA",
+          "when": "false"
+        },
+        {
+          "command": "cai.panel.refrescar",
+          "when": "false"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "cai.nota.responder",
+          "group": "inline",
+          "when": "commentController == complementairy"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "cai.nota.insertar",
+          "group": "inline@1",
+          "when": "commentController == complementairy && commentThread =~ /cai-snippet/"
+        },
+        {
+          "command": "cai.nota.resolver",
+          "group": "inline@2",
+          "when": "commentController == complementairy && commentThread =~ /cai-nota/"
+        },
+        {
+          "command": "cai.nota.pista",
+          "group": "ayuda@0",
+          "when": "commentController == complementairy && commentThread =~ /cai-nota/"
+        },
+        {
+          "command": "cai.nota.piezas",
+          "group": "ayuda@1",
+          "when": "commentController == complementairy && commentThread =~ /cai-nota/"
+        },
+        {
+          "command": "cai.nota.pseudo",
+          "group": "ayuda@2",
+          "when": "commentController == complementairy && commentThread =~ /cai-nota/"
+        },
+        {
+          "command": "cai.nota.ejemplo",
+          "group": "ayuda@3",
+          "when": "commentController == complementairy && commentThread =~ /cai-nota/"
+        },
+        {
+          "command": "cai.nota.tests",
+          "group": "ayuda@4",
+          "when": "commentController == complementairy && commentThread =~ /cai-nota/"
+        },
+        {
+          "command": "cai.nota.plano",
+          "group": "ayuda@5",
+          "when": "commentController == complementairy && commentThread =~ /cai-nota/"
+        },
+        {
+          "command": "cai.nota.explica",
+          "group": "ayuda@6",
+          "when": "commentController == complementairy && commentThread =~ /cai-nota/"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "cai.preguntar",
+          "group": "complementairy@1"
+        },
+        {
+          "command": "cai.pedirAqui",
+          "group": "complementairy@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "cai.panel.refrescar",
+          "when": "view == cai.panel",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "tsc -p .",

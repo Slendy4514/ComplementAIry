@@ -223,7 +223,7 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
         cwd: root,
         schema: RESUMEN_SCHEMA,
         sinHerramientas: true,
-        ...iaOpts(z.config, true),
+        ...iaOpts(z.config, "chico"),
         prompt: l.map((a) => `=== ${a.rel}\n${a.codigo.slice(0, 20_000)}`).join("\n\n"),
       });
       costo += costUsd;
@@ -255,7 +255,7 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
       cwd: root,
       schema: PANORAMA_SCHEMA,
       sinHerramientas: true,
-      ...iaOpts(z.config),
+      ...iaOpts(z.config, "grande"),
       prompt: [
         `Programador: ${nivelDe(Math.max(...Object.values(loadPerfil().temas).map((t) => t.puntaje), 0.3))}.`,
         contextBlock({ ...ctx, conocimiento: "" }),

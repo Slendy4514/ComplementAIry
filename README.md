@@ -53,15 +53,30 @@ Después escribe con tus palabras `.cai/proyecto.md` (qué buscas) y `.cai/regla
 
 ## Uso diario
 
+### En VSCode: notas en la línea exacta (por defecto)
+Lo que dice la IA aparece como **notas**: hilos al costado del código, como en la revisión de un PR. **El archivo no se toca**, así que el autoguardado no choca con nada.
+- **Cada nota tiene botones:** 💡 Pista · 🧩 Piezas · 📝 Pseudocódigo · 🔁 Ejemplo · 🧪 Tests · 🗺️ Plano · ❓ Explícame · ✓ Resuelta. Si sugiere un snippet, también tiene **Insertar aquí**, que lo pone dentro de la función con huecos para completar con Tab.
+- **Escribirle:** en la caja de la nota escribes y presionas Ctrl+Enter; la IA responde en el mismo hilo. "No entiendo" sube un escalón.
+- **Preguntar sobre código:** seleccionas y usas `Ctrl+Alt+G` (o clic derecho → "preguntar"). También puedes usar el **+** del margen en cualquier línea.
+- **Sobre cada función:** `💬 2 notas · 💡 Ayuda · 🧪 Tests`.
+- **Panel ComplementAIry** (barra lateral): **▶ Siguiente paso** (una sola cosa, elegida sin IA), Tareas con casillas (se marcan solas cuando creas la función), Notas por archivo y qué está haciendo la IA. `Ctrl+Alt+N` abre el siguiente paso.
+- **¿Está pensando?** La barra de estado muestra `⟳ revisando cuota.ts (12 s)` y la línea muestra "pensando…". Si pides otra cosa sobre el mismo archivo, te avisa en vez de pisar. Desde la barra de estado puedes cancelar o **silenciar 30 min**.
+- **Lo bloqueante** también aparece en el panel Problemas.
+
+¿Prefieres los comentarios `@guia` dentro del archivo, como antes? Usa `"vista": "comentarios"` en `.cai/config.json` (o el ajuste `cai.vista`). Desde VSCode, la revisión se aplica sobre el texto del editor, no en disco.
+
 | | VSCode | Terminal |
 |---|---|---|
-| Preguntar en el código (`// @ia? ...`) | `Ctrl+Alt+G` | `cai guia <archivo>` |
+| Preguntar (selección o línea) | `Ctrl+Alt+G` | `cai responder <archivo> --linea N --texto "..."` (o `// @ia? ...` + `cai guia <archivo>`) |
+| Siguiente paso | panel o `Ctrl+Alt+N` | `cai siguiente` |
+| Notas y tareas | panel | `cai notas [archivo]`, `cai tareas` |
+| Plano de un archivo | Ctrl+Shift+P → "plano de este archivo" | `cai plano --archivo <archivo>` |
 | Expandir o elegir un snippet | `Ctrl+Alt+E` | `cai expandir <archivo>` |
 | Crear un snippet tuyo | `Ctrl+Alt+S` (con selección) | `cai snippet nuevo <nombre> --archivo f --lineas a-b` |
 | Revisión completa | `Ctrl+Alt+R` | `cai revisar <archivo>` |
 | Acompañante (plano, ayuda, comentarios) | automático al guardar | `cai watch` |
 | Preguntas sueltas, comandos, errores | — | `cai pregunta "..."`, `cai explica -- <cmd>`, `cai corre -- <cmd>` + `cai error` |
-| Tests de una función (casos apagados en `tests/`) | `@ia? !tests` o Ctrl+Shift+P → "proponer tests" | `cai tests <archivo> <función>` |
+| Tests de una función (casos apagados en `tests/`) | botón 🧪 Tests | `cai tests <archivo> <función>` |
 | Visión del proyecto completo | `Ctrl+Alt+P` | `cai panorama` |
 | Memoria del proyecto (responder preguntas) | Ctrl+Shift+P → "memoria del proyecto" | `.cai/conocimiento.md` |
 | Consumo de IA | — | `cai uso` |
@@ -73,9 +88,15 @@ En un proyecto con `cai init`, el chat de Claude Code también es ComplementAIry
 - **No puede escribir tu código:** los hooks lo bloquean. Tampoco puede activar snippets (`cai expandir`), instalar (`cai init`), crear snippets ni declarar tu perfil: eso lo haces tú.
 
 ## Qué IA usa y cómo ahorra tokens
-**Modelo:**
-- Usa el que tengas por defecto en Claude Code. Para cambiarlo, edita `.cai/config.json` → `"ia": { "modelo": "claude-sonnet-5-5" }`.
-- Las tareas simples (consolidar revisiones) usan `ia.modeloRapido` (por defecto `claude-haiku-4-5`).
+**Modelo:** todos a través de tu sesión de Claude Code (sin API key), según el tamaño de la tarea:
+
+| Tamaño | Modelo por defecto | Para qué |
+|---|---|---|
+| chico | `claude-haiku-4-5` | comentario al terminar una función, ayuda al trabarte, consolidar |
+| mediano | `claude-sonnet-5-5` | responder notas, revisar un archivo, tests, plano de un archivo |
+| grande | `claude-opus-5-5` | panorama, plano del proyecto, conocer, arquitectura |
+
+Se cambian en `.cai/config.json` → `"ia": { "modelos": { "chico": "...", "mediano": "...", "grande": "..." } }`.
 
 **Cómo ahorra:**
 - **Las decisiones no las toma la IA:** cuándo ayudar, si cambió algo o si hay errores lo resuelven contadores, hashes y compiladores. Solo se llama a la IA cuando hay algo que redactar.

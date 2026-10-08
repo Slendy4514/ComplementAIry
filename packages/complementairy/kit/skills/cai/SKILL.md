@@ -9,8 +9,13 @@ En este proyecto el programador escribe el código y tú lo acompañas. Desde el
 
 | Si pide… | Corre | Qué pasa |
 |---|---|---|
-| ayuda con un archivo / responder sus `@ia?` | `cai guia <archivo>` | responde en el archivo con comentarios `@guia` |
-| revisión ("¿está bien?", "busca bugs") | `cai revisar <archivo>` | verificaciones deterministas + revisores, como comentarios |
+| "¿qué hago ahora?", "¿por dónde sigo?" | `cai siguiente` | una sola cosa, elegida sin IA (respuestas pendientes, errores, tareas, notas) |
+| ayuda sobre una línea o función | `cai responder <archivo> --linea N --texto "<pregunta>"` (o `--pedido pista\|piezas\|pseudo\|ejemplo\|tests\|explica`) | nota en esa línea (en modo notas el archivo no se toca) |
+| seguir una nota | `cai responder <archivo> --nota <id> --texto "..."` | responde en el mismo hilo |
+| ver notas / tareas | `cai notas [<archivo>]`, `cai tareas` | |
+| responder sus `@ia?` escritos en el archivo | `cai guia <archivo>` | en notas (por defecto) o en comentarios `@guia`, según `vista` |
+| plano de un archivo | `cai plano --archivo <archivo>` | resumen + nota por función + tareas por crear |
+| revisión ("¿está bien?", "busca bugs") | `cai revisar <archivo>` | verificaciones deterministas + revisores, como notas o comentarios |
 | tests de una función | `cai tests <archivo> <función>` | casos apagados en la carpeta de tests; él los activa con `[x]` |
 | "¿cómo sigo?", "qué opinas del proyecto" | `cai panorama` | `.cai/panorama.md` (resúmelo en el chat) y preguntas en `.cai/conocimiento.md` |
 | arquitectura del proyecto | `cai plano "<qué construye>"` | `docs/ESTRUCTURA.md` |
@@ -24,6 +29,7 @@ En este proyecto el programador escribe el código y tú lo acompañas. Desde el
 **Los hace el humano (están bloqueados para ti; sugiérele el comando):** `cai init`, `cai expandir` (activar snippets), `cai snippet nuevo`, `cai perfil set`.
 
 Además:
+- Si un comando sale con código 3, la IA ya está trabajando en ese archivo (lo pidió el editor): espera y vuelve a intentarlo, no lo fuerces.
 - Puedes responder en el chat o dejar comentarios `@guia[<id>] <tipo>: <texto>` en sus archivos (los hooks no te dejan cambiar código).
 - Lee `.cai/proyecto.md`, `.cai/reglas.md` y `.cai/conocimiento.md` antes de aconsejar. Lo marcado como `heredado` en `.cai/config.json` no lo escribió él.
 - Modo directo (plano, piezas, snippets sugeridos `snippet [ ]`); escalera de pistas solo en zonas críticas o si pide aprender.

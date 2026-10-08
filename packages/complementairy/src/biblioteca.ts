@@ -171,7 +171,12 @@ export async function planExpansion(
     }
     // Las líneas de continuación de la sugerencia (`@guia[id]   ...`) se van con ella.
     let hasta = c.row + 1;
-    if (p.id) while (hasta < lines.length && new RegExp(`^\\s*\\S+\\s*@guia\\[${p.id.replace(/\./g, "\\.")}\\]\\s{2,}`).test(lines[hasta]!)) hasta++;
+    // Se van con la sugerencia todas sus líneas (continuaciones y "docs:") hasta el próximo ítem con tipo.
+    if (p.id) {
+      const mismo = new RegExp(`^\\s*\\S+\\s*@guia\\[${p.id.replace(/[.]/g, "\\.")}\\]`);
+      const nuevoItem = new RegExp(`@guia\\[${p.id.replace(/[.]/g, "\\.")}\\] (?:pista|pieza|plano|pregunta|revision|ejemplo|nota|snippet)\\b`);
+      while (hasta < lines.length && mismo.test(lines[hasta]!) && !nuevoItem.test(lines[hasta]!)) hasta++;
+    }
     const indent = /^[ \t]*/.exec(lines[c.row]!)![0];
     const cuerpo = expandir(snip.body, llamada.args, modo, rel);
     const texto =

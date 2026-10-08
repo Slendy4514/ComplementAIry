@@ -9,6 +9,8 @@ import { ask, evitada } from "./llm.js";
 import { loadPerfil, nivelDe, puntaje, registrar } from "./profile.js";
 import { eolOf, renderReply } from "./render.js";
 import { nextThreadId, regionesTop } from "./threads.js";
+import { publicar, type Edicion } from "./salida.js";
+import { guardarDiagnosticos } from "./siguiente.js";
 import { iaOpts } from "./tutor.js";
 import { verifyCommentOnly } from "./verify.js";
 
@@ -99,7 +101,7 @@ async function consolidar(root: string, findings: Finding[], costo: (n: number) 
       cwd: root,
       schema: CONSOLIDAR_SCHEMA,
       sinHerramientas: true,
-      ...iaOpts(loadConfig(root), true),
+      ...iaOpts(loadConfig(root), "chico"),
       prompt: findings.map((f, i) => `[${i}] (línea ${f.line}, ${f.fuente}, ${f.etiqueta}${f.bloqueante ? ", bloqueante" : ""}) ${f.texto}`).join("\n"),
     });
     costo(costUsd);
@@ -125,6 +127,7 @@ export interface ReviewResult {
   corridas: Corrida[];
   bloqueantes: number;
   costoUsd: number;
+  ediciones?: Edicion[];
 }
 
 function findLine(lines: string[], codigo: string): number {
@@ -151,6 +154,8 @@ export interface ReviewOptions {
   sinIa?: boolean;
   /** Revisar todo aunque no haya cambiado desde la última revisión. */
   todo?: boolean;
+  /** Modo comentarios desde VSCode: devolver las inserciones en vez de escribir el archivo. */
+  ediciones?: boolean;
   solo?: string[];
   log?: (s: string) => void;
 }
@@ -228,7 +233,7 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
             system: SYSTEM,
             cwd: root,
             schema: SCHEMA,
-            ...iaOpts(z.config),
+            ...iaOpts(z.config, "mediano"),
             prompt: [
               `Foco de esta revisión: ${r.foco}.`,
               notaOrigen(origen),
@@ -261,7 +266,50 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
     findings.push(...(await consolidar(root, ai, (n) => (res.costoUsd += n))));
   }
 
-  // 3. Insertar sobre el archivo actual, de abajo hacia arriba, verificando cada inserción.
+  // Para "▶ Siguiente paso": lo que falló en las verificaciones queda registrado (sin IA).
+  guardarDiagnosticos(root, rel, gate.diags.filter((d) => d.bloqueante).map((d) => ({ linea: d.line, msg: `[${d.tool}] ${d.msg}`, archivo: d.file })));
+  res.bloqueantes = findings.filter((f) => f.bloqueante).length;
+  const guardarCache = () => {
+    if (sinIa) return;
+    cache[rel] = Object.fromEntries(regiones.map((r) => [r.key, r.hash]));
+    fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+    fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 2));
+  };
+
+  // 4. Perfil: la revisión es evidencia de cuánto domina el tema.
+  function terminarPerfil(): void {
+    const issues = findings.filter((f) => f.etiqueta === "issue").length;
+    if (!propio) return; // código heredado o de terceros: no cuenta en tu perfil
+    if (issues) registrar(lang!.id, -0.01 * Math.min(issues, 5), `revisión: ${issues} problema(s) en ${rel}`);
+    else if (src0.split("\n").length > 15) registrar(lang!.id, 0.02, `revisión sin problemas en ${rel}`);
+  }
+
+  // 3a. Vista notas (o ediciones para el editor): cada hallazgo, una nota en su línea. El archivo no se toca.
+  const vista = loadConfig(root).vista;
+  if (vista === "notas" || o.ediciones) {
+    const lineas0 = src0.split(/\r?\n/);
+    const sal = await publicar(
+      root,
+      rel,
+      findings.map((f) => ({
+        ancla: { linea: f.line, texto: (lineas0[f.line - 1] ?? "").trim() },
+        tipo: "revision",
+        titulo: `${f.etiqueta}${f.bloqueante ? " (bloqueante)" : ""}: ${f.texto.split(/[.:\n]/)[0]!.slice(0, 60)}`,
+        texto: `${f.etiqueta}${f.bloqueante ? " (blocking)" : ""}: ${f.texto}`,
+        links: f.links,
+        bloqueante: f.bloqueante,
+        origen: f.fuente.includes(":") || f.fuente === "reglas" ? "verificacion" : "revisar",
+      })),
+      { vista: o.ediciones ? "comentarios" : "notas", ediciones: !!o.ediciones },
+    );
+    res.insertados = vista === "notas" && !o.ediciones ? sal.notas.length : sal.ediciones.length;
+    res.ediciones = sal.ediciones;
+    guardarCache();
+    terminarPerfil();
+    return res;
+  }
+
+  // 3b. Comentarios en el archivo (terminal / otros editores), de abajo hacia arriba, verificando cada inserción.
   let src = fs.readFileSync(abs, "utf8");
   if (src !== src0) {
     res.omitidos.push("el archivo cambió durante la revisión; volvé a correrla para comentarios precisos");
@@ -283,19 +331,8 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
       res.insertados += byLine.get(line)!.length;
     } else res.omitidos.push(`no se pudo comentar la línea ${line} sin tocar código (¿dentro de un string?)`);
   }
-  res.bloqueantes = findings.filter((f) => f.bloqueante).length;
-  if (!sinIa) {
-    cache[rel] = Object.fromEntries(regiones.map((r) => [r.key, r.hash]));
-    fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
-    fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 2));
-  }
+  guardarCache();
   if (res.insertados) fs.writeFileSync(abs, src);
-
-  // 4. Perfil: la revisión es evidencia de cuánto domina el tema.
-  const issues = findings.filter((f) => f.etiqueta === "issue").length;
-  if (!propio) {
-    /* código heredado o de terceros: no cuenta en tu perfil */
-  } else if (issues) registrar(lang.id, -0.01 * Math.min(issues, 5), `revisión: ${issues} problema(s) en ${rel}`);
-  else if (src0.split("\n").length > 15) registrar(lang.id, 0.02, `revisión sin problemas en ${rel}`);
+  terminarPerfil();
   return res;
 }

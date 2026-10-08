@@ -91,7 +91,7 @@ export async function planoProyecto(root: string, descripcion?: string): Promise
     system: SYSTEM,
     cwd: root,
     schema: SCHEMA,
-    ...iaOpts(cfg),
+    ...iaOpts(cfg, "grande"),
     prompt: [
       descripcion ? `Qué se quiere construir: ${descripcion}` : "",
       `Programador: ${nivel}.`,

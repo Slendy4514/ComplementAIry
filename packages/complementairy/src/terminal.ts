@@ -62,7 +62,7 @@ export async function explica(root: string, cmd: string): Promise<string> {
     system: BASE,
     cwd: root,
     schema: EXPLICA_SCHEMA,
-    ...iaOpts(loadConfig(root)),
+    ...iaOpts(loadConfig(root), "mediano"),
     prompt: `Explicá qué hace este comando, parte por parte, y qué riesgos tiene. Programador: ${nivel} en ${tema}.\nDirectorio: ${root}\nComando: ${cmd}`,
   });
   const out = [`\n${data.resumen}\n`];
@@ -117,7 +117,7 @@ async function responder(root: string, c: Conversacion): Promise<string> {
     system: `${BASE}\n${LADDER}`,
     cwd: root,
     schema: RESP_SCHEMA,
-    ...iaOpts(loadConfig(root)),
+    ...iaOpts(loadConfig(root), "mediano"),
     prompt: [
       `Nivel MÁXIMO de la escalera: ${c.nivel}. Programador: ${nivelProg} en ${c.tema}.`,
       ctx,

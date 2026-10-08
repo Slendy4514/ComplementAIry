@@ -112,7 +112,7 @@ export async function arquitectura(root: string, tema: string): Promise<{ file: 
     system: SYSTEM,
     cwd: root,
     schema: SCHEMA,
-    ...iaOpts(cfg),
+    ...iaOpts(cfg, "grande"),
     prompt: [`Tema a decidir: ${tema}`, `Programador: ${nivel}.`, contextBlock(projectContext(root, "docs/adr/x.md"))].filter(Boolean).join("\n\n"),
   });
   return { file: nuevoAdr(root, data.titulo || tema, data), costoUsd: costUsd };

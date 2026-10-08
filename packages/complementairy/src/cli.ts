@@ -20,12 +20,17 @@ import { acompanar } from "./acompanante.js";
 import { planoProyecto } from "./plano.js";
 import { proponerTests } from "./tests.js";
 import { panorama } from "./panorama.js";
+import { enCurso, OcupadoError, ocuparEsperando } from "./ocupado.js";
+import { responderNota } from "./responder.js";
+import { cargarNotas, guardarNotas, nuevaNota, mensaje, todasLasNotas } from "./notas.js";
+import { cargarTareas, guardarTareas, siguiente } from "./siguiente.js";
+import { planoArchivo } from "./planoArchivo.js";
 import { conContenido, conocer, sugerirAutoria } from "./conocer.js";
 import { createInterface } from "node:readline/promises";
 import { dataDir, loadConfig, origenDe } from "./config.js";
 import { leerUso } from "./llm.js";
 import { crearSnippet } from "./snippets.js";
-import { aplicarExpansion, biblioteca, paraLenguaje, planExpansion } from "./biblioteca.js";
+import { aplicarExpansion, biblioteca, expandir, paraLenguaje, parseLlamada, planExpansion } from "./biblioteca.js";
 import { runReview } from "./review.js";
 import { runGate } from "./gate.js";
 import { runCheck, runPredecir } from "./predict.js";
@@ -103,7 +108,7 @@ function stagedFiles(root: string): { file: string; text: string }[] {
   return names.map((file) => ({ file, text: execFileSync("git", ["show", `:${file}`], { cwd: root, maxBuffer: 64 << 20 }).toString() }));
 }
 
-async function main(argv: string[]): Promise<number> {
+async function ejecutar(argv: string[]): Promise<number> {
   const [cmd, sub, ...rest] = argv;
   const root = projectRoot();
 
@@ -215,6 +220,17 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "snippet": {
+      if (sub === "cuerpo") {
+        // cai snippet cuerpo <archivo> "<nombre clave=valor ...>" → el snippet en formato VSCode (con huecos)
+        const [archivo, llamadaTxt] = rest;
+        const lang = archivo ? langFor(archivo) : null;
+        const ll = llamadaTxt ? parseLlamada(llamadaTxt) : null;
+        if (!lang || !ll) throw new Error('uso: cai snippet cuerpo <archivo> "<nombre clave=valor>"');
+        const sn = paraLenguaje(biblioteca(root), lang.id).find((x) => x.nombre === ll.nombre);
+        if (!sn) throw new Error(`no existe el snippet "${ll.nombre}" para ${lang.id}`);
+        process.stdout.write(JSON.stringify({ nombre: sn.nombre, cuerpo: expandir(sn.body, ll.args, "vscode", archivo) }));
+        return 0;
+      }
       if (sub === "lista") {
         const archivo = rest.find((a) => !a.startsWith("--"));
         const lang = archivo ? langFor(archivo) : null;
@@ -247,9 +263,14 @@ async function main(argv: string[]): Promise<number> {
       const r = await runReview(root, rel, {
         sinIa: rest.includes("--sin-ia"),
         todo: rest.includes("--todo"),
+        ediciones: rest.includes("--ediciones"),
         ...(soloI >= 0 && rest[soloI + 1] ? { solo: rest[soloI + 1]!.split(",") } : {}),
-        log: (l) => console.log(l),
+        log: rest.includes("--json") ? () => {} : (l) => console.log(l),
       });
+      if (rest.includes("--json")) {
+        process.stdout.write(JSON.stringify(r));
+        return 0;
+      }
       for (const c of r.corridas) console.log(`  ${c.estado === "ok" ? "✓" : c.estado === "con hallazgos" ? "✗" : "·"} ${c.tool}: ${c.estado}${c.detalle ? ` (${c.detalle})` : ""}`);
       console.log(`✓ ${r.insertados} comentario(s) de revisión agregados (${r.bloqueantes} bloqueante(s))${r.costoUsd ? ` · US$${r.costoUsd.toFixed(3)}` : ""}`);
       for (const o of r.omitidos) console.log(`  ! ${o}`);
@@ -333,6 +354,120 @@ async function main(argv: string[]): Promise<number> {
       console.log(`✓ ${path.relative(root, nuevoAdr(root, rest.join(" ")))}`);
       return 0;
     }
+    case "responder": {
+      // cai responder <archivo> (--nota <id> | --linea <n>) [--pedido pseudo] [--texto "..."] [--seleccion "..."] [--json]
+      if (!sub) throw new Error('uso: cai responder <archivo> (--nota <id> | --linea <n>) [--pedido pista|piezas|pseudo|ejemplo|plano|snippet|tests|explica] [--texto "..."]');
+      const opt = (k: string) => (rest.includes(k) ? rest[rest.indexOf(k) + 1] : undefined);
+      const json = rest.includes("--json");
+      try {
+        const r = await responderNota(
+          root,
+          {
+            archivo: path.relative(root, path.resolve(sub)),
+            ...(opt("--nota") ? { notaId: opt("--nota")! } : {}),
+            ...(opt("--linea") ? { linea: Number(opt("--linea")) } : {}),
+            ...(opt("--pedido") ? { pedido: opt("--pedido")! } : {}),
+            ...(opt("--texto") ? { texto: opt("--texto")! } : {}),
+            ...(opt("--seleccion") ? { seleccion: opt("--seleccion")! } : {}),
+          },
+          json ? () => {} : (l) => console.log(l),
+        );
+        if (json) process.stdout.write(JSON.stringify({ nota: r.nota, costoUsd: r.costoUsd }));
+        else console.log(`✓ nota ${r.nota.id} (${r.nota.archivo}:${r.nota.ancla.linea}) · ${r.nota.titulo}\n${r.nota.hilo[r.nota.hilo.length - 1]?.texto ?? ""}`);
+        return 0;
+      } catch (e) {
+        if (json && e instanceof OcupadoError) {
+          process.stdout.write(JSON.stringify({ mensaje: e.message, ocupado: true }));
+          return 3;
+        }
+        throw e;
+      }
+    }
+    case "notas": {
+      // cai notas [<archivo>|--todas] [--json] · cai notas resolver <archivo> <id> · cai notas importar <archivo>
+      if (sub === "resolver") {
+        const [archivo, id] = rest;
+        if (!archivo || !id) throw new Error("uso: cai notas resolver <archivo> <id>");
+        const rel = path.relative(root, path.resolve(archivo));
+        const notas = cargarNotas(root, rel);
+        const n = notas.find((x) => x.id === id);
+        if (!n) throw new Error(`no existe la nota ${id}`);
+        n.estado = "resuelta";
+        n.actualizada = new Date().toISOString();
+        guardarNotas(root, rel, notas);
+        console.log(`✓ ${id} resuelta`);
+        return 0;
+      }
+      if (sub === "importar") {
+        if (!rest[0]) throw new Error("uso: cai notas importar <archivo>");
+        const rel = path.relative(root, path.resolve(rest[0]));
+        const abs = path.join(root, rel);
+        const src = fs.readFileSync(abs, "utf8");
+        const guias = await conversation(rel, src, ["guia"]);
+        const grupos = new Map<string, typeof guias>();
+        for (const c of guias) {
+          const id = /^@guia\[([\w-]+)\./.exec(c.content)?.[1] ?? c.content.slice(0, 12);
+          grupos.set(id, [...(grupos.get(id) ?? []), c]);
+        }
+        const notas = cargarNotas(root, rel, src);
+        const lineas = src.split(/\r?\n/);
+        for (const [, cs] of grupos) {
+          let l = cs[cs.length - 1]!.row + 2;
+          while (l <= lineas.length && /^\s*(\/\/|#|--|\/\*|\*|<!--|$)/.test(lineas[l - 1]!)) l++;
+          const texto = cs.map((c) => c.content.replace(/^@guia\[[^\]]*\]\s*/, "")).join("\n");
+          const tipo = /^(\w+)/.exec(texto)?.[1] ?? "nota";
+          nuevaNota(notas, { archivo: rel, ancla: { linea: Math.min(l, lineas.length), texto: (lineas[l - 1] ?? "").trim() }, tipo, titulo: texto.replace(/^\w+( \[.\])?:\s*/, "").slice(0, 60), origen: "importada", hilo: [mensaje("ia", texto)] });
+        }
+        guardarNotas(root, rel, notas);
+        const { text, removed } = await cleanText(rel, src, ["guia"]);
+        if (removed) fs.writeFileSync(abs, text);
+        console.log(`✓ ${grupos.size} nota(s) importadas; ${removed} comentario(s) @guia quitados de ${rel}`);
+        return 0;
+      }
+      const lista = sub && sub !== "--todas" && sub !== "--json" ? cargarNotas(root, path.relative(root, path.resolve(sub))) : todasLasNotas(root);
+      if ([sub, ...rest].includes("--json")) {
+        process.stdout.write(JSON.stringify(lista));
+        return 0;
+      }
+      const abiertas = lista.filter((n) => n.estado === "abierta");
+      for (const n of abiertas) console.log(`${n.bloqueante ? "⚠" : "·"} ${n.archivo}:${n.ancla.linea}${n.desanclada ? " (desanclada)" : ""}  [${n.id}] ${n.titulo}${n.accion ? `\n    → ${n.accion}` : ""}`);
+      if (!abiertas.length) console.log("(sin notas abiertas)");
+      return 0;
+    }
+    case "siguiente": {
+      const pasos = await siguiente(root);
+      const ocup = enCurso(root);
+      if (argv.includes("--json")) {
+        process.stdout.write(JSON.stringify({ pasos, ocupado: ocup }));
+        return 0;
+      }
+      for (const o of ocup) console.log(`⏳ La IA está ${o.tarea}${o.archivo !== "__proyecto__" ? ` en ${o.archivo}` : ""}`);
+      const p = pasos[0];
+      if (!p) console.log("✓ Nada pendiente. Sigue con tu plan o pide un panorama (cai panorama).");
+      else {
+        console.log(`▶ ${p.accion}${p.archivo ? `  (${p.archivo}${p.linea ? `:${p.linea}` : ""})` : ""}\n  ${p.titulo}`);
+        if (pasos.length > 1) console.log(`\nDespués:\n${pasos.slice(1, 6).map((x) => `  · ${x.accion}${x.archivo ? ` (${x.archivo}${x.linea ? `:${x.linea}` : ""})` : ""}`).join("\n")}`);
+      }
+      return 0;
+    }
+    case "tareas": {
+      const tareas = cargarTareas(root);
+      if (sub === "hecha" || sub === "pendiente") {
+        const t = tareas.find((x) => x.id === rest[0]);
+        if (!t) throw new Error(`no existe la tarea ${rest[0]}`);
+        t.hecha = sub === "hecha";
+        guardarTareas(root, tareas);
+        console.log(`✓ ${t.id}: ${t.hecha ? "hecha" : "pendiente"}`);
+        return 0;
+      }
+      if (argv.includes("--json")) {
+        process.stdout.write(JSON.stringify(tareas));
+        return 0;
+      }
+      for (const t of tareas) console.log(`${t.hecha ? "☑" : "☐"} [${t.id}] ${t.titulo}`);
+      if (!tareas.length) console.log("(sin tareas: salen del plano de cada archivo y del panorama)");
+      return 0;
+    }
     case "acompanar": {
       if (!sub) throw new Error("uso: cai acompanar <archivo>");
       const json = rest.includes("--json");
@@ -347,6 +482,13 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "plano": {
+      if (argv.includes("--archivo")) {
+        const f = argv[argv.indexOf("--archivo") + 1];
+        if (!f) throw new Error("uso: cai plano --archivo <archivo>");
+        const r = await planoArchivo(root, path.relative(root, path.resolve(f)));
+        console.log(`✓ plano de ${f}: ${r.notas} nota(s), ${r.tareas} tarea(s) nueva(s) · US$${r.costoUsd.toFixed(3)}`);
+        return 0;
+      }
       const desc = argv.slice(1).join(" ").trim();
       const r = await planoProyecto(root, desc || undefined);
       console.log(`✓ ${path.relative(root, r.file)} con la propuesta de arquitectura · US$${r.costoUsd.toFixed(3)}\n  Pregunta o pide cambios con <!-- @ia? ... --> en ese archivo (Ctrl+Alt+G).`);
@@ -463,6 +605,44 @@ async function main(argv: string[]): Promise<number> {
   }
   console.error(HELP);
   return 2;
+}
+
+/** Qué está haciendo la IA (para el bloqueo y la barra de estado de la extensión). */
+const TAREA: Record<string, string> = {
+  guia: "respondiendo tus preguntas",
+  revisar: "revisando",
+  predecir: "preparando predicciones",
+  check: "comprobando predicciones",
+  tests: "proponiendo tests",
+  panorama: "mirando el proyecto completo",
+  conocer: "conociendo el proyecto",
+  plano: "armando el plano",
+  arquitectura: "preparando la decisión de arquitectura",
+};
+
+/** Un pedido a la vez por archivo (o por proyecto): si ya hay uno en curso, se avisa y no se pisa. */
+async function main(argv: string[]): Promise<number> {
+  const [cmd, sub] = argv;
+  const root = projectRoot();
+  const relDe = (f: string) => path.relative(root, path.resolve(f));
+  let objetivo: string | null = null;
+  if (cmd === "guia" && sub && !["list", "clean", "check"].includes(sub)) objetivo = relDe(sub);
+  else if (["revisar", "predecir", "check", "tests"].includes(cmd ?? "") && sub) objetivo = relDe(sub);
+  else if (cmd === "plano" && argv.includes("--archivo")) objetivo = relDe(argv[argv.indexOf("--archivo") + 1] ?? ".");
+  else if (["panorama", "conocer", "plano", "arquitectura"].includes(cmd ?? "")) objetivo = "__proyecto__";
+  if (!objetivo) return ejecutar(argv);
+  const r = await ocuparEsperando(root, objetivo, TAREA[cmd!] ?? cmd!);
+  if (!r.ok) {
+    const msg = `ya estoy ${r.por.tarea}${r.por.archivo !== "__proyecto__" ? ` en ${r.por.archivo}` : ""} (desde hace ${Math.round((Date.now() - Date.parse(r.por.desde)) / 1000)} s); espera a que termine`;
+    if (argv.includes("--json")) process.stdout.write(JSON.stringify({ ocupado: r.por, mensaje: msg }));
+    else console.error(`cai: ${msg}`);
+    return 3;
+  }
+  try {
+    return await ejecutar(argv);
+  } finally {
+    r.liberar();
+  }
 }
 
 main(process.argv.slice(2)).then(

@@ -1,46 +1,29 @@
 import { execFile } from "node:child_process";
 import * as vscode from "vscode";
+import { Acciones, insertarSnippet, revisarConEdiciones } from "./acciones";
+import { Lentes } from "./codelens";
+import { cli, correr, envVista, guardadoPropio, guardar, mostrarError, output, root, silenciado, vista } from "./comun";
+import { Estado } from "./estado";
+import { NotasView } from "./notasView";
+import { Panel } from "./panel";
 
 /**
- * Capa fina sobre la CLI `cai`: atajos, progreso y resaltado. Toda la lógica (y todas
- * las garantías) están en la CLI; la extensión solo la invoca sobre el archivo abierto.
+ * Capa sobre la CLI `cai`: notas en la línea exacta (hilos con botones), panel "Siguiente paso",
+ * barra de estado "pensando…", CodeLens y snippets que insertas tú. Toda la lógica (y todas las
+ * garantías) están en la CLI; la extensión la invoca y muestra lo que deja en .cai/.
  */
-
-let output: vscode.OutputChannel;
-let status: vscode.StatusBarItem;
-
-function cli(): string {
-  return vscode.workspace.getConfiguration("cai").get<string>("comando", "cai");
-}
-
-function root(doc?: vscode.TextDocument): string | undefined {
-  const folder = doc ? vscode.workspace.getWorkspaceFolder(doc.uri) : vscode.workspace.workspaceFolders?.[0];
-  return folder?.uri.fsPath;
-}
 
 const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
 
-function run(args: string[], cwd: string, titulo: string): Promise<string> {
-  output.appendLine(`$ ${cli()} ${args.join(" ")}`);
-  status.text = `$(sync~spin) ComplementAIry: ${titulo}`;
-  status.show();
-  return new Promise((resolve, reject) => {
-    execFile("sh", ["-c", `${cli()} ${args.map(shq).join(" ")}`], { cwd, maxBuffer: 16 << 20, env: { ...process.env, CLAUDE_PROJECT_DIR: cwd } }, (err, stdout, stderr) => {
-      status.hide();
-      output.append(stdout);
-      if (stderr) output.append(stderr);
-      if (err && !stdout.trim()) reject(new Error(stderr.trim() || err.message));
-      else resolve(stdout.trim());
-    });
-  });
-}
+// `check` sale con 1 cuando alguna predicción no coincidió: es un resultado, no un error.
+const run = (args: string[], cwd: string, _titulo?: string): Promise<string> => correr(args, cwd, args[0] === "check" ? { aceptar: [1] } : {});
 
 async function onFile(cmd: string, titulo: string, extra: string[] = []): Promise<void> {
   const ed = vscode.window.activeTextEditor;
-  if (!ed) return void vscode.window.showWarningMessage("ComplementAIry: abrí un archivo primero.");
+  if (!ed) return void vscode.window.showWarningMessage("ComplementAIry: abre un archivo primero.");
   const cwd = root(ed.document);
   if (!cwd) return void vscode.window.showWarningMessage("ComplementAIry: el archivo no está dentro de un proyecto abierto.");
-  if (ed.document.isDirty) await ed.document.save();
+  await guardar(ed.document);
   try {
     const out = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: `ComplementAIry: ${titulo}…`, cancellable: false },
@@ -49,7 +32,7 @@ async function onFile(cmd: string, titulo: string, extra: string[] = []): Promis
     const resumen = out.split("\n").filter((l) => /^[✓✗!]/.test(l.trim())).slice(-2).join(" · ");
     vscode.window.setStatusBarMessage(`ComplementAIry: ${resumen || "listo"}`, 6000);
   } catch (e) {
-    vscode.window.showErrorMessage(`ComplementAIry: ${(e as Error).message}`, "Ver salida").then((v) => v && output.show());
+    mostrarError(e);
   }
 }
 
@@ -92,21 +75,62 @@ function decorate(ed: vscode.TextEditor | undefined): void {
 }
 
 export function activate(ctx: vscode.ExtensionContext): void {
-  output = vscode.window.createOutputChannel("ComplementAIry");
-  status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+  envVista();
   const reg = (id: string, fn: () => unknown) => ctx.subscriptions.push(vscode.commands.registerCommand(id, fn));
 
-  reg("cai.guia", () => onFile("guia", "respondiendo tus @ia?"));
-  reg("cai.revisar", () => onFile("revisar", "revisando"));
+  const estado = new Estado();
+  estado.registrar(ctx);
+  const notas = new NotasView((doc, n, i) => insertarSnippet(doc, n, i));
+  notas.registrar(ctx);
+  new Acciones(notas).registrar(ctx);
+  new Lentes(notas).registrar(ctx);
+  new Panel(estado).registrar(ctx);
+
+  const vistaActual = () => {
+    const cwd = root(vscode.window.activeTextEditor?.document);
+    return cwd ? vista(cwd) : "notas";
+  };
+  // Ctrl+Alt+G: en modo notas, preguntar sobre la selección/línea; en modo comentarios, responder los @ia? del archivo.
+  reg("cai.guia", () => (vistaActual() === "notas" ? vscode.commands.executeCommand("cai.preguntar") : onFile("guia", "respondiendo tus @ia?")));
+  reg("cai.responderIa", () => onFile("guia", "respondiendo tus @ia?"));
+  reg("cai.revisar", async () => {
+    const ed = vscode.window.activeTextEditor;
+    const cwd = root(ed?.document);
+    if (!ed || !cwd) return;
+    if (vista(cwd) === "notas") return onFile("revisar", "revisando");
+    // Modo comentarios: los comentarios se aplican sobre el texto del editor (no en disco).
+    try {
+      const msg = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: revisando…" }, () => revisarConEdiciones(ed, cwd));
+      vscode.window.setStatusBarMessage(`ComplementAIry: ${msg}`, 8000);
+    } catch (e) {
+      mostrarError(e);
+    }
+  });
+  reg("cai.plano", async () => {
+    const ed = vscode.window.activeTextEditor;
+    const cwd = root(ed?.document);
+    if (!ed || !cwd) return;
+    await guardar(ed.document);
+    try {
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: armando el plano del archivo…" }, () => run(["plano", "--archivo", ed.document.uri.fsPath], cwd));
+      vscode.window.setStatusBarMessage("ComplementAIry: plano listo (notas junto a cada función y tareas en el panel)", 8000);
+    } catch (e) {
+      mostrarError(e);
+    }
+  });
   reg("cai.predecir", () => onFile("predecir", "preparando preguntas"));
   reg("cai.check", () => onFile("check", "comprobando predicciones"));
   reg("cai.limpiar", async () => {
     const ed = vscode.window.activeTextEditor;
     const cwd = root(ed?.document);
     if (!ed || !cwd) return;
-    if (ed.document.isDirty) await ed.document.save();
-    const out = await run(["guia", "clean", ed.document.uri.fsPath], cwd, "limpiando");
-    vscode.window.setStatusBarMessage(`ComplementAIry: ${out.split("\n").pop()}`, 5000);
+    await guardar(ed.document);
+    try {
+      const out = await run(["guia", "clean", ed.document.uri.fsPath], cwd, "limpiando");
+      vscode.window.setStatusBarMessage(`ComplementAIry: ${out.split("\n").pop()}`, 5000);
+    } catch (e) {
+      mostrarError(e);
+    }
   });
   reg("cai.snippet", async () => {
     const ed = vscode.window.activeTextEditor;
@@ -114,7 +138,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     if (!ed || !cwd || ed.selection.isEmpty) return void vscode.window.showWarningMessage("ComplementAIry: seleccioná el código que repetís.");
     const nombre = await vscode.window.showInputBox({ prompt: "Nombre del snippet (lo escribís + Tab para usarlo)", validateInput: (v) => (/^[\w-]+$/.test(v) ? null : "Solo letras, números, - y _") });
     if (!nombre) return;
-    if (ed.document.isDirty) await ed.document.save();
+    await guardar(ed.document);
     const a = ed.selection.start.line + 1;
     const b = ed.selection.end.character === 0 && ed.selection.end.line > ed.selection.start.line ? ed.selection.end.line : ed.selection.end.line + 1;
     try {
@@ -123,7 +147,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       await vscode.window.showTextDocument(doc, { preview: false });
       vscode.window.showInformationMessage("Snippet creado. Reemplazá lo que cambia cada vez por ${1:nombre}, ${2:otro}…");
     } catch (e) {
-      vscode.window.showErrorMessage(`ComplementAIry: ${(e as Error).message}`);
+      mostrarError(e);
     }
   });
   reg("cai.explica", async () => {
@@ -131,21 +155,28 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const sel = ed?.document.getText(ed.selection).trim() || (await vscode.window.showInputBox({ prompt: "Comando a explicar (no se ejecuta)" }));
     const cwd = root(ed?.document);
     if (!sel || !cwd) return;
-    const out = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: explicando…" }, () => run(["explica", "--", sel], cwd, "explicando"));
-    output.show(true);
-    void out;
+    try {
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: explicando…" }, () => run(["explica", "--", sel], cwd, "explicando"));
+      output.show(true);
+    } catch (e) {
+      mostrarError(e);
+    }
   });
   reg("cai.perfil", async () => {
     const cwd = root(vscode.window.activeTextEditor?.document) ?? process.cwd();
-    await run(["perfil"], cwd, "perfil");
-    output.show(true);
+    try {
+      await run(["perfil"], cwd, "perfil");
+      output.show(true);
+    } catch (e) {
+      mostrarError(e);
+    }
   });
 
   reg("cai.expandir", async () => {
     const ed = vscode.window.activeTextEditor;
     const cwd = root(ed?.document);
     if (!ed || !cwd) return;
-    if (ed.document.isDirty) await ed.document.save();
+    await guardar(ed.document);
     const file = ed.document.uri.fsPath;
     const linea = ed.selection.active.line + 1;
     try {
@@ -167,39 +198,36 @@ export function activate(ctx: vscode.ExtensionContext): void {
       );
       if (pick) await ed.insertSnippet(new vscode.SnippetString(pick.body));
     } catch (e) {
-      vscode.window.showErrorMessage(`ComplementAIry: ${(e as Error).message}`);
+      mostrarError(e);
     }
   });
 
-  // Acompañante: al guardar, en segundo plano (uno a la vez por archivo).
-  const enCurso = new Set<string>();
+  // Acompañante: al guardar, en segundo plano. La CLI deja UN pedido en espera si ya hay otro en curso.
   ctx.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (!vscode.workspace.getConfiguration("cai").get<boolean>("acompanar", true)) return;
+      // Los guardados que hace la extensión antes de un pedido tuyo no disparan el acompañante.
+      if (!vscode.workspace.getConfiguration("cai").get<boolean>("acompanar", true) || silenciado() || guardadoPropio(doc)) return;
       const cwd = root(doc);
       const file = doc.uri.fsPath;
-      if (!cwd || enCurso.has(file) || /[\\/](\.cai|\.claude|node_modules|\.git)[\\/]/.test(file)) return;
-      enCurso.add(file);
-      status.text = "$(eye) ComplementAIry";
-      status.show();
+      if (!cwd || doc.uri.scheme !== "file" || /[\\/](\.cai|\.aicode|\.claude|node_modules|\.git)[\\/]/.test(file)) return;
       execFile("sh", ["-c", `${cli()} acompanar ${shq(file)} --json`], { cwd, maxBuffer: 16 << 20, env: { ...process.env, CLAUDE_PROJECT_DIR: cwd } }, (err, stdout, stderr) => {
-        enCurso.delete(file);
-        status.hide();
         if (err) {
           output.appendLine(`acompañante: ${stderr || err.message}`);
           return;
         }
         try {
-          const r = JSON.parse(stdout) as { acciones: { tipo: string; detalle: string }[] };
+          const r = JSON.parse(stdout) as { acciones: { tipo: string; detalle: string }[]; pendiente?: boolean };
+          if (r.pendiente) return void vscode.window.setStatusBarMessage("ComplementAIry: sigo con lo anterior; reviso este guardado al terminar", 5000);
+          const enNotas = vista(cwd) === "notas";
           const msgs: Record<string, string> = {
             expandido: "snippet expandido",
-            respondido: "respondí tus @ia?",
+            respondido: enNotas ? "respondí en las notas" : "respondí tus @ia?",
             "plano-proyecto": "te dejé una propuesta de arquitectura en docs/ESTRUCTURA.md",
-            "plano-archivo": "te dejé el plano de este archivo",
+            "plano-archivo": enNotas ? "te dejé el plano de este archivo (notas + tareas)" : "te dejé el plano de este archivo",
             ayuda: "vi que esta parte te está costando: te dejé una pista",
-            comentario: "te dejé comentarios sobre lo que terminaste",
+            comentario: enNotas ? "te dejé notas sobre lo que terminaste" : "te dejé comentarios sobre lo que terminaste",
             diseno: "te dejé una sugerencia de diseño",
-            "sin-tests": "esta función no tiene tests (pídelos con !tests)",
+            "sin-tests": "esta función no tiene tests (botón 🧪 Tests)",
             resuelto: "¡resuelto!",
           };
           const txt = r.acciones.map((a) => msgs[a.tipo] ?? a.tipo).join(" · ");
@@ -234,7 +262,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: mirando el proyecto completo…" }, () => run(["panorama"], cwd, "panorama"));
       await abrir(cwd, "panorama.md");
     } catch (e) {
-      vscode.window.showErrorMessage(`ComplementAIry: ${(e as Error).message}`);
+      mostrarError(e);
     }
   });
   reg("cai.conocimiento", async () => {
@@ -248,7 +276,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     // La función bajo el cursor: la última "function nombre" / "const nombre =" antes de la línea.
     const antes = ed.document.getText(new vscode.Range(0, 0, ed.selection.active.line + 1, 0));
     const m = [...antes.matchAll(/(?:function\s+|const\s+|def\s+)([A-Za-z_$][\w$]*)/g)].pop();
-    if (ed.document.isDirty) await ed.document.save();
+    await guardar(ed.document);
     try {
       const out = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: proponiendo casos de prueba…" }, () =>
         run(["tests", ed.document.uri.fsPath, ...(m ? [m[1]!] : [])], cwd, "tests"),
@@ -256,7 +284,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       const archivo = /en (\S+\.(?:test\.\w+|py))/.exec(out)?.[1];
       if (archivo) await vscode.window.showTextDocument(vscode.Uri.joinPath(vscode.Uri.file(cwd), archivo), { preview: false });
     } catch (e) {
-      vscode.window.showErrorMessage(`ComplementAIry: ${(e as Error).message}`);
+      mostrarError(e);
     }
   });
 
@@ -266,13 +294,16 @@ export function activate(ctx: vscode.ExtensionContext): void {
   decorate(vscode.window.activeTextEditor);
   ctx.subscriptions.push(
     output,
-    status,
     vscode.window.onDidChangeActiveTextEditor(decorate),
     vscode.workspace.onDidChangeTextDocument((e) => {
       const ed = vscode.window.activeTextEditor;
       if (ed && e.document === ed.document) decorate(ed);
     }),
-    vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration("cai") && decorate(vscode.window.activeTextEditor)),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration("cai")) return;
+      envVista();
+      decorate(vscode.window.activeTextEditor);
+    }),
   );
 }
 

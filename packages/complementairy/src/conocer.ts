@@ -155,7 +155,7 @@ export async function conocer(
     system: SISTEMA,
     cwd: root,
     schema: SCHEMA,
-    ...iaOpts(z.config),
+    ...iaOpts(z.config, "grande"),
     prompt: [
       `Stack detectado: ${detectAdapters(root).map((a) => a.id).join(", ") || "(no detectado)"}.`,
       pj ? `package.json: nombre ${String(pj.name ?? "")}; descripción ${String(pj.description ?? "")}; scripts ${Object.keys((pj.scripts as object) ?? {}).join(", ")}; dependencias ${[...Object.keys((pj.dependencies as object) ?? {}), ...Object.keys((pj.devDependencies as object) ?? {})].join(", ")}` : "",

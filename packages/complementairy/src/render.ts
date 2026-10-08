@@ -15,6 +15,17 @@ export interface Reply {
 
 const WIDTH = 100;
 
+/**
+ * Listas en líneas separadas: "Pasos: 1) a 2) b" → "Pasos:\n1) a\n2) b". También "- " y "N. " después
+ * de una pausa (":", ".", ";"). Sirve para comentarios y para notas (markdown).
+ */
+export function separarListas(t: string): string {
+  return t
+    .replace(/\s+(?=\d{1,2}\)\s)/g, "\n")
+    .replace(/(?<=[:.;!?])\s+(?=(?:\d{1,2}\.|[-•])\s)/g, "\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
 function wrap(text: string, width: number): string[] {
   const out: string[] = [];
   for (const para of text.split(/\n+/)) {
@@ -46,7 +57,7 @@ export function renderReply(lang: LangSpec, indent: string, id: string, r: Reply
     return [first, ...extra];
   }
   const head = `@guia[${id}] ${r.tipo}:`;
-  const body = wrap(sanitizeGuia(r.texto.replace(/-->|\*\/|\\\s*$/g, "—")), WIDTH - indent.length - head.length).map((l) => l.replace(/\\$/, "\\ "));
+  const body = wrap(sanitizeGuia(separarListas(r.texto).replace(/-->|\*\/|\\\s*$/g, "—")), WIDTH - indent.length - head.length).map((l) => l.replace(/\\$/, "\\ "));
   // Links: solo http(s) sin caracteres que puedan cerrar un comentario.
   const links = (r.links ?? []).filter((l) => /^https?:\/\/\S+$/.test(l) && !/\*\/|-->|\\$/.test(l)).map(sanitizeGuia);
   if (lang.line) {
