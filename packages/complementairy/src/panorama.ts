@@ -10,8 +10,8 @@ import { ask, evitada, leerUso } from "./llm.js";
 import { funcionesSinTests, medir, violaciones, type Violacion } from "./metricas.js";
 import { loadPerfil, nivelDe } from "./profile.js";
 import { findThreads } from "./threads.js";
-import { agregarPreguntas, parseMemoria, sinSugerencia, sugerenciaDe, unaLinea, type Memoria } from "./memoria.js";
-import { agregarTareas, cargarTareas, guardarTareas } from "./siguiente.js";
+import { agregarPreguntas, parseMemoria, sinSugerencia, sobreElCodigo, sugerenciaDe, unaLinea, type Memoria } from "./memoria.js";
+import { agregarTareas, cargarTareas, guardarTareas, rutasDe } from "./siguiente.js";
 import { iaOpts } from "./tutor.js";
 
 /**
@@ -31,6 +31,7 @@ interface Archivo {
   lineas: number;
   funciones: number;
   exportadas: string[];
+  nombres: string[];
   violaciones: Violacion[];
   pendientes: number;
   sinActivar: number;
@@ -93,7 +94,7 @@ const SISTEMA = `Eres el compañero de ComplementAIry mirando el proyecto COMPLE
 - Sugiere mejoras de diseño a nivel proyecto: responsabilidades mezcladas, módulos que conviene separar o unir, dependencias raras, duplicación entre archivos, lo que falta (tests, validación, manejo de errores). Cada sugerencia con su porqué y un plano en palabras. Sin código.
 - Propón alternativas reales cuando el enfoque actual no sea el mejor.
 - Señala riesgos.
-- Pregunta lo que te falta saber para aconsejar mejor.
+- Preguntas: solo intenciones, preferencias, decisiones o contexto del negocio que NO están en el código. NUNCA preguntes qué hace, si ya hace algo o si existe algo en el código: eso lo lees tú (o lo ves en los resúmenes y funciones). Cada pregunta, corta y con la respuesta que sugieres.
 - Español neutro con tuteo, concreto.
 
 ${CRITERIO}`;
@@ -188,6 +189,7 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
       lineas: met.lineas,
       funciones: met.funciones.length,
       exportadas: met.funciones.filter((f) => f.exportada).map((f) => f.nombre),
+      nombres: met.funciones.map((f) => f.nombre),
       violaciones: violaciones(met, z.config.practicas),
       pendientes: findThreads(src, parsed.comments).filter((t) => t.pending).length,
       sinActivar: (src.match(/@guia\[[^\]]+\] snippet \[ \]:/g) ?? []).length,
@@ -271,7 +273,7 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
         mem.notas ? `Notas del programador:\n${mem.notas}` : "",
         mem.respondidas.length ? `Lo que el programador ya respondió:\n- ${mem.respondidas.join("\n- ")}` : "",
         mem.abiertas.length ? `Preguntas que ya le hiciste y aún no responde (NO las repitas ni reformules):\n- ${mem.abiertas.map((a) => a.p).join("\n- ")}` : "",
-        `Módulos (${archivos.length}):\n${archivos.map((a) => `- ${a.rel}${origenDe(z.config, a.rel) === "heredado" ? " [HEREDADO: no lo escribió el programador]" : ""} (${a.lineas} líneas, ${a.funciones} funciones): ${resumenes[a.rel]?.resumen ?? "(sin resumen)"}`).join("\n")}`,
+        `Módulos (${archivos.length}):\n${archivos.map((a) => `- ${a.rel}${origenDe(z.config, a.rel) === "heredado" ? " [HEREDADO: no lo escribió el programador]" : ""} (${a.lineas} líneas): ${resumenes[a.rel]?.resumen ?? "(sin resumen)"}${a.nombres.length ? ` Funciones: ${a.nombres.slice(0, 25).join(", ")}.` : ""}`).join("\n")}`,
         // Proyecto chico: el código real (más preciso que los resúmenes). Grande: solo resúmenes.
         totalCodigo <= 30_000 ? `Código completo:\n${archivos.map((a) => `=== ${a.rel}\n${a.codigo}`).join("\n\n")}` : "",
         `Tests: carpeta configurada "${carpetaTests || "(junto al código)"}"; archivos de test existentes: ${testsExistentes.length ? testsExistentes.join(", ") : "ninguno"}.`,
@@ -287,14 +289,16 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
     sug = data;
     // Cada sugerencia, una tarea con el archivo a tocar. Las del panorama anterior que sigan
     // pendientes se reemplazan (la IA reformula los títulos: si no, se acumularían).
-    guardarTareas(root, cargarTareas(root).filter((t) => t.origen !== "panorama" || t.hecha));
+    guardarTareas(root, cargarTareas(root).filter((t) => t.origen !== "panorama" || t.hecha || t.descartada));
     agregarTareas(
       root,
-      data.sugerencias.map((s) => ({ titulo: unaLinea(s.titulo), detalle: unaLinea(`${s.porque} Cómo: ${s.plano}`), ...(s.archivos[0] ? { archivo: s.archivos[0] } : {}), origen: "panorama" as const })),
+      data.sugerencias.map((s) => ({ titulo: unaLinea(s.titulo), detalle: unaLinea(`${s.porque} Cómo: ${s.plano}`), ...(rutasDe(s.archivos.join(", "))[0] ? { archivo: rutasDe(s.archivos.join(", "))[0]! } : {}), origen: "panorama" as const })),
     );
     for (const q of data.preguntas) {
       const pregunta = unaLinea(typeof q === "string" ? q : q.pregunta);
       const s = typeof q === "string" ? "" : unaLinea(q.sugerencia);
+      // Lo que se puede ver en el código no se pregunta (filtro sin IA).
+      if (sobreElCodigo(pregunta, [...archivos.map((a) => a.rel), ...archivos.flatMap((a) => a.nombres)])) continue;
       nuevas.push(s ? `${pregunta} (sugerencia: ${s})` : pregunta);
     }
   } else if (sug) evitada("panorama", "sin cambios desde el último panorama");
@@ -385,4 +389,22 @@ export function responderPregunta(root: string, n: number, respuesta: string): s
     m.abiertas.splice(n - 1, 1);
   });
   return p;
+}
+
+/** ¿Cuántos archivos de código cambiaron desde el último panorama? (sin IA: fechas de modificación) */
+export function estadoPanorama(root: string): { existe: boolean; fecha?: string; cambiados: string[] } {
+  const cache = path.join(dataDir(root), "cache", "panorama.json");
+  if (!fs.existsSync(cache)) return { existe: false, cambiados: [] };
+  const t = fs.statSync(cache).mtimeMs;
+  const z = makeZoner(root);
+  const cambiados = listFiles(z).filter((rel) => {
+    const lang = langFor(rel);
+    if (!lang || NO_CODIGO.has(lang.id) || /^\.(cai|aicode)\//.test(rel)) return false;
+    try {
+      return fs.statSync(path.join(root, rel)).mtimeMs > t;
+    } catch {
+      return false;
+    }
+  });
+  return { existe: true, fecha: new Date(t).toISOString(), cambiados };
 }

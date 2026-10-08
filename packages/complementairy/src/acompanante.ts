@@ -10,6 +10,7 @@ import { fileIdentifiers, guardReplies } from "./guard.js";
 import { langFor } from "./lang.js";
 import { ask, evitada } from "./llm.js";
 import { planoProyecto } from "./plano.js";
+import { verificar } from "./verificar.js";
 import { funcionesSinTests, medir, rutaTest, violaciones } from "./metricas.js";
 import { loadPerfil, nivelDe, puntaje, registrar } from "./profile.js";
 import { insertAboveLine, renderReply, type Reply } from "./render.js";
@@ -26,7 +27,7 @@ import { hijos, type SyntaxNode } from "./parser.js";
  */
 
 export interface Accion {
-  tipo: "expandido" | "respondido" | "plano-proyecto" | "plano-archivo" | "ayuda" | "resuelto" | "comentario" | "diseno" | "sin-tests";
+  tipo: "expandido" | "respondido" | "plano-proyecto" | "plano-archivo" | "ayuda" | "resuelto" | "comentario" | "diseno" | "sin-tests" | "verificado";
   detalle: string;
 }
 
@@ -48,6 +49,7 @@ interface Estado {
       vistos?: Record<string, string>;
       revisados?: Record<string, string>;
       ultimaRevision?: number;
+      verificadas?: Record<string, number>;
       /** Prácticas ya avisadas (no se repiten mientras el problema siga igual). */
       practicas?: Record<string, true>;
       sinTests?: Record<string, true>;
@@ -95,7 +97,7 @@ const SYSTEM = `Eres el acompañante de ComplementAIry: observas cómo programa 
 ${CRITERIO}`;
 
 /** Errores de sintaxis (nodos ERROR / faltantes) por línea, sin herramientas externas. */
-function syntaxErrors(root: SyntaxNode | null): { line: number; msg: string }[] {
+export function syntaxErrors(root: SyntaxNode | null): { line: number; msg: string }[] {
   const out: { line: number; msg: string }[] = [];
   if (!root?.hasError) return out;
   const walk = (n: SyntaxNode) => {
@@ -128,6 +130,7 @@ export async function acompanar(root: string, rel: string, log: (s: string) => v
 }
 
 async function acompanarUnaVez(root: string, rel: string, log: (s: string) => void): Promise<{ acciones: Accion[]; costoUsd: number }> {
+  const inicioDeEstaPasada = new Date().toISOString();
   const abs = path.join(root, rel);
   const lang = langFor(rel);
   const res = { acciones: [] as Accion[], costoUsd: 0 };
@@ -428,12 +431,15 @@ async function acompanarUnaVez(root: string, rel: string, log: (s: string) => vo
     // Se ancla por el texto de cada línea en el archivo actual (otros pasos pudieron agregar comentarios).
     if (data.hallazgos.length && enNotas) {
       const lineasN = actual.split(/\r?\n/);
-      let n = 0;
-      for (const h of data.hallazgos.slice(0, 2 * partes.length)) {
-        const line = lineasN.findIndex((l) => l.trim() === h.codigo.trim()) + 1;
-        if (line > 0 && (await anotar(line, [{ tipo: "revision", texto: `${h.etiqueta}${h.bloqueante ? " (blocking)" : ""}: ${h.texto}`, links: h.links }], { titulo: `${h.etiqueta}: ${h.texto.split(/[.:\n]/)[0]!.slice(0, 60)}`, bloqueante: h.bloqueante }))) n++;
+      // Todos los hallazgos en UNA publicación: cada función recibe un solo mensaje con su lista.
+      const aportes = data.hallazgos.slice(0, 2 * partes.length).flatMap((h) => {
         if (propio) registrarPatron(`acompanante/${h.categoria}`, h.texto);
-      }
+        const line = lineasN.findIndex((l) => l.trim() === h.codigo.trim()) + 1;
+        return line > 0
+          ? [{ ancla: { linea: line, texto: lineasN[line - 1]!.trim() }, tipo: "revision", texto: `${h.etiqueta}${h.bloqueante ? " (blocking)" : ""}: ${h.texto}`, links: h.links, bloqueante: h.bloqueante, origen: "acompanante" }]
+          : [];
+      });
+      const n = aportes.length ? (await publicar(root, rel, aportes, { vista: "notas" })).notas.length && aportes.length : 0;
       if (n) res.acciones.push({ tipo: "comentario", detalle: `${n} nota(s) sobre ${partes.map((p) => p.key.slice(0, 40)).join(", ")}` });
     } else if (data.hallazgos.length) {
       let next = actual;
@@ -458,6 +464,27 @@ async function acompanarUnaVez(root: string, rel: string, log: (s: string) => vo
       }
     } else if (!data.hallazgos.length) evitada("acompanar:revisar", "parte terminada sin observaciones");
   } else if (terminadas.length && !enfriado) evitada("acompanar:revisar", "en enfriamiento (menos de 60 s desde la última revisión)");
+
+  // 7. "¿Quedó lista?" para las funciones con nota que cambiaron (sin errores de sintaxis, una vez por
+  //    minuto por función, dentro del límite por hora). Si en este guardado ya hubo revisión, se espera.
+  const recienRevisado = archivo.ultimaRevision && Date.now() - archivo.ultimaRevision < 5_000;
+  if (enNotas && cfg.verificar && !recienRevisado && puedeLlamar()) {
+    const verificadas = (archivo.verificadas ??= {});
+    const conErrores = (f: { linea: number; lineas: number }) => errores.some((e) => e.line >= f.linea && e.line < f.linea + f.lineas);
+    const v = await verificar(root, rel, {
+      tamano: "chico",
+      log,
+      filtro: (f) => !conErrores(f) && Date.now() - (verificadas[f.nombre] ?? 0) > 60_000,
+      maxIa: Math.max(0, cfg.maxLlamadasHora - estado.llamadas.length), // el límite por hora, función por función
+      noAntesDe: inicioDeEstaPasada, // las notas recién creadas en este guardado se verifican en el próximo
+    }).catch(() => null);
+    for (const x of v?.veredictos.filter((y) => !y.omitida) ?? []) {
+      verificadas[x.funcion.replace(/#\d+$/, "")] = Date.now();
+      if (!x.sinIa) estado.llamadas.push(Date.now());
+      res.acciones.push({ tipo: "verificado", detalle: `${x.funcion}: ${x.estado}` });
+    }
+    res.costoUsd += v?.costoUsd ?? 0;
+  }
 
   saveEstado(root, estado);
   return res;

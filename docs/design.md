@@ -298,6 +298,13 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 - **Archivo:** las notas con `alcance: "archivo"` van arriba y no se atan a una función (`cai responder --archivo-entero`). Un plano nuevo del archivo archiva el anterior.
 - **Función:** los botones por función ya no ofrecen "Plano", que es del archivo.
 
+**Una nota por función (v0.7):** todo lo que se dice de una función (revisión, plano, respuestas, verificación) se agrega al hilo de **su** nota (`notasFuncion.ts`: la función que contiene la línea, por el árbol de sintaxis; fuera de funciones → la nota del archivo). Las notas duplicadas de versiones anteriores se fusionan al leerlas (un id viejo apunta a la que quedó). `responder` sobre una función solo ve esa función y las firmas de las demás.
+- **"¿Quedó lista?"** (`verificar.ts`): primero sin IA (sintaxis de la función, tipos, lint y reglas en sus líneas); si falla, 🔴 sin llamar a la IA. Si pasa, la IA dice lista (la nota se cierra), casi o falta. No se re-verifica si el código de la función no cambió (huella).
+- **Autoguardado:** la extensión distingue Ctrl+S (actúa ya) de un autoguardado (espera a que dejes de editar y corre una vez).
+- **Tareas:** las rutas se normalizan sin IA ("a.js (y b.ts)" → dos tareas); un archivo creado con el mismo nombre en otra carpeta cuenta; las hechas se archivan al día siguiente; se pueden descartar.
+- **Preguntas:** se descartan sin IA las que preguntan por algo que se ve en el código ("¿X ya hace…?"); se puede conversar sobre una antes de responderla (`cai memoria conversar`).
+- **Chat de Claude Code en vista notas:** el hook rechaza que la IA agregue `@guia` y le indica `cai responder`.
+
 **Límite conocido:** en modo comentarios, `guia` y el acompañante siguen escribiendo en disco (solo `revisar` se aplica sobre el buffer desde VSCode). Con autoguardado conviene el modo notas.
 
 ## Estado
@@ -312,6 +319,7 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 | 7 | Extensión de VSCode | ✅ · adaptador de Honcho: pendiente (opcional; ver abajo) |
 | 8 (v0.5) | Notas fuera del archivo, botones, panel "Siguiente paso", bloqueo por archivo, "pensando…", modelos por tamaño | ✅ |
 | 9 (v0.6) | Tres niveles (proyecto, archivo, función), estructura y panorama como tareas, preguntas desde el panel | ✅ |
+| 10 (v0.7) | Una nota por función, panel Nota, "¿quedó lista?", sugerencias rápidas, configuración, autoguardado | ✅ |
 
 **Honcho:** el perfil y la memoria hoy son archivos locales legibles, que es lo que pide el principio de transparencia. Conectar Honcho, un servicio externo de modelado de usuario, requiere una cuenta y una API key tuyas, y envía datos de tu forma de programar a un tercero. Queda para cuando lo decidas.
 

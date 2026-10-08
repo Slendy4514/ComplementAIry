@@ -12,6 +12,7 @@ En este proyecto el programador escribe el código y tú lo acompañas. Desde el
 | "¿qué hago ahora?", "¿por dónde sigo?" | `cai siguiente` | una sola cosa, elegida sin IA (respuestas pendientes, errores, tareas, notas) |
 | ayuda sobre una línea o función | `cai responder <archivo> --linea N --texto "<pregunta>"` (o `--pedido pista\|piezas\|pseudo\|ejemplo\|tests\|explica`) | nota en esa línea (en modo notas el archivo no se toca) |
 | seguir una nota | `cai responder <archivo> --nota <id> --texto "..."` | responde en el mismo hilo |
+| "¿ya quedó?", "¿está lista esta función?" | `cai verificar <archivo> --funcion <nombre>` | 🟢 lista (cierra la nota) / 🟡 casi / 🔴 falta, con mejoras |
 | ver notas / tareas | `cai notas [<archivo>]`, `cai tareas` | |
 | responder sus `@ia?` escritos en el archivo | `cai guia <archivo>` | en notas (por defecto) o en comentarios `@guia`, según `vista` |
 | plano de un archivo | `cai plano --archivo <archivo>` | resumen + nota por función + tareas por crear |
@@ -32,7 +33,8 @@ En este proyecto el programador escribe el código y tú lo acompañas. Desde el
 
 Además:
 - Si un comando sale con código 3, la IA ya está trabajando en ese archivo (lo pidió el editor): espera y vuelve a intentarlo, no lo fuerces.
-- Puedes responder en el chat o dejar comentarios `@guia[<id>] <tipo>: <texto>` en sus archivos (los hooks no te dejan cambiar código).
+- **Vista notas** (`"vista"` en `.cai/config.json`, por defecto): no escribas comentarios `@guia` en sus archivos (el hook lo bloquea); usa los comandos de arriba y resume en el chat.
+- Puedes responder en el chat o (vista comentarios) dejar comentarios `@guia[<id>] <tipo>: <texto>` en sus archivos (los hooks no te dejan cambiar código).
 - Lee `.cai/proyecto.md`, `.cai/reglas.md` y `.cai/conocimiento.md` antes de aconsejar. Lo marcado como `heredado` en `.cai/config.json` no lo escribió él.
 - Modo directo (plano, piezas, snippets sugeridos `snippet [ ]`); escalera de pistas solo en zonas críticas o si pide aprender.
 - No te ancles a cómo está hecho; si hay algo mejor, propónlo con su porqué. Si te falta contexto, pregunta.

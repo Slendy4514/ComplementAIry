@@ -53,34 +53,41 @@ Después escribe con tus palabras `.cai/proyecto.md` (qué buscas) y `.cai/regla
 
 ## Uso diario
 
-### En VSCode: tres niveles que no se mezclan
-| Nivel | Dónde | Qué tienes |
-|---|---|---|
-| **Proyecto** | panel ComplementAIry → **Proyecto** | **Estado** (del panorama), **Estructura** como árbol (✓ existe · ○ por crear, con botón "Crear archivo") y **Preguntas para ti**: clic, respondes en una cajita con la sugerencia ya escrita, y queda en la memoria del proyecto al instante. |
-| **Archivo** | botones arriba del archivo | `🗺️ Plano · 💡 Ayuda con el archivo · 🔎 Revisar · 💬 N notas`. El plano deja un resumen arriba, una nota en cada función que ya existe y una tarea por cada una que falta. |
-| **Función** | botones sobre cada función | `💬 notas · 💡 Ayuda · 🧪 Tests`. |
+### En VSCode
+**Una nota por función, en el panel "Nota".** Lo que dice la IA de una función va a **su** nota, que se va ampliando (revisión, plano, respuestas, verificación): sin duplicados. El panel **Nota** (barra lateral ComplementAIry) **sigue al cursor**: muestra la nota de la función donde estás, con:
+- su estado (🟢 lista · 🟡 casi · 🔴 falta · sin verificar) y el **▶ Qué hacer**;
+- botones: 💡 Pista · 🧩 Piezas · 📝 Pseudocódigo · 🔁 Ejemplo · 🧪 Tests · ❓ Explícame · **✅ ¿Quedó lista?** · Insertar snippet · ✓ Resuelta;
+- una caja para escribirle (Enter envía).
 
-Lo que la IA propone a nivel proyecto se vuelve **tareas**: cada archivo que falta en la estructura (en el orden de "por dónde empezar") y cada sugerencia del panorama, con el archivo a tocar. Se marcan solas cuando creas el archivo o la función, y **▶ Siguiente paso** te dice cuál toca.
+En el código **no se abre nada entre las líneas** ni te quita el foco: solo un ícono en el margen (azul nota · ámbar casi/falta · rojo bloqueante) y, sobre cada función, `💬 nota · 💡 Ayuda · ✅ ¿Lista? · 🧪 Tests`. (Si prefieres los hilos dentro del código: ajuste `cai.notasEnLinea`.)
 
-### Notas en la línea exacta (por defecto)
-Lo que dice la IA aparece como **notas**: hilos al costado del código, como en la revisión de un PR. **El archivo no se toca**, así que el autoguardado no choca con nada.
-- **Cada nota tiene botones:** 💡 Pista · 🧩 Piezas · 📝 Pseudocódigo · 🔁 Ejemplo · 🧪 Tests · 🗺️ Plano · ❓ Explícame · ✓ Resuelta. Si sugiere un snippet, también tiene **Insertar aquí**, que lo pone dentro de la función con huecos para completar con Tab.
-- **Escribirle:** en la caja de la nota escribes y presionas Ctrl+Enter; la IA responde en el mismo hilo. "No entiendo" sube un escalón.
-- **Preguntar sobre código:** seleccionas y usas `Ctrl+Alt+G` (o clic derecho → "preguntar"). También puedes usar el **+** del margen en cualquier línea.
-- **Sobre cada función:** `💬 2 notas · 💡 Ayuda · 🧪 Tests`.
-- **Panel ComplementAIry** (barra lateral): **▶ Siguiente paso** (una sola cosa, elegida sin IA), Tareas con casillas (se marcan solas cuando creas la función), Notas por archivo y qué está haciendo la IA. `Ctrl+Alt+N` abre el siguiente paso.
-- **¿Está pensando?** La barra de estado muestra `⟳ revisando cuota.ts (12 s)` y la línea muestra "pensando…". Si pides otra cosa sobre el mismo archivo, te avisa en vez de pisar. Desde la barra de estado puedes cancelar o **silenciar 30 min**.
-- **Lo bloqueante** también aparece en el panel Problemas.
+**✅ ¿Quedó lista?** (`Ctrl+Alt+L` o el botón): revisa la función con lo que ya escribiste. Primero sin IA (sintaxis, tipos, lint, reglas); si eso pasa, la IA dice 🟢 lista (cierra la nota), 🟡 casi o 🔴 falta, con qué mejorar. También corre solo al guardar las funciones con nota que cambiaron. **Con autoguardado:** Ctrl+S actúa enseguida; un autoguardado espera a que dejes de editar (45 s por defecto) y corre una sola vez.
 
-¿Prefieres los comentarios `@guia` dentro del archivo, como antes? Usa `"vista": "comentarios"` en `.cai/config.json` (o el ajuste `cai.vista`). Desde VSCode, la revisión se aplica sobre el texto del editor, no en disco.
+**Sugerencias rápidas:** tras una pausa escribiendo en una función con nota, aparece en gris al final de la línea una pista de una línea (no se inserta nada). Tardan ~20 s y cuestan ~US$0,016 cada una (máximo 30 por hora); se apagan en la configuración.
+
+**Panel lateral:**
+| Sección | Qué tiene |
+|---|---|
+| **▶ Ahora** | una sola cosa, elegida sin IA (lo que espera tu respuesta, errores, tareas, notas) |
+| **Pendientes** | todo lo demás en orden; clic = detalle completo en el panel Nota |
+| **Proyecto** | estado (y aviso si el panorama está desactualizado), **Estructura** (✓ existe · ○ por crear · "fuera de la propuesta"), **Preguntas para ti** (respondes o **conversas** con la IA antes de responder) |
+| **Hechas recientes** | se archivan solas al día siguiente; cualquier tarea se puede descartar |
+| **IA** | qué está haciendo ahora (cancelar, silenciar 30 min) |
+
+Arriba de cada archivo: `🗺️ Plano · 💡 Ayuda con el archivo · 🔎 Revisar · 💬 N notas`.
+
+**Configuración** (⚙ en el panel, o "ComplementAIry: configuración"): qué ayuda dar por defecto (según tu nivel, pista, piezas, pseudocódigo o ejemplo), sugerencias rápidas, el acompañante (nivel, verificar al guardar, espera con autoguardado, llamadas por hora), qué modelo usa cada tamaño y dónde se ven las notas. Se guarda en `.cai/config.json`.
+
+¿Prefieres los comentarios `@guia` dentro del archivo, como antes? Elige la vista "comentarios" en la configuración.
 
 | | VSCode | Terminal |
 |---|---|---|
 | Preguntar (selección o línea) | `Ctrl+Alt+G` | `cai responder <archivo> --linea N --texto "..."` (o `// @ia? ...` + `cai guia <archivo>`) |
 | Siguiente paso | panel o `Ctrl+Alt+N` | `cai siguiente` |
-| Notas y tareas | panel | `cai notas [archivo]`, `cai tareas` |
+| ¿Quedó lista esta función? | `Ctrl+Alt+L`, ✅ en la nota o sobre la función | `cai verificar <archivo> --funcion <nombre>` |
+| Notas y tareas | panel | `cai notas [archivo]`, `cai tareas [hecha\|pendiente\|descartar <id>]` |
 | Estructura del proyecto | panel → Proyecto, o el botón del panel | `cai plano "<qué construyes>"` → `docs/ESTRUCTURA.md` + tareas |
-| Preguntas que te hizo la IA | panel → Preguntas para ti | `cai memoria`, `cai memoria responder <n> "..."` |
+| Preguntas que te hizo la IA | panel → Preguntas para ti | `cai memoria`, `cai memoria responder <n> "..."`, `cai memoria conversar <n> --texto "..."` |
 | Ayuda sobre el archivo entero | botón "💡 Ayuda con el archivo" | `cai responder <archivo> --archivo-entero --texto "..."` |
 | Plano de un archivo | Ctrl+Shift+P → "plano de este archivo" | `cai plano --archivo <archivo>` |
 | Expandir o elegir un snippet | `Ctrl+Alt+E` | `cai expandir <archivo>` |

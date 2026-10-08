@@ -87,6 +87,20 @@ function realPath(abs: string): string {
   }
 }
 
+/** Líneas con @guia (sin espacios de los extremos), como multiconjunto. */
+const lineasGuia = (t: string) => t.split(/\r?\n/).filter((l) => l.includes("@guia[")).map((l) => l.trim());
+/** ¿El cambio agrega o reescribe algún @guia? (limpiar los que había sí se permite) */
+function agregaGuia(antes: string, despues: string): boolean {
+  const quedan = new Map<string, number>();
+  for (const l of lineasGuia(antes)) quedan.set(l, (quedan.get(l) ?? 0) + 1);
+  for (const l of lineasGuia(despues)) {
+    const n = quedan.get(l) ?? 0;
+    if (!n) return true;
+    quedan.set(l, n - 1);
+  }
+  return false;
+}
+
 async function preEdit(z: Zoner, tool: string, input: Record<string, unknown>): Promise<HookOutput> {
   const file = (input.file_path ?? input.notebook_path) as string | undefined;
   if (!file) return null;
@@ -125,11 +139,19 @@ async function preEdit(z: Zoner, tool: string, input: Record<string, unknown>): 
   if (after.length > MAX_VERIFY_BYTES) return deny("el resultado es demasiado grande para verificarlo.");
 
   const v = await verifyCommentOnly(before, after, lang);
+  const rel = z.rel(abs);
+  const comoNota = `cai responder ${rel} --linea <N> --texto "<lo que quieres decirle>" (o --archivo-entero; para revisar: cai revisar ${rel}; "¿quedó lista?": cai verificar ${rel} --funcion <nombre>)`;
+  // Vista notas (la de VSCode por defecto): lo que dice la IA va a NOTAS, no al archivo. Se puede
+  // limpiar @guia viejos, pero no agregar nuevos.
+  if (v.ok && z.config.vista === "notas" && agregaGuia(before, after))
+    return deny(`este proyecto usa la vista de NOTAS: no escribas comentarios @guia en ${rel}. Deja la nota con un comando de cai (un solo comando, sin encadenar): ${comoNota}. Después resume en el chat.`);
   if (v.ok) return null;
   return deny(
-    `${z.rel(abs)} es zona humana: la IA solo puede agregar o actualizar comentarios @guia, nunca código.\n- ` +
+    `${rel} es zona humana: la IA nunca escribe código.\n- ` +
       v.reasons.join("\n- ") +
-      `\nGuía al programador con comentarios (// @guia[id] pista|pieza|pregunta|revision|ejemplo: ...) en vez de escribir el código.`,
+      (z.config.vista === "notas"
+        ? `\nGuía al programador con una nota: ${comoNota}.`
+        : `\nGuía al programador con comentarios (// @guia[id] pista|pieza|pregunta|revision|ejemplo: ...) en vez de escribir el código.`),
   );
 }
 

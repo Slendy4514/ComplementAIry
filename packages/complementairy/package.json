@@ -1,6 +1,6 @@
 {
   "name": "complementairy",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "ComplementAIry: tú programas, la IA te acompaña con comentarios; nunca escribe tu código.",
   "type": "module",
   "bin": {

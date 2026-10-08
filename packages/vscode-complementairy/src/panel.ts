@@ -48,7 +48,7 @@ interface Tarea {
 }
 
 type Nodo =
-  | { k: "grupo"; id: "despues" | "proyecto" | "estructura" | "preguntas" | "tareas" | "notas" | "ia"; label: string }
+  | { k: "grupo"; id: "pendientes" | "hechas" | "proyecto" | "estructura" | "preguntas" | "ia"; label: string }
   | { k: "accion"; label: string; icono: string; comando: vscode.Command; tooltip?: string; descripcion?: string }
   | { k: "modulo"; archivo: string; resp: string; funciones: string[]; existe: boolean }
   | { k: "pregunta"; q: Pregunta }
@@ -106,6 +106,10 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
   private preguntas: Pregunta[] = [];
   private estructura?: Estructura;
   private panorama?: Panorama;
+  /** Archivos de código que cambiaron desde el último panorama (sin IA). */
+  private desactualizado = 0;
+  /** Archivos nuevos que no están en la estructura propuesta. */
+  private fuera: string[] = [];
   private timer?: NodeJS.Timeout;
   private vista?: vscode.TreeView<Nodo>;
 
@@ -143,6 +147,28 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
     if (this.estructura)
       this.estructura.modulos = this.estructura.modulos.filter((m, i, arr) => dentro(cwd, m.archivo) && arr.findIndex((x) => x.archivo === m.archivo) === i);
     this.panorama = leer<{ sugerencias?: Panorama }>(path.join("cache", "panorama.json"))?.sugerencias;
+    try {
+      this.desactualizado = this.panorama ? (JSON.parse(await correr(["panorama", "--estado", "--json"], cwd, { silencioso: true })) as { cambiados: string[] }).cambiados.length : 0;
+    } catch {
+      this.desactualizado = 0;
+    }
+    // Archivos creados después de la propuesta de estructura que no están en ella (sin IA).
+    this.fuera = [];
+    const est = path.join(dataDir(cwd), "estructura.json");
+    if (this.estructura && fs.existsSync(est)) {
+      const desde = fs.statSync(est).mtimeMs;
+      const propuestos = new Set(this.estructura.modulos.map((m) => m.archivo));
+      const nuevos = await vscode.workspace.findFiles(new vscode.RelativePattern(cwd, "**/*.{js,jsx,ts,tsx,mjs,cjs,py,go,rs,java,kt,rb,php,cs,swift,dart,lua,vue}"), "**/{node_modules,dist,build,.git,.cai,coverage}/**", 400);
+      this.fuera = nuevos
+        // Solo la fecha de CREACIÓN (editar un archivo no lo vuelve "nuevo"); sin ella, no se marca.
+        .filter((u) => {
+          const b = fs.statSync(u.fsPath).birthtimeMs;
+          return b > 0 && b > desde;
+        })
+        .map((u) => path.relative(cwd, u.fsPath).split(path.sep).join("/"))
+        .filter((r) => !propuestos.has(r) && !/(\.test\.|\.spec\.|(^|\/)tests?\/)/.test(r))
+        .slice(0, 10);
+    }
     const p = this.pasos[0];
     if (this.vista) this.vista.badge = this.pasos.length ? { value: this.pasos.length, tooltip: `${this.pasos.length} cosa(s) por hacer` } : undefined;
     if (this.vista) this.vista.message = p ? undefined : "✓ Nada pendiente. Sigue con tu plan o pide un panorama (Ctrl+Alt+P).";
@@ -153,9 +179,9 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
     const cwd = root(vscode.window.activeTextEditor?.document) ?? "";
     switch (n.k) {
       case "grupo": {
-        const abierto = ["proyecto", "preguntas", "tareas", "ia"].includes(n.id);
+        const abierto = ["pendientes", "proyecto", "preguntas", "ia"].includes(n.id);
         const t = new vscode.TreeItem(n.label, abierto ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
-        t.iconPath = new vscode.ThemeIcon({ despues: "list-ordered", proyecto: "project", estructura: "type-hierarchy", preguntas: "question", tareas: "checklist", notas: "comment", ia: "sparkle" }[n.id]);
+        t.iconPath = new vscode.ThemeIcon({ pendientes: "list-ordered", hechas: "pass", proyecto: "project", estructura: "type-hierarchy", preguntas: "question", ia: "sparkle" }[n.id]);
         if (n.id === "estructura" && this.estructura) {
           t.description = this.estructura.resumen;
           t.tooltip = new vscode.MarkdownString(`**Estructura propuesta**\n\n${this.estructura.resumen}\n\n**Por dónde empezar:**\n${this.estructura.orden.map((o, i) => `${i + 1}. ${o}`).join("\n")}`);
@@ -174,11 +200,12 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
       case "tarea": {
         const t = new vscode.TreeItem(n.t.titulo);
         t.iconPath = new vscode.ThemeIcon(ICONO_TAREA[n.t.origen ?? "manual"] ?? "circle-small");
-        if (n.t.detalle) t.tooltip = new vscode.MarkdownString(`**${n.t.titulo}**\n\n${n.t.detalle}`);
+        t.tooltip = new vscode.MarkdownString(`**${n.t.titulo}**${n.t.detalle ? `\n\n${n.t.detalle}` : ""}\n\n_Clic: ver el detalle completo._`);
         t.checkboxState = n.t.hecha ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked;
-        t.description = n.t.archivo ?? "";
+        t.description = n.t.detalle ?? n.t.archivo ?? "";
         t.id = `tarea:${n.t.id}`;
-        if (n.t.archivo) t.command = { command: "cai.irA", title: "Ir", arguments: [cwd, n.t.archivo, undefined, undefined, !!n.t.crear] };
+        // Clic: el detalle COMPLETO en el panel "Nota" (con ir al archivo, hecha, descartar).
+        t.command = { command: "cai.notaPanel.tarea", title: "Ver", arguments: [n.t] };
         return t;
       }
       case "archivo": {
@@ -232,8 +259,8 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
         t.id = `pregunta:${n.q.pregunta}`;
         t.iconPath = new vscode.ThemeIcon("comment-unresolved");
         if (n.q.sugerencia) t.description = `sugerencia: ${n.q.sugerencia}`;
-        t.tooltip = "Clic para responder. Tu respuesta queda en la memoria del proyecto y se usa en todas las sugerencias.";
-        t.command = { command: "cai.responderPregunta", title: "Responder", arguments: [n.q] };
+        t.tooltip = "Clic: responder o conversar sobre la pregunta (en el panel Nota). Tu respuesta queda en la memoria del proyecto.";
+        t.command = { command: "cai.notaPanel.pregunta", title: "Responder", arguments: [n.q] };
         return t;
       }
       case "vacio":
@@ -243,8 +270,10 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
 
   /** Qué hace el clic en un paso: preguntas de la memoria → caja de respuesta; el resto → ir al lugar. */
   private comandoPaso(cwd: string, p: Paso): vscode.Command {
-    if (p.tipo === "responder" && /conocimiento\.md$/.test(p.archivo ?? "") && this.preguntas[0]) return { command: "cai.responderPregunta", title: "Responder", arguments: [this.preguntas[0]] };
-    const crear = p.tipo === "tarea" && this.tareas.some((t) => t.id === p.ref && t.crear);
+    if (p.tipo === "responder" && /conocimiento\.md$/.test(p.archivo ?? "") && this.preguntas[0]) return { command: "cai.notaPanel.pregunta", title: "Responder", arguments: [this.preguntas[0]] };
+    const tarea = p.tipo === "tarea" ? this.tareas.find((t) => t.id === p.ref) : undefined;
+    if (tarea) return { command: "cai.notaPanel.tarea", title: "Ver", arguments: [tarea] };
+    const crear = false;
     return { command: "cai.irA", title: "Ir", arguments: [cwd, p.archivo, p.linea, p.tipo === "tarea" ? undefined : p.ref, crear] };
   }
 
@@ -252,19 +281,22 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
     const cwd = root(vscode.window.activeTextEditor?.document);
     if (!cwd) return [{ k: "vacio", label: "Abre un proyecto" }];
     if (!n) {
-      const pend = this.tareas.filter((t) => !t.hecha).length;
-      const notas = todasLasNotas(cwd).length;
+      // ▶ Ahora (una sola cosa) · Pendientes (todo lo demás, en orden) · Proyecto · Hechas · IA
       const raiz: Nodo[] = [];
       if (this.pasos[0]) raiz.push({ k: "paso", p: this.pasos[0], principal: true });
-      if (this.pasos.length > 1) raiz.push({ k: "grupo", id: "despues", label: `Después (${Math.min(this.pasos.length - 1, 10)})` });
+      if (this.pasos.length > 1) raiz.push({ k: "grupo", id: "pendientes", label: `Pendientes (${this.pasos.length - 1})` });
       raiz.push({ k: "grupo", id: "proyecto", label: "Proyecto" });
-      raiz.push({ k: "grupo", id: "tareas", label: `Tareas${pend ? ` (${pend} pendientes)` : ""}` });
-      raiz.push({ k: "grupo", id: "notas", label: `Notas (${notas})` });
+      if (this.tareas.some((t) => t.hecha)) raiz.push({ k: "grupo", id: "hechas", label: "Hechas recientes" });
       raiz.push({ k: "grupo", id: "ia", label: "IA" });
       return raiz;
     }
     if (n.k === "grupo") {
-      if (n.id === "despues") return this.pasos.slice(1, 11).map((p) => ({ k: "paso", p }));
+      if (n.id === "pendientes")
+        return this.pasos.slice(1, 40).map((p): Nodo => {
+          const t = p.tipo === "tarea" ? this.tareas.find((x) => x.id === p.ref) : undefined;
+          return t ? { k: "tarea", t } : { k: "paso", p };
+        });
+      if (n.id === "hechas") return this.tareas.filter((t) => t.hecha).slice(-10).map((t) => ({ k: "tarea", t }));
       if (n.id === "proyecto") {
         const out: Nodo[] = [];
         if (this.panorama)
@@ -276,6 +308,8 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
             comando: { command: "cai.verPanorama", title: "Ver" },
           });
         else out.push({ k: "accion", label: "Ver el panorama del proyecto", icono: "telescope", descripcion: "estado, sugerencias y preguntas", comando: { command: "cai.panorama", title: "Panorama" } });
+        if (this.panorama && this.desactualizado)
+          out.push({ k: "accion", label: `Panorama desactualizado: ${this.desactualizado} archivo(s) cambiaron`, icono: "history", descripcion: "actualizar", comando: { command: "cai.panorama", title: "Actualizar" } });
         if (this.estructura) out.push({ k: "grupo", id: "estructura", label: "Estructura" });
         else out.push({ k: "accion", label: "Proponer la estructura del proyecto", icono: "type-hierarchy", descripcion: "carpetas, archivos y por dónde empezar", comando: { command: "cai.estructura", title: "Estructura" } });
         out.push({ k: "grupo", id: "preguntas", label: `Preguntas para ti${this.preguntas.length ? ` (${this.preguntas.length})` : ""}` });
@@ -285,21 +319,11 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
         const mods: Nodo[] = [...this.estructura.modulos]
           .sort((a, b) => a.archivo.localeCompare(b.archivo))
           .map((m) => ({ k: "modulo", archivo: m.archivo, resp: m.responsabilidad, funciones: m.funciones, existe: fs.existsSync(path.join(cwd, m.archivo)) }));
-        return [...mods, { k: "accion", label: "Ver ESTRUCTURA.md", icono: "book", comando: { command: "cai.verEstructura", title: "Ver" } }];
+        const fuera: Nodo[] = this.fuera.map((r) => ({ k: "accion", label: r, icono: "question", descripcion: "nuevo, fuera de la propuesta", tooltip: "Lo creaste después de la propuesta de estructura y no está en ella. Si encaja, actualiza docs/ESTRUCTURA.md (o pide una nueva propuesta).", comando: { command: "cai.irA", title: "Abrir", arguments: [cwd, r] } }));
+        return [...mods, ...fuera, { k: "accion", label: "Ver ESTRUCTURA.md", icono: "book", comando: { command: "cai.verEstructura", title: "Ver" } }];
       }
       if (n.id === "preguntas")
         return this.preguntas.length ? this.preguntas.map((q) => ({ k: "pregunta", q })) : [{ k: "vacio", label: "Ninguna por ahora" }];
-      if (n.id === "tareas") {
-        const pend = this.tareas.filter((t) => !t.hecha);
-        const hechas = this.tareas.filter((t) => t.hecha).slice(-5);
-        const out: Nodo[] = [...pend, ...hechas].map((t) => ({ k: "tarea", t }));
-        return out.length ? out : [{ k: "vacio", label: "Sin tareas: salen del plano de cada archivo y del panorama" }];
-      }
-      if (n.id === "notas") {
-        const por = new Map<string, number>();
-        for (const x of todasLasNotas(cwd)) por.set(x.archivo, (por.get(x.archivo) ?? 0) + 1);
-        return por.size ? [...por].sort().map(([rel, c]) => ({ k: "archivo", rel, n: c })) : [{ k: "vacio", label: "Sin notas abiertas" }];
-      }
       if (n.id === "ia") return this.estado.actual.length ? this.estado.actual.map((o) => ({ k: "ia", o })) : [{ k: "ia" }];
     }
     if (n.k === "archivo")

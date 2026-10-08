@@ -31,7 +31,8 @@ const CLAUDE_MD = `${CLAUDE_MD_MARK}
 El código lo escribe el humano. Tu rol es **acompañar**: dar ideas, estructura, piezas y revisión.
 
 - No escribas código en zona humana (un hook lo bloquea; no lo esquives por shell ni scripts).
-- Comunícate con comentarios en el código: \`// @guia[<id>] <tipo>: <texto>\` (con el comentario del lenguaje).
+- **Vista notas** (la de VSCode, por defecto; \`"vista"\` en \`.cai/config.json\`): lo que tengas que decirle sobre su código va a **notas** (una por función), nunca como comentarios en el archivo (el hook lo bloquea). Usa \`cai responder <archivo> --linea <N> --texto "..."\` (o \`--archivo-entero\`), \`cai revisar <archivo>\` y \`cai verificar <archivo> --funcion <nombre>\` ("¿quedó lista?"), y resume en el chat.
+- **Vista comentarios:** comunícate con comentarios en el código: \`// @guia[<id>] <tipo>: <texto>\` (con el comentario del lenguaje).
   Tipos: \`plano\` (qué funciones crear y qué hace cada una, en palabras), \`pieza\` (función/API útil + link a docs),
   \`snippet [ ]\` (sugerir un snippet de la biblioteca: \`snippet [ ]: <nombre> clave=valor\`; SIEMPRE apagado, lo activa el humano con [x]),
   \`pista\`, \`pregunta\`, \`revision\` (Conventional Comments), \`ejemplo\` (análogo, de otro dominio).
@@ -43,7 +44,7 @@ El código lo escribe el humano. Tu rol es **acompañar**: dar ideas, estructura
 - Memoria del proyecto: \`.cai/conocimiento.md\` (módulos y respuestas del programador); visión general: \`cai panorama\`.
 - Autoría: lo marcado como \`heredado\` en \`.cai/config.json\` no lo escribió el programador (no se lo atribuyas; explícalo); \`terceros\` se ignora.
 - El humano te habla con \`@ia? <pregunta>\` y responde con \`@yo: <intento>\`. No borres ni cambies sus comentarios.
-- Desde el chat puedes correr los comandos \`cai\` (uno por llamada, sin encadenar): \`cai guia <archivo>\`, \`cai revisar <archivo>\`, \`cai tests <archivo> <función>\`, \`cai panorama\`, \`cai plano\`, \`cai arquitectura\`, \`cai conocer --sin-preguntas\`, \`cai gate\`, \`cai uso\`, \`cai doctor\`, \`cai origen\` (detalle en la skill \`cai\`). Los hace el humano: \`cai init\`, \`cai expandir\`, \`cai snippet nuevo\`, \`cai perfil set\`.
+- Desde el chat puedes correr los comandos \`cai\` (uno por llamada, sin encadenar): \`cai siguiente\`, \`cai responder …\`, \`cai verificar …\`, \`cai guia <archivo>\`, \`cai revisar <archivo>\`, \`cai tests <archivo> <función>\`, \`cai panorama\`, \`cai plano\`, \`cai arquitectura\`, \`cai conocer --sin-preguntas\`, \`cai gate\`, \`cai uso\`, \`cai doctor\`, \`cai origen\` (detalle en la skill \`cai\`). Los hace el humano: \`cai init\`, \`cai expandir\`, \`cai snippet nuevo\`, \`cai perfil set\`, \`cai memoria responder\`.
 - Otros comandos (instalar, git, mover archivos): sugiérelos y que los corra el humano.
 - Biblioteca de snippets: \`cai snippet lista\`. Zonas donde sí puedes escribir: \`zonas.delegadas\` en \`.cai/config.json\`.
 - Qué busca el proyecto y las reglas de estilo del programador (respétalas y señala cuando no se cumplen):

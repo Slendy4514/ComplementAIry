@@ -18,12 +18,15 @@ import { resolveMissing, runGuia } from "./tutor.js";
 import { watch } from "./watch.js";
 import { acompanar } from "./acompanante.js";
 import { planoProyecto } from "./plano.js";
+import { verificar } from "./verificar.js";
+import { rapida } from "./rapida.js";
+import { cargarDialogos, conversar, olvidarDialogo } from "./dialogo.js";
 import { proponerTests } from "./tests.js";
-import { leerMemoria, panorama, preguntasAbiertas, responderPregunta } from "./panorama.js";
+import { estadoPanorama, leerMemoria, panorama, preguntasAbiertas, responderPregunta } from "./panorama.js";
 import { enCurso, OcupadoError, ocuparEsperando } from "./ocupado.js";
 import { responderNota } from "./responder.js";
 import { cargarNotas, guardarNotas, nuevaNota, mensaje, todasLasNotas } from "./notas.js";
-import { cargarTareas, guardarTareas, siguiente } from "./siguiente.js";
+import { cargarTareas, guardarTareas, siguiente, actualizarTareas } from "./siguiente.js";
 import { planoArchivo } from "./planoArchivo.js";
 import { conContenido, conocer, sugerirAutoria } from "./conocer.js";
 import { createInterface } from "node:readline/promises";
@@ -44,9 +47,13 @@ const HELP = `ComplementAIry (cai) — tú programas, la IA te acompaña
   cai siguiente                  qué hacer ahora (una sola cosa, elegida sin IA) y qué viene después
   cai responder <archivo> (--linea N | --nota <id> | --archivo-entero) [--texto "..."] [--pedido pista|piezas|pseudo|ejemplo|tests|explica]
                                     pregunta en una nota (en modo notas el archivo no se toca)
+  cai rapida <archivo> --linea N  pista de una línea donde estás (VSCode la muestra en gris)
+  cai verificar <archivo> [--funcion X]  "¿quedó lista?": sin IA primero; lista → cierra la nota, si no deja mejoras
   cai notas [<archivo>|--todas]  notas abiertas · cai notas resolver <archivo> <id> · cai notas importar <archivo>
-  cai tareas [hecha|pendiente <id>]  tareas del plano, la estructura y el panorama
+  cai tareas [hecha|pendiente|descartar <id>]  tareas del plano, la estructura y el panorama
+                                    (las hechas se archivan solas al día siguiente)
   cai memoria [responder <n> "..."]  preguntas que la IA te hizo sobre el proyecto (y tus respuestas)
+  cai memoria conversar <n> --texto "..."  preguntarle a la IA sobre su pregunta antes de responder
   cai guia <archivo>             responde los @ia? / @yo: pendientes con comentarios @guia
   cai revisar <archivo> [--sin-ia] [--solo bugs,seguridad] [--todo]
                                     verificaciones deterministas + revisores de IA, como comentarios
@@ -443,6 +450,42 @@ async function ejecutar(argv: string[]): Promise<number> {
       if (!abiertas.length) console.log("(sin notas abiertas)");
       return 0;
     }
+    case "rapida": {
+      // cai rapida <archivo> --linea N [--json]: pista de una línea donde estás escribiendo
+      const n = rest.includes("--linea") ? Number(rest[rest.indexOf("--linea") + 1]) : NaN;
+      if (!sub || !Number.isInteger(n)) throw new Error("uso: cai rapida <archivo> --linea <n> [--json]");
+      const r = await rapida(root, path.relative(root, path.resolve(sub)), n);
+      if (rest.includes("--json")) process.stdout.write(JSON.stringify(r));
+      else console.log(r.texto || `(nada${r.motivo ? `: ${r.motivo}` : ""})`);
+      return 0;
+    }
+    case "verificar": {
+      // cai verificar <archivo> [--funcion X] [--chico] [--forzar] [--json]   ("¿quedó lista?")
+      if (!sub) throw new Error("uso: cai verificar <archivo> [--funcion <nombre>] [--json]");
+      const opt = (k: string) => (rest.includes(k) ? rest[rest.indexOf(k) + 1] : undefined);
+      const json = rest.includes("--json");
+      try {
+        const r = await verificar(root, path.relative(root, path.resolve(sub)), {
+          ...(opt("--funcion") ? { funcion: opt("--funcion")! } : {}),
+          ...(rest.includes("--forzar") ? { forzar: true } : {}),
+          tamano: rest.includes("--chico") ? "chico" : "mediano",
+          log: json ? () => {} : (l) => console.log(l),
+        });
+        if (json) process.stdout.write(JSON.stringify(r));
+        else {
+          const icono = { lista: "🟢", casi: "🟡", falta: "🔴" };
+          for (const v of r.veredictos) console.log(`${icono[v.estado]} ${v.funcion}: ${v.resumen}${v.omitida ? " (sin cambios desde la última vez)" : ""}`);
+          if (!r.veredictos.length) console.log("(nada que verificar: ninguna función con nota abierta; usa --funcion <nombre>)");
+        }
+        return 0;
+      } catch (e) {
+        if (json && e instanceof OcupadoError) {
+          process.stdout.write(JSON.stringify({ mensaje: e.message, ocupado: true }));
+          return 3;
+        }
+        throw e;
+      }
+    }
     case "memoria": {
       // cai memoria [--json] · cai memoria responder <n> "<respuesta>"  (las preguntas que la IA te hizo)
       if (sub === "responder") {
@@ -450,10 +493,22 @@ async function ejecutar(argv: string[]): Promise<number> {
         const r = rest.slice(1).join(" ").trim();
         if (!Number.isInteger(n) || n < 1 || !r) throw new Error('uso: cai memoria responder <número de pregunta> "<respuesta>" (los números salen en: cai memoria)');
         const p = responderPregunta(root, n, r);
+        olvidarDialogo(root, p);
         console.log(`✓ Anotado en la memoria del proyecto: ${p} → ${r}`);
         return 0;
       }
-      const abiertas = preguntasAbiertas(root);
+      if (sub === "conversar") {
+        // cai memoria conversar <n> --texto "..." [--json]: preguntarle a la IA sobre su pregunta
+        const n = Number(rest[0]);
+        const t = rest.includes("--texto") ? rest[rest.indexOf("--texto") + 1] : undefined;
+        if (!Number.isInteger(n) || !t) throw new Error('uso: cai memoria conversar <n> --texto "<lo que quieres preguntarle>"');
+        const r = await conversar(root, n, t);
+        if (rest.includes("--json")) process.stdout.write(JSON.stringify(r));
+        else console.log(r.hilo[r.hilo.length - 1]!.texto);
+        return 0;
+      }
+      const dialogos = cargarDialogos(root);
+      const abiertas = preguntasAbiertas(root).map((a) => ({ ...a, dialogo: dialogos[a.pregunta] ?? [] }));
       if (argv.includes("--json")) {
         process.stdout.write(JSON.stringify({ abiertas, respondidas: leerMemoria(path.join(dataDir(root), "conocimiento.md")).respondidas }));
         return 0;
@@ -480,13 +535,16 @@ async function ejecutar(argv: string[]): Promise<number> {
       return 0;
     }
     case "tareas": {
-      const tareas = cargarTareas(root);
-      if (sub === "hecha" || sub === "pendiente") {
+      const cambiar = ["hecha", "pendiente", "descartar"].includes(sub ?? "");
+      // Al listar: se actualizan (hechas solas, separadas, archivadas) y no se muestran las archivadas.
+      const tareas = cambiar ? cargarTareas(root) : (await actualizarTareas(root)).filter((t) => !t.archivada);
+      if (sub === "hecha" || sub === "pendiente" || sub === "descartar") {
         const t = tareas.find((x) => x.id === rest[0]);
-        if (!t) throw new Error(`no existe la tarea ${rest[0]}`);
-        t.hecha = sub === "hecha";
+        if (!t) throw new Error(`no existe la tarea ${rest[0]} (míralas con: cai tareas)`);
+        if (sub === "descartar") Object.assign(t, { archivada: true, descartada: true }); // no vuelve a proponerse
+        else Object.assign(t, { hecha: sub === "hecha", archivada: false, ...(sub === "hecha" ? { hechaEn: new Date().toISOString() } : { hechaEn: undefined }) });
         guardarTareas(root, tareas);
-        console.log(`✓ ${t.id}: ${t.hecha ? "hecha" : "pendiente"}`);
+        console.log(`✓ ${t.id}: ${sub === "descartar" ? "descartada" : t.hecha ? "hecha" : "pendiente"}`);
         return 0;
       }
       if (argv.includes("--json")) {
@@ -559,6 +617,13 @@ async function ejecutar(argv: string[]): Promise<number> {
       return 0;
     }
     case "panorama": {
+      if (argv.includes("--estado")) {
+        // Sin IA: ¿cuántos archivos cambiaron desde el último panorama? (para el aviso del panel)
+        const e = estadoPanorama(root);
+        if (argv.includes("--json")) process.stdout.write(JSON.stringify(e));
+        else console.log(e.existe ? `${e.cambiados.length} archivo(s) cambiaron desde el último panorama (${e.fecha})` : "todavía no hay panorama");
+        return 0;
+      }
       const r = await panorama(root, { sinIa: argv.includes("--sin-ia"), log: (l) => console.log(l) });
       for (const l of r.resumen) console.log(`· ${l}`);
       console.log(`✓ ${path.relative(root, r.archivo)}${r.costoUsd ? ` · US$${r.costoUsd.toFixed(3)}` : ""}`);
@@ -658,7 +723,7 @@ async function main(argv: string[]): Promise<number> {
   if (cmd === "guia" && sub && !["list", "clean", "check"].includes(sub)) objetivo = relDe(sub);
   else if (["revisar", "predecir", "check", "tests"].includes(cmd ?? "") && sub) objetivo = relDe(sub);
   else if (cmd === "plano" && argv.includes("--archivo")) objetivo = relDe(argv[argv.indexOf("--archivo") + 1] ?? ".");
-  else if (["panorama", "conocer", "plano", "arquitectura"].includes(cmd ?? "")) objetivo = "__proyecto__";
+  else if (["panorama", "conocer", "plano", "arquitectura"].includes(cmd ?? "") && !argv.includes("--estado")) objetivo = "__proyecto__";
   if (!objetivo) return ejecutar(argv);
   const r = await ocuparEsperando(root, objetivo, TAREA[cmd!] ?? cmd!);
   if (!r.ok) {

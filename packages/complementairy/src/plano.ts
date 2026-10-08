@@ -6,8 +6,9 @@ import { listFiles } from "./files.js";
 import { makeZoner } from "./config.js";
 import { ask } from "./llm.js";
 import { loadPerfil, nivelDe } from "./profile.js";
+import { sobreElCodigo } from "./memoria.js";
 import { actualizarMemoria, agregarPreguntas, unaLinea } from "./panorama.js";
-import { agregarTareas, cargarTareas, guardarTareas } from "./siguiente.js";
+import { agregarTareas, cargarTareas, guardarTareas, rutasDe } from "./siguiente.js";
 import { iaOpts } from "./tutor.js";
 import { sanitizeGuia } from "./verify.js";
 
@@ -31,7 +32,7 @@ const SCHEMA = {
         type: "object",
         additionalProperties: false,
         required: ["archivo", "responsabilidad", "funciones"],
-        properties: { archivo: { type: "string" }, responsabilidad: { type: "string" }, funciones: { type: "array", items: { type: "string" } } },
+        properties: { archivo: { type: "string", description: "UNA ruta relativa con extensión (p. ej. src/dominio/cuota.ts), sin texto extra. Un módulo por archivo." }, responsabilidad: { type: "string" }, funciones: { type: "array", items: { type: "string" } } },
       },
     },
     orden: { type: "array", maxItems: 8, items: { type: "string" } },
@@ -52,7 +53,7 @@ const SCHEMA = {
 const SYSTEM = `Eres el arquitecto de ComplementAIry. Propones una estructura CONCRETA para el proyecto (no un menú de opciones): carpetas, módulos, qué hace cada uno, qué funciones tendrá (nombres y responsabilidad en palabras, sin código), en qué orden construir y qué reglas de dependencias conviene verificar.
 - Lee el proyecto con Read/Grep/Glob (estructura actual, package.json, código existente) y respeta lo que ya existe.
 - Lo más simple que funcione para lo que describe el programador; explica el porqué de cada decisión en una frase.
-- Preguntas: solo decisiones que de verdad dependen del programador.
+- Preguntas: solo decisiones que de verdad dependen del programador. NUNCA preguntes qué hace o si ya existe algo en el código: léelo con Read/Grep.
 - Español neutro con tuteo.
 
 ${CRITERIO}`;
@@ -117,6 +118,12 @@ export async function planoProyecto(root: string, descripcion?: string): Promise
       .filter(Boolean)
       .join("\n\n"),
   });
+  // La IA a veces escribe "a.js (y b.ts)" en vez de una ruta: se separa en rutas reales (sin IA).
+  data.modulos = data.modulos.flatMap((m) => {
+    const rutas = rutasDe(m.archivo);
+    return rutas.map((archivo) => ({ ...m, archivo }));
+  });
+  data.modulos = data.modulos.filter((m, i, arr) => arr.findIndex((x) => x.archivo === m.archivo) === i);
   const file = path.join(root, "docs", "ESTRUCTURA.md");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const fecha = new Date().toISOString().slice(0, 10);
@@ -151,7 +158,7 @@ export async function planoProyecto(root: string, descripcion?: string): Promise
     actualizarMemoria(root, (m) => {
       agregarPreguntas(
         m,
-        data.preguntas.map((q) => (q.sugerencia ? `${unaLinea(limpio(q.pregunta))} (sugerencia: ${unaLinea(limpio(q.sugerencia))})` : unaLinea(limpio(q.pregunta)))),
+        data.preguntas.filter((q) => !sobreElCodigo(q.pregunta, archivos)).map((q) => (q.sugerencia ? `${unaLinea(limpio(q.pregunta))} (sugerencia: ${unaLinea(limpio(q.sugerencia))})` : unaLinea(limpio(q.pregunta)))),
       );
     });
   return { file, costoUsd: costUsd, tareas };

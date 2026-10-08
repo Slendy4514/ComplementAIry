@@ -8,7 +8,8 @@ import { fileIdentifiers, guardReplies } from "./guard.js";
 import { langFor } from "./lang.js";
 import { ask } from "./llm.js";
 import { medir } from "./metricas.js";
-import { cargarNotas, guardarNotas, mensaje, nuevaNota, type Nota } from "./notas.js";
+import { cargarNotas, guardarNotas, mensaje, type Nota } from "./notas.js";
+import { consolidar, funcionEn as funcionEnF, funcionPorClave, notaPara } from "./notasFuncion.js";
 import { conBloqueo } from "./ocupado.js";
 import { coincide, ejecutar } from "./predict.js";
 import { loadPerfil, nivelDe, puntaje, registrar } from "./profile.js";
@@ -81,33 +82,28 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
     const src = fs.readFileSync(abs, "utf8");
     const lineas = src.split(/\r?\n/);
     const z = makeZoner(root);
-    const notas = cargarNotas(root, rel, src);
     const funciones = medir(src, await parse(src, lang)).funciones;
-    const funcionEn = (l: number) => funciones.filter((f) => f.linea <= l && l < f.linea + f.lineas).pop();
+    const funcionEn = (l: number) => funcionEnF(funciones, l);
+    // Una nota por función: las duplicadas de antes se fusionan (y un id fusionado apunta a la que quedó).
+    const { notas, destino } = consolidar(cargarNotas(root, rel, src), funciones, src);
+    const notaId = p.notaId ? (destino.get(p.notaId) ?? p.notaId) : undefined;
 
-    // 1. La nota (existente o nueva) y el mensaje del humano.
-    let nota = p.notaId ? notas.find((n) => n.id === p.notaId) : undefined;
+    // 1. La nota de esa función (o del archivo) y el mensaje del humano.
+    let nota = notaId ? notas.find((n) => n.id === notaId) : undefined;
     if (p.notaId && !nota) throw new Error(`no existe la nota ${p.notaId} en ${rel}`);
     // El pedido puede venir de un botón (p.pedido) o escrito en el texto ("!pseudo", "!tests"...).
     if (!p.pedido && p.texto && /!tests?\b/i.test(p.texto)) p = { ...p, pedido: "tests" };
-    const ped = pedidoDe(p.pedido) ?? (p.texto ? PEDIDOS.find((x) => x.re.test(p.texto!)) : undefined);
+    // Sin escalón pedido: el que elegiste en la configuración (ayuda.porDefecto), salvo que pidas "más".
+    const porDefecto = z.config.ayuda.porDefecto !== "auto" && !PIDE_MAS.test(p.texto ?? "") ? pedidoDe(z.config.ayuda.porDefecto) : undefined;
+    const ped = pedidoDe(p.pedido) ?? (p.texto ? PEDIDOS.find((x) => x.re.test(p.texto!)) : undefined) ?? porDefecto;
     if (!nota) {
       const l = p.archivoEntero ? 1 : Math.min(Math.max(1, p.linea ?? 1), lineas.length);
-      const fn = p.archivoEntero ? undefined : funcionEn(l);
-      nota = nuevaNota(notas, {
-        archivo: rel,
-        ancla: { linea: l, texto: (lineas[l - 1] ?? "").trim(), ...(fn ? { funcion: fn.nombre } : {}) },
-        ...(p.archivoEntero ? { alcance: "archivo" as const } : {}),
-        tipo: "pregunta",
-        titulo: (p.texto ?? (ped ? `${ped.que[0]!.toUpperCase()}${ped.que.slice(1)}` : "Pregunta")).slice(0, 60),
-        origen: p.origen ?? "pregunta",
-      });
+      nota = notaPara(notas, rel, funciones, src, { linea: l, ...(p.archivoEntero ? { alcance: "archivo" as const } : {}), tipo: "pregunta", origen: p.origen ?? "pregunta" });
     }
     const humano = [p.texto?.trim(), ped && !p.texto ? `Pido: ${ped.que}.` : "", p.seleccion ? `Sobre esta parte:\n\`\`\`\n${p.seleccion.slice(0, 2000)}\n\`\`\`` : ""].filter(Boolean).join("\n\n");
     if (humano) nota.hilo.push(mensaje("tu", humano));
     nota.estado = "abierta";
-    if (p.fuente) nota.fuente = p.fuente;
-    if (p.turnos !== undefined) nota.turnos = p.turnos;
+    if (p.fuente) nota.fuentes = { ...nota.fuentes, [p.fuente]: p.turnos ?? 1 };
     let costo = 0;
 
     // 2a. Predicción: se comprueba ejecutando el código (sin IA).
@@ -149,13 +145,16 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
       const libreria = paraLenguaje(biblioteca(root), lang.id);
       const libTexto = libreria.map((s) => `- ${s.nombre}: ${s.descripcion}${marcadores(s).length ? ` (marcadores: ${marcadores(s).join(", ")})` : ""}`).join("\n");
       const entero = nota.alcance === "archivo";
-      const marca = entero ? -1 : nota.ancla.linea - 1;
-      const desde = entero || lineas.length <= 400 ? 0 : Math.max(0, marca - 80);
-      const hasta = entero ? Math.min(lineas.length, 600) : lineas.length <= 400 ? lineas.length : marca + 80;
+      // Una nota de función solo ve ESA función (y las firmas de las otras, para no comentarlas).
+      const fn = entero ? undefined : ((nota.ancla.funcion ? funcionPorClave(funciones, nota.ancla.funcion) : undefined) ?? funcionEn(nota.ancla.linea));
+      const marca = entero || fn ? -1 : nota.ancla.linea - 1;
+      const desde = fn ? fn.linea - 1 : entero || lineas.length <= 400 ? 0 : Math.max(0, marca - 80);
+      const hasta = fn ? fn.linea - 1 + fn.lineas : entero ? Math.min(lineas.length, 600) : lineas.length <= 400 ? lineas.length : marca + 80;
       const vista = lineas
         .slice(desde, hasta)
         .map((l, i) => `${String(desde + i + 1).padStart(4)}| ${l}${desde + i === marca ? "   ◀ NOTA" : ""}`)
         .join("\n");
+      const otras = fn ? funciones.filter((f) => f !== fn && !(f.linea >= fn.linea && f.linea < fn.linea + fn.lineas)).map((f) => `${f.linea}| ${(lineas[f.linea - 1] ?? "").trim()}`) : [];
       const prompt = [
         `Archivo: ${rel} (${lang.id})${critical ? " — ZONA CRÍTICA" : ""}. Programador: ${nivelProg} en ${lang.id}.`,
         notaOrigen(origenDe(z.config, rel)),
@@ -164,13 +163,15 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
         ped ? `El programador pidió explícitamente: ${ped.que}. Responde con eso (tipo "${ped.tipo}").` : "",
         p.pedido === "explica" ? "El programador pidió que le expliques esta parte: qué hace, por qué y qué cuidar. Sin reescribirla." : "",
         entero ? "La pregunta es sobre el ARCHIVO COMPLETO (su organización, qué funciones tiene o le faltan, cómo encaja en el proyecto), no sobre una función puntual." : "",
+        fn ? `Esta nota es SOLO de la función \`${fn.nombre}\`. Habla únicamente de ella: no comentes ni sugieras cambios en otras funciones (cada una tiene su propia nota).` : "",
         contextBlock(projectContext(root, rel)),
         libTexto ? `BIBLIOTECA DE SNIPPETS (${lang.id}):\n${libTexto}` : "",
         "Formato: listas con cada ítem en su propia línea; nada de muros de texto. Si sugieres un snippet, en \"codigo\" copia la línea después de la cual va.",
-        "Conversación de la nota:",
-        nota.hilo.map((m) => `${m.quien === "ia" ? "TUTOR" : "PROGRAMADOR"}: ${m.texto}`).join("\n"),
-        entero ? "Código del archivo:" : "Código (◀ NOTA marca dónde está la nota):",
+        "Conversación de la nota (lo más reciente al final):",
+        nota.hilo.slice(-12).map((m) => `${m.quien === "ia" ? "TUTOR" : "PROGRAMADOR"}: ${m.texto.slice(0, 1500)}`).join("\n"),
+        entero ? "Código del archivo:" : fn ? `Código de \`${fn.nombre}\`:` : "Código (◀ NOTA marca dónde está la nota):",
         vista,
+        otras.length ? `Otras funciones del archivo (solo firmas, NO hables de ellas):\n${otras.join("\n")}` : "",
       ]
         .filter(Boolean)
         .join("\n");
@@ -200,7 +201,8 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
       nota.snippets.push(...snippets);
       nota.nivel = Math.max(prev, nivel);
       if (respuesta?.que_hacer) nota.accion = respuesta.que_hacer;
-      if (respuesta?.titulo && nota.hilo.filter((m) => m.quien === "ia").length === 1) nota.titulo = respuesta.titulo.slice(0, 60);
+      // Las notas de función se llaman como la función; el resto toma el título de la IA.
+      if (respuesta?.titulo && !nota.ancla.funcion && nota.alcance !== "archivo" && nota.hilo.filter((m) => m.quien === "ia").length === 1) nota.titulo = respuesta.titulo.slice(0, 60);
     }
     nota.actualizada = new Date().toISOString();
     guardarNotas(root, rel, notas);

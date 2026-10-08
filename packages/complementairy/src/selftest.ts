@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { cargarNotas, guardarNotas, mensaje, nuevaNota } from "./notas.js";
 import { responderNota } from "./responder.js";
 import { conBloqueo, enCurso, ocupar } from "./ocupado.js";
-import { actualizarTareas, agregarTareas, cargarTareas, guardarDiagnosticos, siguiente } from "./siguiente.js";
+import { actualizarTareas, agregarTareas, cargarTareas, guardarDiagnosticos, guardarTareas, rutasDe, siguiente } from "./siguiente.js";
 import { planoArchivo } from "./planoArchivo.js";
 import { separarListas } from "./render.js";
 import { iaOpts } from "./tutor.js";
@@ -30,6 +30,10 @@ import { acompanar } from "./acompanante.js";
 import { init } from "./init.js";
 import { actualizarMemoria, agregarPreguntas, leerMemoria, panorama, preguntasAbiertas, responderPregunta } from "./panorama.js";
 import { planoProyecto } from "./plano.js";
+import { verificar } from "./verificar.js";
+import { rapida } from "./rapida.js";
+import { cargarDialogos, conversar, olvidarDialogo } from "./dialogo.js";
+import { sobreElCodigo } from "./memoria.js";
 import { generadosPor } from "./snapshot.js";
 import { conocer, sugerirAutoria } from "./conocer.js";
 import { execFileSync } from "node:child_process";
@@ -1114,6 +1118,7 @@ CASES.push(
 // --- v0.5: notas, bloqueo, siguiente paso, formato y modelos por tamaño ---------------------
 const conNotas = (r: string, extra: object = {}) => fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ vista: "notas", ...extra }));
 const sha = (f: string) => crypto.createHash("sha1").update(fs.readFileSync(f)).digest("hex");
+const DOS = "export function a(x: number) {\n  return 10 / x;\n}\n\nexport function b(y: number) {\n  const z = y * 2;\n  return z;\n}\n";
 const respNota = (texto = "pensá en X", extra: object = {}) => ({ titulo: "Validar meses", que_hacer: "Agrega la validación al inicio", respuestas: [{ tipo: "pista", texto, links: [], codigo: "" }], nivel_usado: 2, ...extra });
 CASES.push(
   {
@@ -1127,7 +1132,7 @@ CASES.push(
       await runGuia(r, "src/n.ts");
       await runGuia(r, "src/n.ts"); // ya respondida: no vuelve a llamar
       const notas = cargarNotas(r, "src/n.ts");
-      return sha(f) === antes && calls.length === 1 && notas.length === 1 && notas[0]!.ancla.texto === "return m;" && notas[0]!.hilo.length === 2 && notas[0]!.accion.includes("validación");
+      return sha(f) === antes && calls.length === 1 && notas.length === 1 && notas[0]!.ancla.funcion === "f" && notas[0]!.ancla.linea === 1 && notas[0]!.hilo.length === 2 && notas[0]!.accion.includes("validación");
     },
   },
   {
@@ -1148,7 +1153,7 @@ CASES.push(
       conNotas(r);
       const calls = fakeLLM(() => respNota());
       const { nota } = await responderNota(r, { archivo: "src/cuota.ts", linea: 3, seleccion: "return monto / meses;", texto: "¿y si meses es 0?" });
-      return nota.ancla.texto === "return monto / meses;" && calls[0]!.prompt.includes("Sobre esta parte") && nota.hilo[0]!.quien === "tu";
+      return nota.ancla.funcion === "cuota" && calls[0]!.prompt.includes("Sobre esta parte") && nota.hilo[0]!.quien === "tu";
     },
   },
   {
@@ -1159,7 +1164,7 @@ CASES.push(
       await responderNota(r, { archivo: "src/cuota.ts", linea: 3, texto: "?" });
       const f = path.join(r, "src/cuota.ts");
       fs.writeFileSync(f, "// nuevo\n// nuevo\n" + TS);
-      const movida = cargarNotas(r, "src/cuota.ts")[0]!.ancla.linea === 5;
+      const movida = cargarNotas(r, "src/cuota.ts")[0]!.ancla.linea === 3;
       fs.writeFileSync(f, "export const x = 1;\n");
       const n = cargarNotas(r, "src/cuota.ts")[0]!;
       return movida && !!n.desanclada && n.estado === "abierta";
@@ -1175,7 +1180,7 @@ CASES.push(
       fakeLLM((o) => (o.kind === "revisar:consolidar" ? { mantener: [0] } : { hallazgos: [{ codigo: "  return 10 / x;", etiqueta: "issue", bloqueante: true, categoria: "div", texto: "x puede ser 0", links: [] }] }));
       const res = await runReview(r, "src/rv.ts", { solo: ["bugs"] });
       const notas = cargarNotas(r, "src/rv.ts");
-      return sha(f) === antes && res.insertados === 1 && notas[0]!.bloqueante && notas[0]!.ancla.texto === "return 10 / x;";
+      return sha(f) === antes && res.insertados === 1 && notas.length === 1 && notas[0]!.bloqueante && notas[0]!.ancla.funcion === "a";
     },
   },
   {
@@ -1250,7 +1255,7 @@ CASES.push(
       const res = await planoArchivo(r, "src/cuota.ts");
       const notas = cargarNotas(r, "src/cuota.ts");
       const tareas = cargarTareas(r);
-      return res.tareas === 1 && tareas[0]!.funcion === "validarMeses" && notas.some((n) => n.titulo === "Plano del archivo") && notas.some((n) => n.ancla.funcion === "cuota");
+      return res.tareas === 1 && tareas[0]!.funcion === "validarMeses" && notas.some((n) => n.alcance === "archivo") && notas.filter((n) => n.ancla.funcion === "cuota").length === 1;
     },
   },
   {
@@ -1355,6 +1360,201 @@ CASES.push(
       const n = cargarNotas(r, "src/cuota.ts")[0]!;
       const md = fs.readFileSync(path.join(r, "docs/ESTRUCTURA.md"), "utf8");
       return t.length === 1 && t[0] === "src/b.ts" && n.ancla.linea === 1 && !n.desanclada && md.includes("# Propuesta 2");
+    },
+  },
+  {
+    name: "una nota por función: revisión + plano sobre la misma función = UNA nota con dos mensajes",
+    run: async (r) => {
+      conNotas(r, { tests: { avisarSinTests: false } });
+      fs.writeFileSync(path.join(r, "src/d.ts"), DOS);
+      fakeLLM((o) => (o.kind === "revisar:consolidar" ? { mantener: [0, 1] } : o.kind === "plano-archivo" ? { resumen: "Dos funciones.", funciones: [{ nombre: "a", que_hace: "Divide.", recibe: "x", devuelve: "number", cuida: "x = 0", snippet: "" }], orden: "Empieza por a." } : { hallazgos: [{ codigo: "  return 10 / x;", etiqueta: "issue", bloqueante: true, categoria: "div", texto: "x puede ser 0", links: [] }, { codigo: "export function a(x: number) {", etiqueta: "suggestion", bloqueante: false, categoria: "nombres", texto: "nombre poco claro", links: [] }] }));
+      await runReview(r, "src/d.ts", { solo: ["bugs"] });
+      await planoArchivo(r, "src/d.ts");
+      const notas = cargarNotas(r, "src/d.ts").filter((n) => n.ancla.funcion === "a");
+      return notas.length === 1 && notas[0]!.hilo.length === 2 && notas[0]!.hilo[0]!.texto.includes("- issue") && notas[0]!.bloqueante;
+    },
+  },
+  {
+    name: "una nota por función: las notas duplicadas de antes se fusionan (migración) y un id viejo sigue sirviendo",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/d.ts"), DOS);
+      const notas = cargarNotas(r, "src/d.ts");
+      const v1 = nuevaNota(notas, { archivo: "src/d.ts", ancla: { linea: 2, texto: "return 10 / x;" }, tipo: "revision", titulo: "issue 1", origen: "revisar", hilo: [mensaje("ia", "uno")] });
+      nuevaNota(notas, { archivo: "src/d.ts", ancla: { linea: 2, texto: "return 10 / x;" }, tipo: "revision", titulo: "issue 2", origen: "revisar", hilo: [mensaje("ia", "dos")], bloqueante: true });
+      const v3 = nuevaNota(notas, { archivo: "src/d.ts", ancla: { linea: 1, texto: "export function a(x: number) {", funcion: "a" }, tipo: "plano", titulo: "a: divide", origen: "plano", hilo: [mensaje("ia", "tres")] });
+      nuevaNota(notas, { archivo: "src/d.ts", ancla: { linea: 6, texto: "const z = y * 2;" }, tipo: "revision", titulo: "b", origen: "revisar", hilo: [mensaje("ia", "de b")] });
+      guardarNotas(r, "src/d.ts", notas);
+      const calls = fakeLLM(() => respNota());
+      await responderNota(r, { archivo: "src/d.ts", notaId: v3.id, texto: "¿y ahora?" });
+      const final = cargarNotas(r, "src/d.ts").filter((n) => n.estado === "abierta");
+      const a = final.filter((n) => n.ancla.funcion === "a");
+      return final.length === 2 && a.length === 1 && a[0]!.id === v1.id && a[0]!.bloqueante && ["uno", "dos", "tres"].every((t) => a[0]!.hilo.some((m) => m.texto === t)) && a[0]!.titulo === "a" && calls.length === 1;
+    },
+  },
+  {
+    name: "responder sobre una función habla SOLO de ella: ve su código y apenas las firmas de las otras",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/d.ts"), DOS);
+      const calls = fakeLLM(() => respNota());
+      await responderNota(r, { archivo: "src/d.ts", linea: 7, texto: "¿está bien?" });
+      const p = calls[0]!.prompt;
+      return p.includes("SOLO de la función `b`") && p.includes("const z = y * 2;") && !p.includes("return 10 / x;") && p.includes("export function a(x: number) {");
+    },
+  },
+  {
+    name: "verificar: con error de sintaxis da 'falta' SIN IA; 'lista' cierra la nota; sin cambios no vuelve a llamar",
+    run: async (r) => {
+      conNotas(r);
+      const f = path.join(r, "src/d.ts");
+      fs.writeFileSync(f, "export function a(x: number) {\n  return 10 / ;\n}\n");
+      const calls = fakeLLM(() => ({ estado: "lista", resumen: "Divide y cuida el cero.", mejoras: [], que_hacer: "" }));
+      const v1 = await verificar(r, "src/d.ts", { funcion: "a" });
+      fs.writeFileSync(f, "export function a(x: number) {\n  if (x === 0) throw new Error('x no puede ser 0');\n  return 10 / x;\n}\n");
+      const v2 = await verificar(r, "src/d.ts", { funcion: "a" });
+      const nota = cargarNotas(r, "src/d.ts").find((n) => n.ancla.funcion === "a")!;
+      // Al guardar (sin --funcion) una función sin nota abierta no se verifica, y una sin cambios tampoco.
+      const v3 = await verificar(r, "src/d.ts", {});
+      return v1.veredictos[0]!.estado === "falta" && v1.veredictos[0]!.sinIa && calls.length === 1 && v2.veredictos[0]!.estado === "lista" && nota.estado === "resuelta" && nota.verificacion?.estado === "lista" && v3.veredictos.length === 0;
+    },
+  },
+  {
+    name: "tareas: 'Crear TaskRule.js (y JournalRule.ts)' se separa en dos; una creada en otra carpeta cuenta; las hechas se archivan",
+    run: async (r) => {
+      agregarTareas(r, [{ titulo: "Crear TaskRule.js (y JournalRule.ts)", archivo: "TaskRule.js (y JournalRule.ts)", crear: true, origen: "estructura" }]);
+      fs.mkdirSync(path.join(r, "src/reglas"), { recursive: true });
+      fs.writeFileSync(path.join(r, "src/reglas/JournalRule.ts"), "");
+      const t1 = await actualizarTareas(r);
+      const separadas = t1.filter((t) => t.crear).map((t) => t.archivo).sort().join(",") === "JournalRule.ts,TaskRule.js";
+      const journal = t1.find((t) => t.archivo === "JournalRule.ts")!;
+      const vieja = cargarTareas(r);
+      vieja.find((t) => t.archivo === "JournalRule.ts")!.hechaEn = new Date(Date.now() - 2 * 86400_000).toISOString();
+      guardarTareas(r, vieja);
+      const t2 = await actualizarTareas(r);
+      return separadas && journal.hecha && journal.detalle!.includes("src/reglas/JournalRule.ts") && t2.find((t) => t.archivo === "JournalRule.ts")!.archivada === true && !t2.find((t) => t.archivo === "TaskRule.js")!.hecha;
+    },
+  },
+  {
+    name: "preguntas: no se pregunta lo que se puede ver en el código ('¿cuota.ts ya valida…?')",
+    run: async (r) => {
+      fakeLLM((o) => (o.kind === "panorama:resumen" ? { resumenes: [] } : { estado: "x", sugerencias: [], alternativas: [], riesgos: [], preguntas: [{ pregunta: "¿cuota.ts ya valida los meses?", sugerencia: "" }, { pregunta: "¿En qué moneda trabajas?", sugerencia: "CLP" }] }));
+      await panorama(r);
+      const ab = preguntasAbiertas(r).map((q) => q.pregunta);
+      return ab.length === 1 && ab[0] === "¿En qué moneda trabajas?" && sobreElCodigo("¿Existe normalize?", ["normalize"]) && !sobreElCodigo("¿moveTo debe sobrescribir si existe?", ["moveTo"]);
+    },
+  },
+  {
+    name: "[seg] vista notas: la IA del chat no puede AGREGAR comentarios @guia (sí limpiarlos); se le indica 'cai responder'",
+    run: async (r) => {
+      conNotas(r);
+      const agrega = await edit(r, "src/cuota.ts", "  return monto / meses;", "  // @guia[c1.1] pista: ojo con meses = 0\n  return monto / meses;");
+      const msg = JSON.stringify(agrega);
+      fs.writeFileSync(path.join(r, "src/cuota.ts"), TS.replace("  return monto / meses;", "  // @guia[c1.1] pista: x\n  return monto / meses;"));
+      const limpia = await edit(r, "src/cuota.ts", "  // @guia[c1.1] pista: x\n", "");
+      return denied(agrega) && msg.includes("cai responder") && !denied(limpia);
+    },
+  },
+  {
+    name: "rápidas: solo en funciones con nota, con caché (misma línea y código = sin IA) y apagables",
+    run: async (r) => {
+      conNotas(r);
+      const calls = fakeLLM(() => ({ texto: "valida que meses no sea 0" }));
+      const sinNota = await rapida(r, "src/cuota.ts", 3);
+      await responderNota(r, { archivo: "src/cuota.ts", linea: 3, texto: "?" });
+      const antes = calls.length;
+      const a = await rapida(r, "src/cuota.ts", 3);
+      const b = await rapida(r, "src/cuota.ts", 3);
+      conNotas(r, { rapidas: { activas: false } });
+      const off = await rapida(r, "src/cuota.ts", 3);
+      return sinNota.texto === "" && a.texto === "valida que meses no sea 0" && b.motivo === "caché" && calls.length === antes + 1 && off.motivo === "desactivadas";
+    },
+  },
+  {
+    name: "configuración: ayuda.porDefecto = pseudo da pseudocódigo al preguntar (salvo que pidas más)",
+    run: async (r) => {
+      conNotas(r, { ayuda: { porDefecto: "pseudo" } });
+      const calls = fakeLLM(() => respNota());
+      await responderNota(r, { archivo: "src/cuota.ts", linea: 3, texto: "¿cómo sigo?" });
+      return levelIn(calls[0]!) === 3 && calls[0]!.prompt.includes("pseudocódigo");
+    },
+  },
+  {
+    name: "memoria: conversar sobre una pregunta guarda el hilo; al responderla, el hilo se borra",
+    run: async (r) => {
+      actualizarMemoria(r, (m) => m.abiertas.push({ p: "¿Qué base de datos? (sugerencia: SQLite)", r: "" }));
+      const calls = fakeLLM(() => ({ texto: "Importa porque cambia dónde guardar; te recomiendo SQLite." }));
+      const c = await conversar(r, 1, "¿por qué me lo preguntas?");
+      const guardado = cargarDialogos(r)["¿Qué base de datos?"]?.length === 2;
+      const p = responderPregunta(r, 1, "SQLite");
+      olvidarDialogo(r, p);
+      return calls.length === 1 && c.hilo.length === 2 && guardado && !cargarDialogos(r)["¿Qué base de datos?"];
+    },
+  },
+  {
+    name: "[rev] métodos con el mismo nombre en clases distintas tienen cada uno SU nota",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/c.ts"), "class A {\n  render() {\n    return 1;\n  }\n}\nclass B {\n  render() {\n    return 2;\n  }\n}\n");
+      fakeLLM(() => respNota());
+      await responderNota(r, { archivo: "src/c.ts", linea: 3, texto: "a" });
+      await responderNota(r, { archivo: "src/c.ts", linea: 8, texto: "b" });
+      const n = cargarNotas(r, "src/c.ts").filter((x) => x.estado === "abierta");
+      return n.length === 2 && n.some((x) => x.ancla.linea === 2) && n.some((x) => x.ancla.linea === 7);
+    },
+  },
+  {
+    name: "[rev] un @ia? ya respondido no se vuelve a responder aunque su nota se cierre o se fusione",
+    run: async (r) => {
+      conNotas(r);
+      const f = path.join(r, "src/n.ts");
+      fs.writeFileSync(f, "export function f(m: number) {\n  // @ia? ¿cómo valido m?\n  return m;\n}\n");
+      const calls = fakeLLM(() => respNota());
+      await runGuia(r, "src/n.ts");
+      const notas = cargarNotas(r, "src/n.ts");
+      notas[0]!.estado = "resuelta";
+      guardarNotas(r, "src/n.ts", notas);
+      await runGuia(r, "src/n.ts");
+      return calls.length === 1;
+    },
+  },
+  {
+    name: "[rev] el acompañante no suelta el bloqueo del archivo cuando 'verificar' (adentro) termina",
+    run: async (r) => {
+      const a = ocupar(r, "src/cuota.ts", "acompañando");
+      await conBloqueo(r, "src/cuota.ts", "verificando", async () => true);
+      const sigue = enCurso(r).length === 1;
+      if (a.ok) a.liberar();
+      return a.ok && sigue && enCurso(r).length === 0;
+    },
+  },
+  {
+    name: "[rev] '¿quedó lista?' de una función sin cambios desde 'lista' no crea otra nota ni llama a la IA",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/d.ts"), "export function a(x: number) {\n  if (x === 0) throw new Error('x no puede ser 0');\n  return 10 / x;\n}\n");
+      const calls = fakeLLM(() => ({ estado: "lista", resumen: "ok", mejoras: [], que_hacer: "" }));
+      await verificar(r, "src/d.ts", { funcion: "a" });
+      const v = await verificar(r, "src/d.ts", { funcion: "a" });
+      return calls.length === 1 && v.veredictos[0]!.omitida === true && cargarNotas(r, "src/d.ts").length === 1;
+    },
+  },
+  {
+    name: "[rev] rutas sin extensión válidas (Dockerfile, .env) se aceptan; un 'index.ts' en otra carpeta no cuenta como hecho",
+    run: async (r) => {
+      agregarTareas(r, [{ titulo: "Crear src/api/index.ts", archivo: "src/api/index.ts", crear: true, origen: "estructura" }]);
+      fs.writeFileSync(path.join(r, "src/index.ts"), "");
+      const t = await actualizarTareas(r);
+      return rutasDe("Dockerfile y .env").join(",") === "Dockerfile,.env" && !t.find((x) => x.archivo === "src/api/index.ts")!.hecha;
+    },
+  },
+  {
+    name: "[seg][rev] vista notas: reescribir un @guia existente también se rechaza; desde el chat no se descartan tareas",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/cuota.ts"), TS.replace("  return monto / meses;", "  // @guia[c1.1] pista: x\n  return monto / meses;"));
+      const reescribe = await edit(r, "src/cuota.ts", "// @guia[c1.1] pista: x", "// @guia[c1.1] pista: otra cosa");
+      return denied(reescribe) && generadosPor("cai tareas descartar t1") === null && generadosPor("cai tareas hecha t1") !== null;
     },
   },
   {

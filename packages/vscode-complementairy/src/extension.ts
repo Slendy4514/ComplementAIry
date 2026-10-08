@@ -2,7 +2,10 @@ import { execFile } from "node:child_process";
 import * as vscode from "vscode";
 import { Acciones, insertarSnippet, revisarConEdiciones } from "./acciones";
 import { Lentes } from "./codelens";
-import { cli, correr, envVista, guardadoPropio, guardar, mostrarError, output, root, silenciado, vista } from "./comun";
+import { cli, correr, envVista, guardadoPropio, guardar, leerConfig, mostrarError, output, root, silenciado, vista } from "./comun";
+import { registrarConfiguracion } from "./configuracion";
+import { NotaPanel } from "./notaView";
+import { Rapidas } from "./rapidas";
 import { Estado } from "./estado";
 import { NotasView } from "./notasView";
 import { Panel } from "./panel";
@@ -80,11 +83,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   const estado = new Estado();
   estado.registrar(ctx);
-  const notas = new NotasView((doc, n, i) => insertarSnippet(doc, n, i));
+  const notas = new NotasView((doc, n, i) => insertarSnippet(doc, n, i), ctx.extensionUri);
   notas.registrar(ctx);
   new Acciones(notas).registrar(ctx);
   new Lentes(notas).registrar(ctx);
   new Panel(estado).registrar(ctx);
+  new NotaPanel(notas).registrar(ctx);
+  new Rapidas(notas).registrar(ctx);
+  registrarConfiguracion(ctx);
 
   const vistaActual = () => {
     const cwd = root(vscode.window.activeTextEditor?.document);
@@ -203,15 +209,59 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   });
 
-  // Acompañante: al guardar, en segundo plano. La CLI deja UN pedido en espera si ya hay otro en curso.
+  // Acompañante: al guardar, en segundo plano. Cuidado con el autoguardado: Ctrl+S actúa enseguida;
+  // un autoguardado espera a que dejes de editar (acompanar.esperaAutoguardado, 45 s) y corre UNA vez.
+  const motivos = new Map<string, vscode.TextDocumentSaveReason>();
+  const asentados = new Map<string, NodeJS.Timeout>();
+  const programarAsentado = (doc: vscode.TextDocument) => {
+    const k = doc.uri.toString();
+    clearTimeout(asentados.get(k));
+    const cwd = root(doc);
+    const espera = (cwd ? leerConfig(cwd).acompanar?.esperaAutoguardado : undefined) ?? 45;
+    asentados.set(
+      k,
+      setTimeout(() => {
+        asentados.delete(k);
+        if (!doc.isClosed) acompanarAhora(doc, "asentado");
+      }, Math.max(5, espera) * 1000),
+    );
+  };
   ctx.subscriptions.push(
+    vscode.workspace.onWillSaveTextDocument((e) => motivos.set(e.document.uri.toString(), e.reason)),
     vscode.workspace.onDidSaveTextDocument((doc) => {
+      const motivo = motivos.get(doc.uri.toString()) ?? vscode.TextDocumentSaveReason.Manual;
+      motivos.delete(doc.uri.toString());
       // Los guardados que hace la extensión antes de un pedido tuyo no disparan el acompañante.
-      if (!vscode.workspace.getConfiguration("cai").get<boolean>("acompanar", true) || silenciado() || guardadoPropio(doc)) return;
+      if (guardadoPropio(doc)) return;
+      if (motivo === vscode.TextDocumentSaveReason.Manual) {
+        clearTimeout(asentados.get(doc.uri.toString()));
+        asentados.delete(doc.uri.toString());
+        acompanarAhora(doc, "manual");
+      } else programarAsentado(doc);
+    }),
+    // Si sigues escribiendo, la espera vuelve a empezar.
+    vscode.workspace.onDidChangeTextDocument((e) => e.contentChanges.length && asentados.has(e.document.uri.toString()) && programarAsentado(e.document)),
+    // Al cambiar de archivo, lo pendiente del anterior corre ya (terminaste ahí, por ahora).
+    vscode.window.onDidChangeActiveTextEditor((ed) => {
+      // Pasar a un panel (Nota, terminal, salida) no cuenta como cambiar de archivo.
+      if (!ed) return;
+      for (const [k, t] of asentados)
+        if (k !== ed?.document.uri.toString()) {
+          clearTimeout(t);
+          asentados.delete(k);
+          const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === k);
+          if (doc && !doc.isDirty) acompanarAhora(doc, "asentado");
+        }
+    }),
+    { dispose: () => asentados.forEach((t) => clearTimeout(t)) },
+  );
+  function acompanarAhora(doc: vscode.TextDocument, motivo: "manual" | "asentado"): void {
+    {
+      if (!vscode.workspace.getConfiguration("cai").get<boolean>("acompanar", true) || silenciado()) return;
       const cwd = root(doc);
       const file = doc.uri.fsPath;
       if (!cwd || doc.uri.scheme !== "file" || /[\\/](\.cai|\.aicode|\.claude|node_modules|\.git)[\\/]/.test(file)) return;
-      execFile("sh", ["-c", `${cli()} acompanar ${shq(file)} --json`], { cwd, maxBuffer: 16 << 20, env: { ...process.env, CLAUDE_PROJECT_DIR: cwd } }, (err, stdout, stderr) => {
+      execFile("sh", ["-c", `${cli()} acompanar ${shq(file)} --json --motivo ${motivo}`], { cwd, maxBuffer: 16 << 20, env: { ...process.env, CLAUDE_PROJECT_DIR: cwd } }, (err, stdout, stderr) => {
         if (err) {
           output.appendLine(`acompañante: ${stderr || err.message}`);
           return;
@@ -231,7 +281,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
             "sin-tests": "esta función no tiene tests (botón 🧪 Tests)",
             resuelto: "¡resuelto!",
           };
-          const txt = r.acciones.map((a) => msgs[a.tipo] ?? a.tipo).join(" · ");
+          const ESTADOS: Record<string, string> = { lista: "🟢 lista", casi: "🟡 casi lista", falta: "🔴 falta" };
+          const txt = r.acciones
+            .map((a) => (a.tipo === "verificado" ? a.detalle.replace(/: (lista|casi|falta)$/, (_, e: string) => ` ${ESTADOS[e]}`) : (msgs[a.tipo] ?? a.tipo)))
+            .join(" · ");
           if (txt) vscode.window.setStatusBarMessage(`ComplementAIry: ${txt}`, 8000);
           if (r.acciones.some((a) => a.tipo === "plano-proyecto"))
             vscode.window.showInformationMessage("ComplementAIry: te dejé una propuesta de estructura del proyecto (panel → Proyecto → Estructura). Lo que falta crear está en tus tareas.", "Abrir").then(async (v) => {
@@ -241,8 +294,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
           output.appendLine(`acompañante: salida inesperada: ${stdout.slice(0, 200)}`);
         }
       });
-    }),
-  );
+    }
+  }
 
   const abrir = async (cwd: string, ...partes: string[]) => {
     for (const dir of [".cai", ".aicode"]) {

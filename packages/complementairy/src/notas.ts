@@ -44,11 +44,37 @@ export interface Nota {
   nivel?: number;
   /** Mensajes humanos ya respondidos que vinieron de un @ia? del archivo. */
   turnos?: number;
+  /** Varios @ia? pueden caer en la misma nota (una por función): turnos respondidos por cada uno. */
+  fuentes?: Record<string, number>;
+  /** Resultado de "¿quedó lista?" (cai verificar). */
+  verificacion?: { estado: "lista" | "casi" | "falta"; resumen: string; fecha: string; hash: string };
   creada: string;
   actualizada: string;
 }
 
 const archivoNotas = (root: string, rel: string) => path.join(dataDir(root), "notas", rel.replace(/[\\/]/g, "__") + ".json");
+
+/**
+ * ¿Esta línea DEFINE la función (no la llama, como `this.moveTo(x)` o `init();`)? La clave puede ser
+ * "nombre#k" (k-ésima función con ese nombre).
+ */
+export function lineaDeDefinicion(lineas: string[], clave: string): number {
+  const nombre = clave.replace(/#\d+$/, "");
+  const k = Number(/#(\d+)$/.exec(clave)?.[1] ?? 1);
+  const esc = nombre.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const inicio = new RegExp(`^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?(?:static\\s+)?(?:(?:function\\*?|def|fn|func|fun|const|let|var|private|public|protected|override|get|set)\\s+)*${esc}\\s*(?:[=:(<])`);
+  const conPalabra = new RegExp(`\\b(?:function|def|fn|func|fun|const|let|var)\\s+\\*?\\s*${esc}\\b`);
+  let vistas = 0;
+  for (let i = 0; i < lineas.length; i++) {
+    const l = lineas[i]!;
+    if (!inicio.test(l)) continue;
+    const sinComentario = l.replace(/\s*(\/\/|#).*$/, "").trimEnd();
+    // Una llamada termina en ";" o no abre bloque; una definición tiene palabra clave o abre `{`, `=>` o `:`.
+    const define = conPalabra.test(l) || (/(\{|=>|:)$/.test(sinComentario) && !/;$/.test(sinComentario));
+    if (define && ++vistas === k) return i;
+  }
+  return -1;
+}
 
 /** Busca el ancla en el texto actual: misma línea, o la más cercana con el mismo texto, o la función. */
 export function reanclar(src: string, n: Nota): Nota {
@@ -58,15 +84,14 @@ export function reanclar(src: string, n: Nota): Nota {
   const objetivo = n.ancla.texto.trim();
   const i = n.ancla.linea - 1;
   if (objetivo && lineas[i]?.trim() === objetivo) return { ...n, desanclada: false };
+  if (n.ancla.funcion) {
+    const k = lineaDeDefinicion(lineas, n.ancla.funcion);
+    if (k >= 0) return { ...n, ancla: { ...n.ancla, linea: k + 1, texto: lineas[k]!.trim() }, desanclada: false };
+  }
   if (objetivo) {
     let mejor = -1;
     for (let k = 0; k < lineas.length; k++) if (lineas[k]!.trim() === objetivo && (mejor < 0 || Math.abs(k - i) < Math.abs(mejor - i))) mejor = k;
     if (mejor >= 0) return { ...n, ancla: { ...n.ancla, linea: mejor + 1 }, desanclada: false };
-  }
-  if (n.ancla.funcion) {
-    const re = new RegExp(`\\b${n.ancla.funcion.replace(/[$]/g, "\\$")}\\b\\s*(=\\s*(async\\s*)?\\(|\\(|:)`);
-    const k = lineas.findIndex((l) => re.test(l));
-    if (k >= 0) return { ...n, ancla: { ...n.ancla, linea: k + 1, texto: lineas[k]!.trim() }, desanclada: false };
   }
   // Sin lugar: queda visible como "desanclada", nunca se pierde.
   return { ...n, ancla: { ...n.ancla, linea: Math.min(Math.max(1, n.ancla.linea), Math.max(1, lineas.length)) }, desanclada: !!objetivo };

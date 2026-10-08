@@ -40,7 +40,15 @@ export interface Config {
     revisar: boolean;
     /** Nivel por carpeta: { "src/legacy/**": "silencioso", "src/nuevo/**": "activo" } (gana el primero que coincide). */
     porCarpeta: Record<string, "silencioso" | "normal" | "activo">;
+    /** "¿Quedó lista?" automático al guardar las funciones con nota que cambiaron (modelo chico). */
+    verificar: boolean;
+    /** Con autoguardado: segundos sin editar antes de que el acompañante actúe (en VSCode). */
+    esperaAutoguardado: number;
   };
+  /** Qué ayuda dar cuando preguntas sin pedir un escalón: "auto" (según tu nivel) o uno fijo. */
+  ayuda: { porDefecto: "auto" | "pista" | "piezas" | "pseudo" | "ejemplo" };
+  /** Sugerencias rápidas (texto gris al final de la línea, en VSCode). */
+  rapidas: { activas: boolean; esperaMs: number };
   /**
    * Dónde se muestra lo que dice la IA: "notas" (hilos de VSCode al costado del código; el archivo no
    * se toca) o "comentarios" (comentarios @guia dentro del archivo, para terminal y otros editores).
@@ -134,7 +142,9 @@ export const DEFAULT_CONFIG: Config = {
   bash: { permitir: [] },
   snapshot: { ignorar: [], maxBytes: 1024 * 1024 },
   snippets: { modo: "ganado", lenguajes: [] },
-  acompanar: { nivel: "normal", intentos: 3, maxLlamadasHora: 20, revisar: true, porCarpeta: {} },
+  acompanar: { nivel: "normal", intentos: 3, maxLlamadasHora: 20, revisar: true, porCarpeta: {}, verificar: true, esperaAutoguardado: 45 },
+  ayuda: { porDefecto: "auto" },
+  rapidas: { activas: true, esperaMs: 2000 },
   practicas: { maxFuncionesArchivo: 12, maxLineasArchivo: 300, maxLineasFuncion: 40, maxAnidamiento: 3, maxParametros: 4 },
   autoria: { heredado: [], terceros: [], acompanarHeredado: false },
   tests: { carpeta: "tests", avisarSinTests: true },
@@ -162,6 +172,8 @@ export function loadConfig(root: string): Config {
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...raw.snapshot },
     snippets: { ...DEFAULT_CONFIG.snippets, ...raw.snippets },
     acompanar: { ...DEFAULT_CONFIG.acompanar, ...raw.acompanar },
+    ayuda: { ...DEFAULT_CONFIG.ayuda, ...raw.ayuda },
+    rapidas: { ...DEFAULT_CONFIG.rapidas, ...raw.rapidas },
     ia: { ...DEFAULT_CONFIG.ia, ...raw.ia, modelos: { ...DEFAULT_CONFIG.ia.modelos, ...raw.ia?.modelos } },
     vista: raw.vista ?? (process.env.CAI_VISTA === "comentarios" || process.env.CAI_VISTA === "notas" ? process.env.CAI_VISTA : DEFAULT_CONFIG.vista),
     practicas: { ...DEFAULT_CONFIG.practicas, ...raw.practicas },

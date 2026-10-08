@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse } from "./comments.js";
-import { dataDir } from "./config.js";
+import { dataDir, makeZoner } from "./config.js";
+import { listFiles } from "./files.js";
 import { langFor } from "./lang.js";
 import { medir } from "./metricas.js";
 import { todasLasNotas } from "./notas.js";
@@ -33,6 +34,11 @@ export interface Tarea {
   /** Por qué y cómo (en palabras), para el tooltip del panel. */
   detalle?: string;
   hecha: boolean;
+  /** Cuándo se marcó hecha (las hechas hace más de un día se archivan). */
+  hechaEn?: string;
+  /** Archivada (hecha hace rato o descartada): no aparece en el panel ni en "siguiente". */
+  archivada?: boolean;
+  descartada?: boolean;
   origen: "plano" | "estructura" | "panorama" | "manual";
   creada: string;
 }
@@ -61,6 +67,24 @@ export function guardarDiagnosticos(root: string, rel: string, diags: Diagnostic
   else delete todo[rel];
   fs.mkdirSync(path.dirname(diagFile(root)), { recursive: true });
   fs.writeFileSync(diagFile(root), JSON.stringify(todo, null, 2));
+}
+
+/**
+ * Rutas de verdad a partir de lo que escribió la IA: "src/a.js (y src/b.ts)", "a.js, b.js" o
+ * "`a.js` y `b.js`" → ["src/a.js", "src/b.ts"]. Lo que no parece una ruta con extensión se descarta.
+ */
+export function rutasDe(texto: string): string[] {
+  const partes = texto
+    .replace(/[`"'*]/g, " ")
+    .split(/\s*(?:,|;|\(|\)|\s+y\s+|\s+and\s+|\s+o\s+|\s+or\s+|\s+)\s*/i)
+    .map((x) => x.trim().replace(/^\.\//, "").replace(/[.:]+$/, ""))
+    .filter((x) => !x.startsWith("/") && !x.split("/").includes(".."))
+    .filter((x) => {
+      const base = x.split("/").pop()!;
+      // Con extensión, un archivo conocido sin extensión (Dockerfile, Makefile…) o un dotfile (.env, .gitignore).
+      return /^[\w@.\-/]+$/.test(x) && (/\.[A-Za-z0-9]{1,8}$/.test(base) || /^(Dockerfile|Makefile|Procfile|Gemfile|Rakefile|Jenkinsfile|Vagrantfile|LICENSE|README)$/.test(base) || /^\.[\w.-]+$/.test(base));
+    });
+  return [...new Set(partes)];
 }
 
 export function cargarTareas(root: string): Tarea[] {
@@ -95,12 +119,52 @@ export function agregarTareas(root: string, nuevas: Omit<Tarea, "id" | "hecha" |
 export async function actualizarTareas(root: string): Promise<Tarea[]> {
   const tareas = cargarTareas(root);
   let cambio = false;
-  for (const t of tareas.filter((x) => !x.hecha && x.crear && x.archivo))
+  const ahora = new Date().toISOString();
+  // Tareas viejas con varias rutas en una ("a.js (y b.ts)"): se separan; sin ruta válida, se archivan.
+  for (const t of [...tareas].filter((x) => x.crear && x.archivo && !x.hecha && !x.archivada)) {
+    const rutas = rutasDe(t.archivo!);
+    if (rutas.length === 1 && rutas[0] === t.archivo) continue;
+    cambio = true;
+    if (!rutas.length) {
+      t.archivada = true;
+      continue;
+    }
+    // Si solo había que ordenar la ruta ("./a.js"), el título y la descripción se conservan.
+    if (rutas.length > 1 || !t.titulo.includes(rutas[0]!)) t.titulo = `Crear ${rutas[0]}`;
+    t.archivo = rutas[0]!;
+    for (const r of rutas.slice(1)) {
+      if (tareas.some((x) => x.archivo === r && x.crear)) continue;
+      const max = Math.max(0, ...tareas.map((x) => Number(/^t(\d+)$/.exec(x.id)?.[1] ?? 0)));
+      tareas.push({ ...t, id: `t${max + 1}`, archivo: r, titulo: `Crear ${r}` });
+    }
+  }
+  let todos: string[] | null = null;
+  for (const t of tareas.filter((x) => !x.hecha && !x.archivada && x.crear && x.archivo)) {
     if (fs.existsSync(path.join(root, t.archivo!))) {
-      t.hecha = true;
+      Object.assign(t, { hecha: true, hechaEn: ahora });
+      cambio = true;
+      continue;
+    }
+    // ¿Lo creaste con el mismo nombre en otra carpeta? También cuenta (y se dice dónde).
+    todos ??= listFiles(makeZoner(root));
+    // Solo si ese nombre es único en el proyecto (un "index.ts" o "utils.ts" en otro lado no cuenta).
+    const mismos = todos.filter((f) => path.basename(f) === path.basename(t.archivo!));
+    const otro = mismos.length === 1 && !/^(index|main|utils?|helpers?|types|config|app|mod|__init__)\./i.test(path.basename(t.archivo!)) ? mismos[0] : undefined;
+    if (otro) {
+      Object.assign(t, { hecha: true, hechaEn: ahora, detalle: `${t.detalle ?? ""} (lo creaste en ${otro})`.trim() });
       cambio = true;
     }
-  for (const t of tareas.filter((x) => !x.hecha && x.funcion && x.archivo)) {
+  }
+  // Las hechas hace más de un día se archivan: el panel no se llena.
+  for (const t of tareas.filter((x) => x.hecha && !x.archivada))
+    if (!t.hechaEn) {
+      t.hechaEn = ahora;
+      cambio = true;
+    } else if (Date.now() - Date.parse(t.hechaEn) > 24 * 3600_000) {
+      t.archivada = true;
+      cambio = true;
+    }
+  for (const t of tareas.filter((x) => !x.hecha && !x.archivada && x.funcion && x.archivo)) {
     const abs = path.join(root, t.archivo!);
     const lang = langFor(t.archivo!);
     if (!lang || !fs.existsSync(abs)) continue;
@@ -108,6 +172,7 @@ export async function actualizarTareas(root: string): Promise<Tarea[]> {
     const parsed = await parse(src, lang).catch(() => null); // si no se puede analizar, la tarea sigue pendiente
     if (parsed && medir(src, parsed).funciones.some((f) => f.nombre === t.funcion)) {
       t.hecha = true;
+      t.hechaEn = ahora;
       cambio = true;
     }
   }
@@ -136,7 +201,7 @@ export async function siguiente(root: string): Promise<Paso[]> {
   }
 
   // 3. Tareas del plano.
-  for (const t of (await actualizarTareas(root)).filter((x) => !x.hecha))
+  for (const t of (await actualizarTareas(root)).filter((x) => !x.hecha && !x.archivada))
     pasos.push({
       prioridad: 3,
       tipo: "tarea",

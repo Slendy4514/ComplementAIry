@@ -45,6 +45,9 @@ function leer(f: string): Ocupacion | null {
 
 export type Resultado = { ok: true; liberar: () => void } | { ok: false; por: Ocupacion };
 
+/** Cuántas veces este proceso tomó cada archivo (reentrante): se suelta recién al llegar a cero. */
+const tomas = new Map<string, number>();
+
 /** Toma el archivo (o "proyecto") para una tarea. Si ya hay otra en curso, devuelve quién lo tiene. */
 export function ocupar(root: string, archivo: string, tarea: string, linea?: number): Resultado {
   const d = dir(root);
@@ -52,6 +55,19 @@ export function ocupar(root: string, archivo: string, tarea: string, linea?: num
   const f = path.join(d, `${clave(archivo)}.json`);
   const actual = leer(f);
   if (actual && actual.pid !== process.pid) return { ok: false, por: actual };
+  if (actual && (tomas.get(f) ?? 0) > 0) {
+    // Ya lo tiene este proceso (p. ej. el acompañante llama a "verificar"): no se suelta al terminar lo de adentro.
+    tomas.set(f, tomas.get(f)! + 1);
+    let hecho = false;
+    return {
+      ok: true,
+      liberar: () => {
+        if (hecho) return;
+        hecho = true;
+        tomas.set(f, Math.max(0, (tomas.get(f) ?? 1) - 1));
+      },
+    };
+  }
   const o: Ocupacion = { pid: process.pid, tarea, archivo, ...(linea ? { linea } : {}), desde: new Date().toISOString() };
   try {
     // "wx": si otro proceso lo creó en el mismo instante, gana el primero.
@@ -61,11 +77,13 @@ export function ocupar(root: string, archivo: string, tarea: string, linea?: num
     if (otro) return { ok: false, por: otro };
     fs.writeFileSync(f, JSON.stringify(o));
   }
+  tomas.set(f, 1);
   let liberado = false;
   const liberar = () => {
     if (liberado) return;
     liberado = true;
     process.removeListener("exit", liberar);
+    tomas.delete(f);
     const yo = leer(f);
     if (yo?.pid === process.pid) fs.rmSync(f, { force: true });
   };

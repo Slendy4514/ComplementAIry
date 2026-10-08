@@ -59,9 +59,12 @@ export function generadosPor(comando: string): ((rel: string, antes: Buffer | nu
     case "notas":
     case "predecir":
     case "check":
+    case "verificar":
     case "siguiente":
-    case "tareas":
       return (rel) => notasYTareas(rel);
+    case "tareas":
+      // Descartar una tarea es definitivo (no vuelve a proponerse): eso lo decide el humano.
+      return /\btareas\s+descartar\b/.test(comando) ? null : (rel) => notasYTareas(rel);
     case "tests":
       return (rel) => notasYTareas(rel); // el archivo de tests nuevo/ampliado ya pasa por "solo comentarios"
     case "panorama":

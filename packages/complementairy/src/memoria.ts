@@ -35,3 +35,24 @@ export function agregarPreguntas(m: Memoria, preguntas: string[]): void {
   }
 }
 
+
+/**
+ * ¿La pregunta es sobre algo que se puede ver en el código? ("¿cuota.ts ya valida…?", "¿existe
+ * validarMeses?"). Esas no se le hacen al programador: se leen. Filtro sin IA.
+ */
+export function sobreElCodigo(pregunta: string, nombres: string[]): boolean {
+  const p = pregunta.toLowerCase().replace(/[¿?`"']/g, " ").replace(/\s+/g, " ").trim();
+  const VERBO = "(?:hace|tiene|existe|existen|est[aá]|maneja|valida|usa|incluye|implementa|soporta|guarda|devuelve|retorna|contiene|lee|escribe|llama|exporta|importa|crea|mueve|borra)";
+  const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const n of nombres) {
+    const base = n.split("/").pop()!.toLowerCase();
+    const alias = [base, base.replace(/\.[^.]+$/, "")].filter((x) => x.length > 3);
+    for (const a of alias) {
+      const nombre = `(?<![\\p{L}\\d_.])${esc(a)}(?![\\p{L}\\d_])`;
+      // "¿X ya hace…?", "¿X valida…?" (el código ES la respuesta) · "¿existe X?", "¿hay un X?"
+      if (new RegExp(`${nombre}\\s+(?:ya\\s+\\p{L}+|(?:no\\s+)?${VERBO}\\b)`, "u").test(p)) return true;
+      if (new RegExp(`^(?:ya\\s+)?(?:existe|existen|hay)\\b.*${nombre}`, "u").test(p)) return true;
+    }
+  }
+  return false;
+}

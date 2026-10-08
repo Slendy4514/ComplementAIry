@@ -302,7 +302,7 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
       })),
       { vista: o.ediciones ? "comentarios" : "notas", ediciones: !!o.ediciones },
     );
-    res.insertados = vista === "notas" && !o.ediciones ? sal.notas.length : sal.ediciones.length;
+    res.insertados = vista === "notas" && !o.ediciones ? (sal.notas.length ? findings.length : 0) : sal.ediciones.length;
     res.ediciones = sal.ediciones;
     guardarCache();
     terminarPerfil();

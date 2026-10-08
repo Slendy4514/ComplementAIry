@@ -218,3 +218,38 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - las demás gramáticas siguen saliendo de `tree-sitter-wasms`; probé que las 23 cargan;
   - si un archivo no se puede analizar, el panorama lo salta con un aviso en vez de caerse.
 - Selftest: 135/135, incluidas las garantías de seguridad, que dependen de este analizador.
+
+## v0.7: una nota por función, panel "Nota", "¿quedó lista?" (2026-10-08)
+- **Feedback del usuario:**
+  - las notas duplicaban y comentaban otras funciones;
+  - estorbaban entre la firma y el cuerpo, y robaban el foco al escribir;
+  - quería pedir "¿quedó lista?";
+  - la tarea "Crear TaskRule.js (y JournalRule.ts)" quedaba rota;
+  - faltaba dinamismo y sugerencias rápidas;
+  - el texto de las tareas aparecía cortado, las tareas nunca se archivaban y "Después" repetía "Tareas";
+  - quería conversar sobre las preguntas, y que la IA no preguntara lo que se ve en el código;
+  - en modo notas, el chat debía usar notas;
+  - cuidado con el autoguardado;
+  - quería un lugar donde configurar todo.
+- **Decisiones del usuario:** panel lateral "Nota" que sigue al cursor; sugerencias como texto gris al final de la línea; "¿quedó lista?" con botón y también al guardar.
+- **Hecho:**
+  - **Una nota por función:** lo nuevo se agrega a su hilo, y las duplicadas viejas se fusionan al leerlas. `responder` solo ve la función de la nota. Los métodos con el mismo nombre se distinguen (`render#2`).
+  - **Panel "Nota":**
+    - muestra estado, "Qué hacer", botones, historial y una caja para conversar;
+    - también el detalle completo de tareas y preguntas;
+    - en el código ya no se abre nada: solo un ícono en el margen y CodeLens (los hilos en línea quedan como opción).
+  - **`cai verificar`:** primero sin IA; después lista (cierra la nota), casi o falta, sin repetir si la función no cambió. Corre al guardar con Ctrl+S, o con autoguardado cuando dejas de editar (45 s).
+  - **Tareas:** rutas normalizadas, archivo creado en otra carpeta (si el nombre es único), archivado al día siguiente y "descartar" (solo el humano).
+  - **Panel:** Ahora / Pendientes / Proyecto / Hechas / IA, con aviso de panorama desactualizado y archivos fuera de la estructura.
+  - **Preguntas:** filtro sin IA de lo que se ve en el código y `cai memoria conversar`.
+  - **Sugerencias rápidas:** tardan ~20 s y cuestan ~US$0,016 cada una, sobre todo por arrancar Claude Code en cada llamada.
+  - **Configuración:** pantalla que escribe solo lo que cambias en `.cai/config.json`.
+  - **Chat en vista notas:** el hook rechaza agregar o reescribir `@guia` y le indica `cai responder`.
+- **Revisión independiente:** encontró 21 problemas, todos corregidos con tests `[rev]`. Los principales:
+  - métodos homónimos compartían nota;
+  - la fusión perdía el estado de los `@ia?`, que se volvían a responder;
+  - el bloqueo del archivo se soltaba a mitad del acompañante;
+  - el panel aceptaba HTML de la IA (ahora se sanea);
+  - la configuración podía borrar claves del usuario.
+- **Prueba real:** nota → 🔴 falta (validación) → el usuario la agrega → 🟡 casi (falta validar monto y tasa). La conversación sobre una pregunta explicó por qué importaba, con un ejemplo.
+- Selftest: 151/151.

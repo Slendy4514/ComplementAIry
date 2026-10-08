@@ -2,7 +2,7 @@
   "name": "complementairy",
   "displayName": "ComplementAIry — tú programas, la IA te acompaña",
   "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "publisher": "complementairy",
   "license": "MIT",
   "engines": {
@@ -192,6 +192,27 @@
       {
         "command": "cai.responderPregunta",
         "title": "Responder pregunta"
+      },
+      {
+        "command": "cai.configurar",
+        "title": "ComplementAIry: configuración",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "cai.verificarFuncion",
+        "title": "ComplementAIry: ¿quedó lista esta función?"
+      },
+      {
+        "command": "cai.notaPanel.mostrar",
+        "title": "Mostrar nota"
+      },
+      {
+        "command": "cai.notaPanel.tarea",
+        "title": "Ver tarea"
+      },
+      {
+        "command": "cai.notaPanel.pregunta",
+        "title": "Ver pregunta"
       }
     ],
     "keybindings": [
@@ -228,6 +249,12 @@
         "command": "cai.siguiente",
         "key": "ctrl+alt+n",
         "mac": "cmd+alt+n"
+      },
+      {
+        "command": "cai.verificarFuncion",
+        "key": "ctrl+alt+l",
+        "mac": "cmd+alt+l",
+        "when": "editorTextFocus"
       }
     ],
     "configuration": {
@@ -272,6 +299,11 @@
           "type": "boolean",
           "default": true,
           "description": "Mostrar 💬 notas · 💡 Ayuda · 🧪 Tests sobre cada función (modo notas)."
+        },
+        "cai.notasEnLinea": {
+          "type": "boolean",
+          "default": false,
+          "description": "Mostrar las notas también como hilos dentro del código (entre las líneas). Apagado: ícono en el margen + panel Nota, que no quita el foco."
         }
       }
     },
@@ -315,6 +347,11 @@
     },
     "views": {
       "complementairy": [
+        {
+          "type": "webview",
+          "id": "cai.nota",
+          "name": "Nota"
+        },
         {
           "id": "cai.panel",
           "name": "Siguiente paso",
@@ -386,6 +423,18 @@
         },
         {
           "command": "cai.responderPregunta",
+          "when": "false"
+        },
+        {
+          "command": "cai.notaPanel.mostrar",
+          "when": "false"
+        },
+        {
+          "command": "cai.notaPanel.tarea",
+          "when": "false"
+        },
+        {
+          "command": "cai.notaPanel.pregunta",
           "when": "false"
         }
       ],
@@ -472,6 +521,11 @@
           "command": "cai.panel.refrescar",
           "when": "view == cai.panel",
           "group": "navigation@3"
+        },
+        {
+          "command": "cai.configurar",
+          "when": "view == cai.panel || view == cai.nota",
+          "group": "navigation@9"
         }
       ],
       "view/item/context": [

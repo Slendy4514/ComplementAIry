@@ -115,26 +115,51 @@ export interface Nota {
   prediccion?: { expresion: string; funcion: string };
   desanclada?: boolean;
   alcance?: "archivo";
+  verificacion?: { estado: "lista" | "casi" | "falta"; resumen: string; fecha: string; hash: string };
   actualizada: string;
 }
 
 export const archivoNotas = (cwd: string, rel: string) => path.join(dataDir(cwd), "notas", rel.replace(/[\\/]/g, "__") + ".json");
 
-/** Igual que en la CLI (notas.ts): misma línea, la más cercana con el mismo texto, o la función. */
+/** Línea (0-based) que DEFINE la función de la clave "nombre" o "nombre#k". Igual que en la CLI (notas.ts). */
+function lineaDeDefinicion(lineas: string[], clave: string): number {
+  const nombre = clave.replace(/#\d+$/, "");
+  const k = Number(/#(\d+)$/.exec(clave)?.[1] ?? 1);
+  const esc = nombre.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const inicio = new RegExp(`^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?(?:static\\s+)?(?:(?:function\\*?|def|fn|func|fun|const|let|var|private|public|protected|override|get|set)\\s+)*${esc}\\s*(?:[=:(<])`);
+  const conPalabra = new RegExp(`\\b(?:function|def|fn|func|fun|const|let|var)\\s+\\*?\\s*${esc}\\b`);
+  let vistas = 0;
+  for (let i = 0; i < lineas.length; i++) {
+    const l = lineas[i]!;
+    if (!inicio.test(l)) continue;
+    const sinComentario = l.replace(/\s*(\/\/|#).*$/, "").trimEnd();
+    const define = conPalabra.test(l) || (/(\{|=>|:)$/.test(sinComentario) && !/;$/.test(sinComentario));
+    if (define && ++vistas === k) return i;
+  }
+  return -1;
+}
+
+/** Clave de una función (símbolo de VSCode): su nombre, o "nombre#k" si se repite (igual que la CLI). */
+export function claveDeSimbolo(funciones: vscode.DocumentSymbol[], s: vscode.DocumentSymbol): string {
+  const nombre = (x: vscode.DocumentSymbol) => x.name.replace(/\(.*$/, "");
+  const mismos = funciones.filter((x) => nombre(x) === nombre(s)).sort((a, b) => a.range.start.line - b.range.start.line);
+  return mismos.length > 1 ? `${nombre(s)}#${mismos.indexOf(s) + 1}` : nombre(s);
+}
+
+/** Igual que en la CLI (notas.ts): misma línea, la función, o la línea más cercana con el mismo texto. */
 export function reanclar(lineas: string[], n: Nota): Nota {
   if (n.alcance === "archivo") return { ...n, ancla: { ...n.ancla, linea: 1 }, desanclada: false };
   const objetivo = n.ancla.texto.trim();
   const i = n.ancla.linea - 1;
   if (objetivo && lineas[i]?.trim() === objetivo) return { ...n, desanclada: false };
+  if (n.ancla.funcion) {
+    const k = lineaDeDefinicion(lineas, n.ancla.funcion);
+    if (k >= 0) return { ...n, ancla: { ...n.ancla, linea: k + 1, texto: lineas[k]!.trim() }, desanclada: false };
+  }
   if (objetivo) {
     let mejor = -1;
     for (let k = 0; k < lineas.length; k++) if (lineas[k]!.trim() === objetivo && (mejor < 0 || Math.abs(k - i) < Math.abs(mejor - i))) mejor = k;
     if (mejor >= 0) return { ...n, ancla: { ...n.ancla, linea: mejor + 1 }, desanclada: false };
-  }
-  if (n.ancla.funcion) {
-    const re = new RegExp(`\\b${n.ancla.funcion.replace(/[$]/g, "\\$")}\\b\\s*(=\\s*(async\\s*)?\\(|\\(|:)`);
-    const k = lineas.findIndex((l) => re.test(l));
-    if (k >= 0) return { ...n, ancla: { ...n.ancla, linea: k + 1, texto: lineas[k]!.trim() }, desanclada: false };
   }
   return { ...n, ancla: { ...n.ancla, linea: Math.min(Math.max(1, n.ancla.linea), Math.max(1, lineas.length)) }, desanclada: !!objetivo };
 }
@@ -143,13 +168,13 @@ export function reanclar(lineas: string[], n: Nota): Nota {
  * Notas abiertas de un documento, re-ancladas contra el texto ACTUAL del editor (aunque no esté guardado).
  * `undefined` si el archivo de notas no se pudo leer (así no se borran los hilos por un error pasajero).
  */
-export function notasDe(cwd: string, doc: vscode.TextDocument): Nota[] | undefined {
+export function notasDe(cwd: string, doc: vscode.TextDocument, incluirResueltas = false): Nota[] | undefined {
   const f = archivoNotas(cwd, relDe(cwd, doc.uri.fsPath));
   if (!fs.existsSync(f)) return [];
   try {
     const todas = (JSON.parse(fs.readFileSync(f, "utf8")) as { notas: Nota[] }).notas ?? [];
     const lineas = doc.getText().split(/\r?\n/);
-    return todas.filter((n) => n.estado === "abierta").map((n) => reanclar(lineas, n));
+    return todas.filter((n) => incluirResueltas || n.estado === "abierta").map((n) => (n.estado === "abierta" ? reanclar(lineas, n) : n));
   } catch {
     return undefined;
   }
@@ -216,4 +241,28 @@ export function silenciar(min: number): void {
 export function mostrarError(e: unknown): void {
   if (e instanceof OcupadoError) vscode.window.showWarningMessage(`ComplementAIry: ${e.message}`);
   else vscode.window.showErrorMessage(`ComplementAIry: ${(e as Error).message}`, "Ver salida").then((v) => v && output.show());
+}
+
+// --- Configuración del proyecto (.cai/config.json) ---------------------------------------------
+
+export interface ConfigProyecto {
+  vista?: "notas" | "comentarios";
+  ayuda?: { porDefecto?: string };
+  rapidas?: { activas?: boolean; esperaMs?: number };
+  acompanar?: { nivel?: string; revisar?: boolean; verificar?: boolean; esperaAutoguardado?: number; maxLlamadasHora?: number };
+  ia?: { modelos?: { chico?: string; mediano?: string; grande?: string } };
+  tests?: { carpeta?: string };
+  [k: string]: unknown;
+}
+
+/** Lo que está escrito en .cai/config.json (sin valores por defecto). Con `estricto`, un JSON inválido es un error (no {}). */
+export function leerConfig(cwd: string, estricto = false): ConfigProyecto {
+  const f = path.join(dataDir(cwd), "config.json");
+  if (!fs.existsSync(f)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(f, "utf8")) as ConfigProyecto;
+  } catch (e) {
+    if (estricto) throw new Error(`${path.relative(cwd, f)} no es un JSON válido (${(e as Error).message}); arréglalo antes de guardar la configuración para no perder lo que tiene`);
+    return {};
+  }
 }

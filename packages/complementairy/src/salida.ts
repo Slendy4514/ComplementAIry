@@ -3,7 +3,8 @@ import path from "node:path";
 import { parse } from "./comments.js";
 import { loadConfig } from "./config.js";
 import { langFor } from "./lang.js";
-import { cargarNotas, guardarNotas, mensaje, nuevaNota, type Nota, type Snippet } from "./notas.js";
+import { cargarNotas, guardarNotas, type Nota, type Snippet } from "./notas.js";
+import { agregar, consolidar, funcionesDe, notaPara } from "./notasFuncion.js";
 import { eolOf, insertAboveLine, renderReply, separarListas } from "./render.js";
 import { nextThreadId } from "./threads.js";
 
@@ -64,6 +65,21 @@ export function markdown(a: Pick<Aporte, "tipo" | "texto" | "links" | "accion" |
   return partes.join("\n\n");
 }
 
+/** Varios aportes del mismo tipo sobre la misma nota → un mensaje con una lista (no un muro). */
+export function markdownGrupo(as: Aporte[]): string {
+  if (as.length === 1) return markdown(as[0]!);
+  const porTipo = new Map<string, Aporte[]>();
+  for (const a of as) porTipo.set(a.tipo, [...(porTipo.get(a.tipo) ?? []), a]);
+  return [...porTipo]
+    .map(([tipo, xs]) => {
+      if (xs.length === 1) return markdown(xs[0]!);
+      const items = xs.map((a) => `- ${separarListas(a.texto).replace(/\n/g, "\n  ")}${a.links?.length ? ` ${a.links.map((l) => `[📖](${l})`).join(" ")}` : ""}`);
+      const snippets = xs.flatMap((a) => a.snippets ?? []);
+      return [`**${ETIQUETA[tipo] ?? tipo}**`, ...items, ...(snippets.length ? [`Snippets sugeridos (botón **Insertar aquí**): ${snippets.map((s) => `\`${s.llamada}\``).join(", ")}`] : [])].join("\n");
+    })
+    .join("\n\n---\n\n");
+}
+
 export async function publicar(root: string, rel: string, aportes: Aporte[], o: { vista?: "notas" | "comentarios"; ediciones?: boolean } = {}): Promise<ResultadoSalida> {
   const res: ResultadoSalida = { notas: [], insertados: 0, ediciones: [] };
   if (!aportes.length) return res;
@@ -73,35 +89,27 @@ export async function publicar(root: string, rel: string, aportes: Aporte[], o: 
   const lineas = src.split(/\r?\n/);
 
   if (vista === "notas") {
-    const notas = cargarNotas(root, rel, src);
+    // Una nota por función: lo de cada función se agrega a SU nota, en un solo mensaje por pedido.
+    const funciones = await funcionesDe(src, langFor(rel));
+    const { notas, destino: fusionadas } = consolidar(cargarNotas(root, rel, src), funciones, src);
+    const grupos = new Map<Nota, Aporte[]>();
     for (const a of aportes) {
-      const texto = (a.ancla.texto ?? lineas[a.ancla.linea - 1] ?? "").trim();
-      const existente = a.notaId ? notas.find((n) => n.id === a.notaId) : undefined;
-      if (existente) {
-        existente.hilo.push(mensaje("ia", markdown(a)));
-        existente.snippets.push(...(a.snippets ?? []));
-        if (a.accion) existente.accion = a.accion;
-        existente.estado = "abierta";
-        existente.actualizada = new Date().toISOString();
-        res.notas.push(existente.id);
-        continue;
+      const destino = a.notaId
+        ? notas.find((n) => n.id === (fusionadas.get(a.notaId!) ?? a.notaId))
+        : notaPara(notas, rel, funciones, src, { linea: a.ancla.linea, funcion: a.ancla.funcion, alcance: a.alcance, tipo: a.tipo, origen: a.origen });
+      if (!destino) continue;
+      grupos.set(destino, [...(grupos.get(destino) ?? []), a]);
+    }
+    for (const [n, as] of grupos) {
+      const nuevo = agregar(n, markdownGrupo(as));
+      for (const a of as) {
+        for (const s of a.snippets ?? []) if (!n.snippets.some((x) => x.llamada === s.llamada)) n.snippets.push(s);
+        n.bloqueante ||= !!a.bloqueante;
+        if (a.accion) n.accion = a.accion;
+        if (a.fuente) n.fuente = a.fuente;
       }
-      // Sin duplicados: el mismo texto en la misma línea no se vuelve a agregar.
-      if (notas.some((n) => n.estado === "abierta" && n.ancla.texto === texto && n.hilo.some((m) => m.texto === markdown(a)))) continue;
-      const n: Nota = nuevaNota(notas, {
-        archivo: rel,
-        ancla: { linea: a.ancla.linea, texto, ...(a.ancla.funcion ? { funcion: a.ancla.funcion } : {}) },
-        tipo: a.tipo,
-        titulo: (a.titulo ?? a.texto.split(/[.:\n]/)[0] ?? a.tipo).slice(0, 80),
-        accion: a.accion ?? "",
-        bloqueante: !!a.bloqueante,
-        snippets: a.snippets ?? [],
-        origen: a.origen,
-        ...(a.fuente ? { fuente: a.fuente } : {}),
-        ...(a.alcance ? { alcance: a.alcance } : {}),
-        hilo: [mensaje("ia", markdown(a))],
-      });
-      res.notas.push(n.id);
+      if (n.hilo.length === 1 && as[0]!.tipo) n.tipo = as[0]!.tipo;
+      if (nuevo) res.notas.push(n.id);
     }
     guardarNotas(root, rel, notas);
     return res;

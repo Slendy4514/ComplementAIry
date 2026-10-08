@@ -1,11 +1,25 @@
 import * as vscode from "vscode";
+import { funcionEn } from "./notaView";
 import { archivoNotas, correr, guardar, mostrarError, notasDe, OcupadoError, relDe, root, vista, type Nota } from "./comun";
 
 /**
- * Las notas como hilos nativos de VSCode (como en la revisión de un PR), en la línea exacta.
- * El archivo nunca se toca: se terminan los choques con el autoguardado.
- * Cada nota tiene botones (pista, pseudocódigo, tests...) y una caja para escribirle a la IA.
+ * Las notas (una por función): datos, pedidos a la IA y cómo se ven en el código.
+ * Por defecto NO se abren hilos dentro del código (estorbaban y robaban el foco): hay un ícono en el
+ * margen, CodeLens y hover, y la nota se lee y se usa en el panel "Nota" (notaView.ts), que sigue al
+ * cursor. Con el ajuste `cai.notasEnLinea` vuelven los hilos nativos de VSCode.
+ * El archivo nunca se toca: sin choques con el autoguardado.
  */
+
+/** ¿Hilos dentro del código? (apagado por defecto) */
+export const enLinea = () => vscode.workspace.getConfiguration("cai").get<boolean>("notasEnLinea", false);
+
+/** Qué pedido está en curso (para mostrar "pensando…" en el panel). */
+export interface Pensando {
+  uri: string;
+  id?: string;
+  linea?: number;
+  activo: boolean;
+}
 
 const ICONO: Record<string, string> = {
   pista: "💡",
@@ -21,6 +35,8 @@ const ICONO: Record<string, string> = {
 };
 
 /** Los botones de cada nota: el mismo pedido que se escribe a mano (!pseudo, !tests...). */
+export { ICONO };
+export const ESTADO: Record<string, string> = { lista: "🟢 lista", casi: "🟡 casi lista", falta: "🔴 falta" };
 export const BOTONES: { pedido: string; etiqueta: string }[] = [
   { pedido: "pista", etiqueta: "💡 Pista" },
   { pedido: "piezas", etiqueta: "🧩 Piezas" },
@@ -73,12 +89,22 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
   readonly onCambio = this.cambio.event;
   private readonly temporizadores = new Map<string, NodeJS.Timeout>();
   private readonly avisados = new Set<string>();
+  private readonly pensandoEm = new vscode.EventEmitter<Pensando>();
+  /** Empieza o termina un pedido a la IA (el panel "Nota" muestra "pensando…"). */
+  readonly onPensando = this.pensandoEm.event;
+  private readonly enCurso = new Set<string>();
+  private readonly margen: vscode.TextEditorDecorationType[];
 
-  constructor(private readonly insertar: (doc: vscode.TextDocument, nota: Nota, i: number) => Promise<void>) {
+  constructor(
+    private readonly insertar: (doc: vscode.TextDocument, nota: Nota, i: number) => Promise<void>,
+    extensionUri: vscode.Uri,
+  ) {
+    const icono = (f: string) => vscode.window.createTextEditorDecorationType({ gutterIconPath: vscode.Uri.joinPath(extensionUri, "media", f), gutterIconSize: "contain" });
+    this.margen = [icono("nota.svg"), icono("nota-casi.svg"), icono("nota-bloq.svg")];
     this.controller.commentingRangeProvider = {
       provideCommentingRanges: (doc) => {
         const cwd = root(doc);
-        return cwd && doc.uri.scheme === "file" && vista(cwd) === "notas" ? [new vscode.Range(0, 0, Math.max(0, doc.lineCount - 1), 0)] : [];
+        return enLinea() && cwd && doc.uri.scheme === "file" && vista(cwd) === "notas" ? [new vscode.Range(0, 0, Math.max(0, doc.lineCount - 1), 0)] : [];
       },
     };
     this.controller.options = { prompt: "Pregúntale a ComplementAIry…", placeHolder: "Escribe tu pregunta (o !pista, !pseudo, !tests…) y presiona Ctrl+Enter" };
@@ -114,13 +140,20 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
     if (!notas) return; // no se pudo leer: se deja lo que hay hasta el próximo cambio
     let mapa = this.hilos.get(k);
     if (!mapa) this.hilos.set(k, (mapa = new Map()));
-    const vivas = new Set(notas.map((n) => n.id));
+    // Ícono en el margen (azul: nota · ámbar: "casi" o "falta" · rojo: bloqueante). No toma el foco.
+    for (const ed of vscode.window.visibleTextEditors.filter((e) => e.document === doc)) {
+      const lineas = (f: (n: Nota) => boolean) => notas.filter(f).map((n) => new vscode.Range(n.ancla.linea - 1, 0, n.ancla.linea - 1, 0));
+      ed.setDecorations(this.margen[2]!, lineas((n) => n.bloqueante));
+      ed.setDecorations(this.margen[1]!, lineas((n) => !n.bloqueante && !!n.verificacion && n.verificacion.estado !== "lista"));
+      ed.setDecorations(this.margen[0]!, lineas((n) => !n.bloqueante && !(n.verificacion && n.verificacion.estado !== "lista")));
+    }
+    const vivas = new Set(enLinea() ? notas.map((n) => n.id) : []);
     for (const [id, t] of mapa)
       if (!vivas.has(id) && !this.ocupados.has(t)) {
         t.dispose();
         mapa.delete(id);
       }
-    for (const n of notas) {
+    for (const n of enLinea() ? notas : []) {
       const linea = Math.min(Math.max(0, n.ancla.linea - 1), Math.max(0, doc.lineCount - 1));
       const rango = new vscode.Range(linea, 0, linea, 0);
       let t = mapa.get(n.id);
@@ -195,6 +228,10 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
   async pedir(doc: vscode.TextDocument, o: { id?: string; linea?: number; archivoEntero?: boolean; pedido?: string; texto?: string; seleccion?: string; thread?: vscode.CommentThread; plantilla?: vscode.CommentThread }): Promise<void> {
     const cwd = root(doc);
     if (!cwd) return;
+    if (!enLinea() && !o.thread && !o.plantilla) {
+      await this.pedirSinHilo(doc, cwd, o);
+      return;
+    }
     let thread = o.thread ?? o.plantilla;
     const temporal = !o.thread;
     if (!thread) {
@@ -236,6 +273,74 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
       this.ocupados.delete(thread);
       if (temporal) thread.dispose();
       else if (!doc.isClosed) thread.canReply = true;
+      this.dibujar(doc);
+    }
+  }
+
+  /** Argumentos de `cai responder` para un pedido. */
+  private args(doc: vscode.TextDocument, o: { id?: string; linea?: number; archivoEntero?: boolean; pedido?: string; texto?: string; seleccion?: string }): string[] {
+    return [
+      "responder",
+      doc.uri.fsPath,
+      ...(o.id ? ["--nota", o.id] : o.archivoEntero ? ["--archivo-entero"] : ["--linea", String(o.linea ?? 1)]),
+      ...(o.pedido ? ["--pedido", o.pedido] : []),
+      ...(o.texto ? ["--texto", o.texto] : []),
+      ...(o.seleccion ? ["--seleccion", o.seleccion] : []),
+      "--json",
+    ];
+  }
+
+  /** ¿Hay un pedido en curso para esta nota (o esta línea)? */
+  ocupado(uri: string, id?: string): boolean {
+    return [...this.enCurso].some((k) => k.startsWith(`${uri}#`) && (!id || k === `${uri}#${id}` || k.endsWith("#nueva")));
+  }
+
+  /** Pedido sin hilo en el código: el panel "Nota" muestra "pensando…" y luego la respuesta. */
+  private async pedirSinHilo(doc: vscode.TextDocument, cwd: string, o: { id?: string; linea?: number; archivoEntero?: boolean; pedido?: string; texto?: string; seleccion?: string }): Promise<Nota | undefined> {
+    const uri = doc.uri.toString();
+    const clave = `${uri}#${o.id ?? "nueva"}`;
+    if (this.enCurso.has(clave)) return void vscode.window.showWarningMessage("ComplementAIry: ya estoy respondiendo en esta nota; espera a que termine.");
+    this.enCurso.add(clave);
+    this.pensandoEm.fire({ uri, ...(o.id ? { id: o.id } : {}), ...(o.linea ? { linea: o.linea } : {}), activo: true });
+    try {
+      await guardar(doc);
+      const r = JSON.parse(await correr(this.args(doc, o), cwd)) as { nota?: Nota };
+      // La respuesta se ve en el panel "Nota" (sin quitarte el foco del editor).
+      if (r.nota) void vscode.commands.executeCommand("cai.notaPanel.mostrar", uri, r.nota.id, { silencioso: true });
+      return r.nota;
+    } catch (e) {
+      if (e instanceof OcupadoError)
+        void vscode.window.showWarningMessage(`ComplementAIry: ${e.message}`, "Reintentar").then((v) => v && this.pedirSinHilo(doc, cwd, o));
+      else mostrarError(e);
+      return undefined;
+    } finally {
+      this.enCurso.delete(clave);
+      this.pensandoEm.fire({ uri, ...(o.id ? { id: o.id } : {}), activo: false });
+      this.dibujar(doc);
+    }
+  }
+
+  /** "¿Quedó lista?" de una función (cai verificar). */
+  async verificar(doc: vscode.TextDocument, funcion: string, id?: string): Promise<void> {
+    const cwd = root(doc);
+    if (!cwd) return;
+    const uri = doc.uri.toString();
+    const clave = `${uri}#${id ?? "nueva"}`;
+    if (this.enCurso.has(clave)) return;
+    this.enCurso.add(clave);
+    this.pensandoEm.fire({ uri, ...(id ? { id } : {}), activo: true });
+    try {
+      await guardar(doc);
+      const r = JSON.parse(await correr(["verificar", doc.uri.fsPath, "--funcion", funcion, "--json"], cwd)) as { veredictos: { estado: string; resumen: string; nota?: string; omitida?: boolean }[] };
+      const v = r.veredictos[0];
+      if (v) vscode.window.setStatusBarMessage(`ComplementAIry: ${ESTADO[v.estado] ?? v.estado} · ${funcion.replace(/#\d+$/, "")}${v.omitida ? " (sin cambios desde la última vez)" : ""}`, 8000);
+      // El veredicto (también "lista", con la nota ya cerrada) se ve en el panel, sin quitarte el foco.
+      if (v?.nota) void vscode.commands.executeCommand("cai.notaPanel.mostrar", uri, v.nota, { silencioso: true });
+    } catch (e) {
+      mostrarError(e);
+    } finally {
+      this.enCurso.delete(clave);
+      this.pensandoEm.fire({ uri, ...(id ? { id } : {}), activo: false });
       this.dibujar(doc);
     }
   }
@@ -284,6 +389,22 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
       const n = this.notas(u.doc).find((x) => x.id === u.id);
       if (n) await this.insertar(u.doc, n, typeof args[2] === "number" ? args[2] : 0);
     });
+    reg("cai.verificarFuncion", async (...args) => {
+      const [uri, funcion] = args as [string | undefined, string | undefined];
+      const doc = uri ? await vscode.workspace.openTextDocument(vscode.Uri.parse(uri)) : vscode.window.activeTextEditor?.document;
+      if (!doc) return;
+      let nombre = funcion;
+      if (!nombre) {
+        // Desde el atajo o la paleta: la función donde está el cursor.
+        const ed = vscode.window.activeTextEditor;
+        const f = ed && (await funcionEn(ed.document, ed.selection.active));
+        nombre = f?.clave;
+        if (!nombre) return void vscode.window.showInformationMessage("ComplementAIry: pon el cursor dentro de una función para verificarla.");
+      }
+      const nota = this.notas(doc).find((n) => n.ancla.funcion === nombre);
+      if (!enLinea() && nota) void vscode.commands.executeCommand("cai.notaPanel.mostrar", doc.uri.toString(), nota.id);
+      await this.verificar(doc, nombre, nota?.id);
+    });
     reg("cai.notasArchivo", async (...args) => {
       const u = typeof args[0] === "string" ? vscode.Uri.parse(args[0]) : vscode.window.activeTextEditor?.document.uri;
       if (!u) return;
@@ -305,6 +426,7 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
       const pos = new vscode.Position(Math.max(0, n.ancla.linea - 1), 0);
       ed.selection = new vscode.Selection(pos, pos);
       ed.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+      if (!enLinea()) return void vscode.commands.executeCommand("cai.notaPanel.mostrar", doc.uri.toString(), id);
       // El hilo puede no existir todavía (archivo recién abierto): se crea ya desplegado.
       this.desplegar.add(id);
       this.dibujar(doc);
@@ -332,7 +454,8 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
       vscode.workspace.onDidChangeTextDocument((e) => e.document.uri.scheme === "file" && e.contentChanges.length && this.programar(e.document, 400)),
       vscode.workspace.onDidCloseTextDocument((d) => this.cerrar(d)),
       vscode.window.onDidChangeActiveTextEditor((ed) => ed && this.avisar(ed.document)),
-      vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration("cai.vista") && vscode.workspace.textDocuments.forEach((d) => this.dibujar(d))),
+      vscode.workspace.onDidChangeConfiguration((e) => (e.affectsConfiguration("cai.vista") || e.affectsConfiguration("cai.notasEnLinea")) && vscode.workspace.textDocuments.forEach((d) => this.dibujar(d))),
+      vscode.window.onDidChangeVisibleTextEditors((eds) => eds.forEach((e) => this.programar(e.document, 50))),
     );
     for (const d of vscode.workspace.textDocuments) this.dibujar(d);
     if (vscode.window.activeTextEditor) this.avisar(vscode.window.activeTextEditor.document);
@@ -354,7 +477,7 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
     if (!notas.length) return undefined;
     const m = mdBotones(
       notas
-        .map((n) => `${ICONO[n.tipo] ?? "📝"} **${n.titulo}**${n.accion ? `  \n▶ ${n.accion}` : ""}  \n[Abrir la nota](${cmd("cai.nota.abrir", [doc.uri.toString(), n.id])})`)
+        .map((n) => `${ICONO[n.tipo] ?? "📝"} **${n.titulo}**${n.verificacion ? ` · ${ESTADO[n.verificacion.estado]}` : ""}${n.accion ? `  \n▶ ${n.accion}` : ""}  \n[Abrir la nota](${cmd("cai.nota.abrir", [doc.uri.toString(), n.id])})`)
         .join("\n\n---\n\n"),
       ["cai.nota.abrir"],
     );
@@ -372,5 +495,7 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
     this.controller.dispose();
     this.diagnosticos.dispose();
     this.cambio.dispose();
+    this.pensandoEm.dispose();
+    for (const d of this.margen) d.dispose();
   }
 }

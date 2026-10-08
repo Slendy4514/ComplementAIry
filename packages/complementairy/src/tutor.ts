@@ -391,8 +391,10 @@ async function guiaEnNotas(root: string, rel: string, src: string, threads: Thre
   for (const t of threads) {
     const humanos = t.turns.filter((x) => x.quien === "humano");
     const fuente = `ia?:${t.anchor.text.trim()}`;
-    const nota = notas.find((n) => n.fuente === fuente);
-    const ya = nota?.turnos ?? 0;
+    // Lo ya respondido de este @ia? cuenta aunque su nota esté cerrada (si no, se volvería a responder).
+    const conFuente = notas.filter((n) => n.fuentes?.[fuente] !== undefined || n.fuente === fuente);
+    const ya = Math.max(0, ...conFuente.map((n) => n.fuentes?.[fuente] ?? (n.fuente === fuente ? (n.turnos ?? 0) : 0)));
+    const nota = conFuente.find((n) => n.estado === "abierta");
     if (humanos.length <= ya) continue;
     // Ancla: la primera línea de código después del hilo.
     let linea = t.last.row + 2;
