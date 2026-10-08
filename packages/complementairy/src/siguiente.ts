@@ -105,7 +105,8 @@ export async function actualizarTareas(root: string): Promise<Tarea[]> {
     const lang = langFor(t.archivo!);
     if (!lang || !fs.existsSync(abs)) continue;
     const src = fs.readFileSync(abs, "utf8");
-    if (medir(src, await parse(src, lang)).funciones.some((f) => f.nombre === t.funcion)) {
+    const parsed = await parse(src, lang).catch(() => null); // si no se puede analizar, la tarea sigue pendiente
+    if (parsed && medir(src, parsed).funciones.some((f) => f.nombre === t.funcion)) {
       t.hecha = true;
       cambio = true;
     }

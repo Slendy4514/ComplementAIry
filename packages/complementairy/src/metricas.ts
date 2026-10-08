@@ -4,7 +4,7 @@ import type { Config } from "./config.js";
 import { listFiles } from "./files.js";
 import type { Zoner } from "./config.js";
 import type { Parsed } from "./comments.js";
-import type { SyntaxNode } from "./parser.js";
+import { nombrados, type SyntaxNode } from "./parser.js";
 
 /**
  * Mediciones de diseño, deterministas (tree-sitter). Deciden CUÁNDO vale la pena pedirle a la IA
@@ -43,7 +43,7 @@ function nombreDe(n: SyntaxNode): string | null {
 
 function anidamiento(n: SyntaxNode, depth = 0): number {
   let max = depth;
-  for (const c of n.namedChildren) {
+  for (const c of nombrados(n)) {
     if (FUNC.test(c.type)) continue; // las funciones internas se miden aparte
     const d = CONTROL.test(c.type) && !(c.type === "if_statement" && c.parent?.type === "else_clause") ? depth + 1 : depth;
     max = Math.max(max, anidamiento(c, d));
@@ -66,18 +66,18 @@ export function medir(src: string, parsed: Parsed): Metricas {
     if (FUNC.test(n.type)) {
       const nombre = nombreDe(n);
       if (nombre) {
-        const params = n.childForFieldName("parameters") ?? n.namedChildren.find((c) => /parameters/.test(c.type)) ?? null;
+        const params = n.childForFieldName("parameters") ?? nombrados(n).find((c) => /parameters/.test(c.type)) ?? null;
         out.funciones.push({
           nombre,
           linea: n.startPosition.row + 1,
           lineas: n.endPosition.row - n.startPosition.row + 1,
-          parametros: params ? params.namedChildren.filter((c) => !/comment/.test(c.type)).length : 0,
+          parametros: params ? nombrados(params).filter((c) => !/comment/.test(c.type)).length : 0,
           anidamiento: anidamiento(n),
           exportada: exportada(n) || (parsed.root!.type === "module" && !nombre.startsWith("_") && n.parent?.type === "module"),
         });
       }
     }
-    for (const c of n.namedChildren) walk(c);
+    for (const c of nombrados(n)) walk(c);
   };
   walk(parsed.root);
   return out;

@@ -1,4 +1,4 @@
-import type { SyntaxNode } from "./parser.js";
+import { hijos, type SyntaxNode } from "./parser.js";
 import type { Reply } from "./render.js";
 
 /**
@@ -47,7 +47,7 @@ export function fileIdentifiers(root: SyntaxNode | null, src: string): Set<strin
   if (root) {
     const walk = (n: SyntaxNode) => {
       if (n.childCount === 0 && /identifier|name$/.test(n.type)) out.add(n.text);
-      for (const c of n.children) walk(c);
+      for (const c of hijos(n)) walk(c);
     };
     walk(root);
   } else {

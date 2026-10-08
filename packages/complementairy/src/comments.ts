@@ -1,5 +1,5 @@
 import type { LangSpec } from "./lang.js";
-import { getParser, type SyntaxNode } from "./parser.js";
+import { getParser, hijos, type SyntaxNode } from "./parser.js";
 
 export type CommentKind = "guia" | "ia" | "yo" | "snippet" | "otro";
 
@@ -53,6 +53,7 @@ export async function parse(src: string, lang: LangSpec): Promise<Parsed> {
   if (!lang.grammar) return { comments: scanComments(src, lang), hasError: false, root: null };
   const parser = await getParser(lang.grammar);
   const tree = parser.parse(src);
+  if (!tree) throw new Error(`no pude analizar el archivo (${lang.id}): el analizador no devolvió un árbol`);
   const comments: Comment[] = [];
   const walk = (n: SyntaxNode): void => {
     if (n.type.includes("comment")) {
@@ -60,7 +61,7 @@ export async function parse(src: string, lang: LangSpec): Promise<Parsed> {
       comments.push(mk(src, n.startIndex, n.endIndex, n.startPosition.row));
       return;
     }
-    for (const c of n.children) walk(c);
+    for (const c of hijos(n)) walk(c);
   };
   walk(tree.rootNode);
   // Python/bash: los comentarios de bloque se cierran con salto de línea; normalizamos.
@@ -70,7 +71,7 @@ export async function parse(src: string, lang: LangSpec): Promise<Parsed> {
       c.text = c.text.slice(0, -1);
     }
   }
-  return { comments, hasError: tree.rootNode.hasError(), root: tree.rootNode };
+  return { comments, hasError: tree.rootNode.hasError, root: tree.rootNode };
 }
 
 /**

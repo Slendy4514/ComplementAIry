@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { codeOnly, type Comment, type Parsed } from "./comments.js";
+import { nombrados } from "./parser.js";
 
 /**
  * Un hilo es una conversación dentro del código: empieza en un `@ia?` y sigue con los
@@ -129,7 +130,7 @@ export function regionOf(src: string, parsed: Parsed, offset: number): { start: 
   let start = -1;
   let end = -1;
   if (parsed.root) {
-    let n = parsed.root.descendantForIndex(offset);
+    let n = parsed.root.descendantForIndex(offset) ?? parsed.root;
     // Un comentario suelto entre sentencias: subimos hasta un nodo que lo contenga con código.
     while (n.parent && !REGION_TYPES.test(n.type)) n = n.parent;
     if (n.parent) {
@@ -171,7 +172,7 @@ export function regionesTop(src: string, parsed: Parsed): RegionTop[] {
   };
   if (!parsed.root) return src.trim() ? [mk(0, src.length, 0, src.split("\n").length - 1)] : [];
   const out: RegionTop[] = [];
-  for (const n of parsed.root.namedChildren) {
+  for (const n of nombrados(parsed.root)) {
     if (n.type.includes("comment")) continue;
     out.push(mk(n.startIndex, n.endIndex, n.startPosition.row, n.endPosition.row));
   }

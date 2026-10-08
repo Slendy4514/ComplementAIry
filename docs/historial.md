@@ -209,3 +209,12 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - **Prueba real** de `cai plano` en una copia de demo-ts: estructura clara, 10 archivos por crear como tareas y 4 preguntas útiles, por US$0,15. Con esa prueba se corrigieron la numeración doble y el orden de las tareas, y las preguntas se separaron de la sugerencia.
 - La revisión independiente encontró 18 problemas, todos corregidos. Los más importantes: una respuesta con saltos de línea podía pisar las notas de la memoria; el panorama podía pisar una respuesta dada mientras la IA pensaba; las tareas y las preguntas se repetían en cada propuesta; y desde el chat, `cai plano` podía cambiar lo que respondiste (ahora solo puede agregar preguntas).
 - Selftest: 135/135.
+
+## v0.6.1: `cai panorama` se caía (2026-10-08)
+- **Síntoma:** `cai: Cannot read properties of undefined (reading 'apply')` al pedir el panorama.
+- **Causa:** la gramática de Bash de `tree-sitter-wasms` se cae con `[ a != b ]` (había uno en `install.sh`), y un solo archivo que no se podía analizar tumbaba todo el panorama.
+- **Arreglo:**
+  - `web-tree-sitter` pasa de 0.20.8 a 0.25.10, con las gramáticas oficiales de Bash (`tree-sitter-bash`) y de YAML (`@tree-sitter-grammars/tree-sitter-yaml`), que traen binarios ya compilados;
+  - las demás gramáticas siguen saliendo de `tree-sitter-wasms`; probé que las 23 cargan;
+  - si un archivo no se puede analizar, el panorama lo salta con un aviso en vez de caerse.
+- Selftest: 135/135, incluidas las garantías de seguridad, que dependen de este analizador.

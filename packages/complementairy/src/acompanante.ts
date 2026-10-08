@@ -18,7 +18,7 @@ import { dejarPendiente, ocupar, tomarPendiente } from "./ocupado.js";
 import { planoArchivo } from "./planoArchivo.js";
 import { findThreads, nextThreadId, regionesTop, regionOf } from "./threads.js";
 import { iaOpts, marcadores, runGuia, TIPOS, type Tamano } from "./tutor.js";
-import type { SyntaxNode } from "./parser.js";
+import { hijos, type SyntaxNode } from "./parser.js";
 
 /**
  * El acompañante: corre cada vez que guardás. Las decisiones de CUÁNDO intervenir son
@@ -97,10 +97,10 @@ ${CRITERIO}`;
 /** Errores de sintaxis (nodos ERROR / faltantes) por línea, sin herramientas externas. */
 function syntaxErrors(root: SyntaxNode | null): { line: number; msg: string }[] {
   const out: { line: number; msg: string }[] = [];
-  if (!root?.hasError()) return out;
+  if (!root?.hasError) return out;
   const walk = (n: SyntaxNode) => {
-    if (n.type === "ERROR" || n.isMissing()) out.push({ line: n.startPosition.row + 1, msg: n.isMissing() ? `falta ${n.type}` : "error de sintaxis" });
-    else if (n.hasError()) for (const c of n.children) walk(c);
+    if (n.type === "ERROR" || n.isMissing) out.push({ line: n.startPosition.row + 1, msg: n.isMissing ? `falta ${n.type}` : "error de sintaxis" });
+    else if (n.hasError) for (const c of hijos(n)) walk(c);
   };
   walk(root);
   return out;

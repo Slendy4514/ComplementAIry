@@ -172,7 +172,14 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
       continue;
     }
     if (src.length > 400_000) continue;
-    const parsed = await parse(src, lang);
+    let parsed: Awaited<ReturnType<typeof parse>>;
+    try {
+      parsed = await parse(src, lang);
+    } catch (e) {
+      // Un archivo que el analizador no puede leer no tumba el panorama: se salta y se avisa.
+      o.log?.(`  ! no pude analizar ${rel} (${e instanceof Error ? e.message : String(e)}); lo salto`);
+      continue;
+    }
     const met = medir(src, parsed);
     archivos.push({
       rel,
