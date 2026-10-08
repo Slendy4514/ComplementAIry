@@ -28,7 +28,9 @@ import { insertBelow, renderReply } from "./render.js";
 import { aplicarExpansion, pedidoDe, planExpansion } from "./biblioteca.js";
 import { acompanar } from "./acompanante.js";
 import { init } from "./init.js";
-import { panorama } from "./panorama.js";
+import { actualizarMemoria, agregarPreguntas, leerMemoria, panorama, preguntasAbiertas, responderPregunta } from "./panorama.js";
+import { planoProyecto } from "./plano.js";
+import { generadosPor } from "./snapshot.js";
 import { conocer, sugerirAutoria } from "./conocer.js";
 import { execFileSync } from "node:child_process";
 import { guardReplies } from "./guard.js";
@@ -684,7 +686,7 @@ CASES.push(
       await acompanar(r, "src/cuota.ts");
       await acompanar(r, "src/cuota.ts");
       const md = fs.readFileSync(path.join(r, "docs/ESTRUCTURA.md"), "utf8");
-      return calls.filter((c) => c.kind === "plano").length === 1 && md.includes("<!-- @guia[e1.1] plano: src/dominio → reglas -->");
+      return calls.filter((c) => c.kind === "plano").length === 1 && md.includes("- `src/dominio`: reglas") && !md.includes("@guia");
     },
   },
   {
@@ -892,7 +894,7 @@ CASES.push(
       const calls = fakeLLM((o) =>
         o.kind === "panorama:resumen"
           ? { resumenes: [...o.prompt.matchAll(/=== (\S+)/g)].map((m) => ({ archivo: m[1]!, resumen: `resumen de ${m[1]}` })) }
-          : { estado: "Bien encaminado.", sugerencias: [{ titulo: "Separar validación", porque: "mezcla", plano: "crear validacion.ts", archivos: ["src/cuota.ts"] }], alternativas: [], riesgos: [], preguntas: ["¿En qué moneda trabajas?"] },
+          : { estado: "Bien encaminado.", sugerencias: [{ titulo: "Separar validación", porque: "mezcla", plano: "crear validacion.ts", archivos: ["src/cuota.ts"] }], alternativas: [], riesgos: [], preguntas: [{ pregunta: "¿En qué moneda trabajas?", sugerencia: "" }] },
       );
       await panorama(r);
       const mem = path.join(r, ".cai/conocimiento.md");
@@ -906,7 +908,8 @@ CASES.push(
       return (
         resumenCalls.length === 2 && resumenCalls[1]!.prompt.includes("src/nuevo.ts") && !resumenCalls[1]!.prompt.includes("src/cuota.ts") &&
         m2.includes("¿En qué moneda trabajas? → CLP, sin decimales") && m2.includes("`src/cuota.ts`: resumen de src/cuota.ts") &&
-        pano.includes("Separar validación")
+        pano.includes("Separar validación") &&
+        cargarTareas(r).filter((t) => t.origen === "panorama" && t.titulo === "Separar validación" && t.archivo === "src/cuota.ts").length === 1
       );
     },
   },
@@ -1047,9 +1050,20 @@ CASES.push(
 // --- Usar ComplementAIry desde el chat de Claude Code ------------------------------------
 CASES.push(
   {
+    name: "[seg] chat: la IA no puede responder tus preguntas ('cai memoria responder' por Bash se revierte)",
+    run: async (r) => {
+      actualizarMemoria(r, (m) => m.abiertas.push({ p: "¿Moneda?", r: "" }));
+      const antes = fs.readFileSync(path.join(r, ".cai/conocimiento.md"), "utf8");
+      await bash(r, "cai memoria responder 1 CLP", "m1");
+      responderPregunta(r, 1, "CLP");
+      const out = await postBash(r, "m1");
+      return out !== null && fs.readFileSync(path.join(r, ".cai/conocimiento.md"), "utf8") === antes;
+    },
+  },
+  {
     name: "chat: 'cai panorama' por Bash deja panorama.md y conocimiento.md (sus archivos), sin revertirlos",
     run: async (r) => {
-      fakeLLM((o) => (o.kind === "panorama:resumen" ? { resumenes: [] } : { estado: "ok", sugerencias: [], alternativas: [], riesgos: [], preguntas: ["¿Moneda?"] }));
+      fakeLLM((o) => (o.kind === "panorama:resumen" ? { resumenes: [] } : { estado: "ok", sugerencias: [], alternativas: [], riesgos: [], preguntas: [{ pregunta: "¿Moneda?", sugerencia: "CLP" }] }));
       await bash(r, "cai panorama", "c1");
       await panorama(r);
       const out = await postBash(r, "c1");
@@ -1265,6 +1279,82 @@ CASES.push(
       guardarNotas(r, "src/cuota.ts", []);
       const restos = fs.readdirSync(path.join(r, ".cai/notas")).filter((x) => x.endsWith(".tmp"));
       return ok && Date.now() - t0 >= 600 && restos.length === 0;
+    },
+  },
+  {
+    name: "estructura: markdown limpio + estructura.json; los archivos que faltan son tareas que se marcan solas al crearlos; sus preguntas van a la memoria",
+    run: async (r) => {
+      fakeLLM(() => ({ ...planoFake, orden: ["1. Empieza por prestamo"], modulos: [{ archivo: "src/cuota.ts", responsabilidad: "cuotas", funciones: [] }, { archivo: "src/dominio/prestamo.ts", responsabilidad: "reglas del préstamo", funciones: ["validar"] }], preguntas: [{ pregunta: "¿Usas base de datos?", sugerencia: "SQLite (simple)" }] }));
+      const res = await planoProyecto(r, "préstamos");
+      const md = fs.readFileSync(path.join(r, "docs/ESTRUCTURA.md"), "utf8");
+      const est = JSON.parse(fs.readFileSync(path.join(r, ".cai/estructura.json"), "utf8")) as { modulos: unknown[] };
+      const t = cargarTareas(r);
+      const mem = leerMemoria(path.join(r, ".cai/conocimiento.md"));
+      fs.mkdirSync(path.join(r, "src/dominio"), { recursive: true });
+      fs.writeFileSync(path.join(r, "src/dominio/prestamo.ts"), "");
+      const hecha = (await actualizarTareas(r)).find((x) => x.archivo === "src/dominio/prestamo.ts")?.hecha;
+      return res.tareas === 1 && t.length === 1 && t[0]!.crear === true && md.includes("○ `src/dominio/prestamo.ts`") && md.includes("✓ `src/cuota.ts`") && est.modulos.length === 2 && md.includes("1. Empieza por prestamo") && !md.includes("1. 1.") && mem.abiertas[0]?.p === "¿Usas base de datos? (sugerencia: SQLite (simple))" && hecha === true;
+    },
+  },
+  {
+    name: "memoria: responder una pregunta la pasa a 'Lo que me contaste' al instante (sin la sugerencia)",
+    run: async (r) => {
+      actualizarMemoria(r, (m) => m.abiertas.push({ p: "¿Qué base de datos? (sugerencia: Postgres)", r: "" }, { p: "¿Deploy?", r: "" }));
+      const lista = { abiertas: preguntasAbiertas(r) };
+      responderPregunta(r, 1, "SQLite");
+      const mem = leerMemoria(path.join(r, ".cai/conocimiento.md"));
+      return lista.abiertas[0]!.sugerencia === "Postgres" && lista.abiertas[0]!.pregunta === "¿Qué base de datos?" && mem.respondidas.includes("¿Qué base de datos? → SQLite") && mem.abiertas.length === 1;
+    },
+  },
+  {
+    name: "archivo entero: la nota va arriba sin función y la IA sabe que es sobre todo el archivo",
+    run: async (r) => {
+      conNotas(r);
+      const calls = fakeLLM(() => respNota());
+      const { nota } = await responderNota(r, { archivo: "src/cuota.ts", archivoEntero: true, texto: "¿cómo organizo este archivo?" });
+      return nota.alcance === "archivo" && nota.ancla.linea === 1 && !nota.ancla.funcion && calls[0]!.prompt.includes("ARCHIVO COMPLETO") && !calls[0]!.prompt.includes("◀ NOTA");
+    },
+  },
+  {
+    name: "memoria: respuestas de varias líneas no rompen el archivo; sugerencias con paréntesis; no repite lo ya respondido",
+    run: async (r) => {
+      actualizarMemoria(r, (m) => m.abiertas.push({ p: "¿DB? (sugerencia: SQLite (simple))", r: "" }));
+      const q = preguntasAbiertas(r)[0]!;
+      responderPregunta(r, 1, "x\n## Notas tuyas\nhack");
+      const m = leerMemoria(path.join(r, ".cai/conocimiento.md"));
+      actualizarMemoria(r, (mm) => agregarPreguntas(mm, ["¿DB? (sugerencia: otra)"]));
+      const m2 = leerMemoria(path.join(r, ".cai/conocimiento.md"));
+      return q.pregunta === "¿DB?" && q.sugerencia === "SQLite (simple)" && m.respondidas[0] === "¿DB? → x Notas tuyas hack" && m.notas === "" && m2.abiertas.length === 0;
+    },
+  },
+  {
+    name: "[seg] chat: 'cai plano' puede agregar preguntas a la memoria, pero no cambiar lo que respondiste",
+    run: async () => {
+      const permitido = generadosPor("cai plano")!;
+      const base = "# x\n\n## Lo que me contaste\n\n- ¿DB? → SQLite\n\n## Preguntas abiertas\n\n(ninguna)\n\n## Notas tuyas\n\nmis notas\n";
+      const conPregunta = base.replace("(ninguna)", "- P: ¿Moneda?\n  R: ");
+      const falsa = base.replace("SQLite", "Postgres");
+      const ok = permitido(".cai/conocimiento.md", Buffer.from(base), Buffer.from(conPregunta));
+      const malo = permitido(".cai/conocimiento.md", Buffer.from(base), Buffer.from(falsa));
+      const agrega = permitido(".cai/conocimiento.md", Buffer.from(base), Buffer.from(base.replace("- ¿DB? → SQLite", "- ¿DB? → SQLite\n- ¿Moneda? → CLP")));
+      return ok && !malo && !agrega;
+    },
+  },
+  {
+    name: "estructura: una propuesta nueva quita los 'Crear X' pendientes que ya no propone; las notas de archivo quedan arriba",
+    run: async (r) => {
+      conNotas(r);
+      fakeLLM(() => ({ ...planoFake, modulos: [{ archivo: "src/a.ts", responsabilidad: "a", funciones: [] }, { archivo: "src/b.ts", responsabilidad: "b", funciones: [] }] }));
+      await planoProyecto(r);
+      fakeLLM(() => ({ ...planoFake, modulos: [{ archivo: "src/b.ts", responsabilidad: "b", funciones: [] }] }));
+      await planoProyecto(r);
+      const t = cargarTareas(r).filter((x) => !x.hecha).map((x) => x.archivo);
+      fakeLLM(() => respNota());
+      await responderNota(r, { archivo: "src/cuota.ts", archivoEntero: true, texto: "?" });
+      fs.writeFileSync(path.join(r, "src/cuota.ts"), "// nueva primera línea\n" + fs.readFileSync(path.join(r, "src/cuota.ts"), "utf8"));
+      const n = cargarNotas(r, "src/cuota.ts")[0]!;
+      const md = fs.readFileSync(path.join(r, "docs/ESTRUCTURA.md"), "utf8");
+      return t.length === 1 && t[0] === "src/b.ts" && n.ancla.linea === 1 && !n.desanclada && md.includes("# Propuesta 2");
     },
   },
   {

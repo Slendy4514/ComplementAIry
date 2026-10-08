@@ -2,7 +2,7 @@
   "name": "complementairy",
   "displayName": "ComplementAIry — tú programas, la IA te acompaña",
   "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "complementairy",
   "license": "MIT",
   "engines": {
@@ -61,7 +61,8 @@
       },
       {
         "command": "cai.panorama",
-        "title": "ComplementAIry: panorama del proyecto (estado, sugerencias, preguntas)"
+        "title": "ComplementAIry: panorama del proyecto (estado, sugerencias, preguntas)",
+        "icon": "$(telescope)"
       },
       {
         "command": "cai.tests",
@@ -89,7 +90,7 @@
       },
       {
         "command": "cai.plano",
-        "title": "ComplementAIry: plano de este archivo"
+        "title": "ComplementAIry: plano de este archivo (qué funciones y por cuál empezar)"
       },
       {
         "command": "cai.responderIa",
@@ -161,6 +162,36 @@
       {
         "command": "cai.irA",
         "title": "Ir"
+      },
+      {
+        "command": "cai.ayudaArchivo",
+        "title": "ComplementAIry: ayuda con este archivo (entero)"
+      },
+      {
+        "command": "cai.notasArchivo",
+        "title": "ComplementAIry: notas de este archivo"
+      },
+      {
+        "command": "cai.estructura",
+        "title": "ComplementAIry: estructura del proyecto (proponer / ver)",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "cai.verPanorama",
+        "title": "ComplementAIry: ver el panorama del proyecto"
+      },
+      {
+        "command": "cai.verEstructura",
+        "title": "ComplementAIry: ver docs/ESTRUCTURA.md"
+      },
+      {
+        "command": "cai.crearArchivo",
+        "title": "Crear archivo",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "cai.responderPregunta",
+        "title": "Responder pregunta"
       }
     ],
     "keybindings": [
@@ -348,6 +379,14 @@
         {
           "command": "cai.panel.refrescar",
           "when": "false"
+        },
+        {
+          "command": "cai.crearArchivo",
+          "when": "false"
+        },
+        {
+          "command": "cai.responderPregunta",
+          "when": "false"
         }
       ],
       "comments/commentThread/context": [
@@ -391,12 +430,12 @@
         {
           "command": "cai.nota.tests",
           "group": "ayuda@4",
-          "when": "commentController == complementairy && commentThread =~ /cai-nota/"
+          "when": "commentController == complementairy && commentThread =~ /cai-funcion/"
         },
         {
           "command": "cai.nota.plano",
           "group": "ayuda@5",
-          "when": "commentController == complementairy && commentThread =~ /cai-nota/"
+          "when": "commentController == complementairy && commentThread =~ /cai-archivo/"
         },
         {
           "command": "cai.nota.explica",
@@ -412,13 +451,34 @@
         {
           "command": "cai.pedirAqui",
           "group": "complementairy@2"
+        },
+        {
+          "command": "cai.ayudaArchivo",
+          "group": "complementairy@3"
         }
       ],
       "view/title": [
         {
+          "command": "cai.panorama",
+          "when": "view == cai.panel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cai.estructura",
+          "when": "view == cai.panel",
+          "group": "navigation@2"
+        },
+        {
           "command": "cai.panel.refrescar",
           "when": "view == cai.panel",
-          "group": "navigation"
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "cai.crearArchivo",
+          "when": "view == cai.panel && viewItem == cai-modulo-faltante",
+          "group": "inline"
         }
       ]
     }

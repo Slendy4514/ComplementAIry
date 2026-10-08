@@ -27,6 +27,7 @@ export interface Aporte {
   /** Responde dentro de una nota existente. */
   notaId?: string;
   fuente?: string;
+  alcance?: "archivo";
 }
 
 export interface Edicion {
@@ -97,6 +98,7 @@ export async function publicar(root: string, rel: string, aportes: Aporte[], o: 
         snippets: a.snippets ?? [],
         origen: a.origen,
         ...(a.fuente ? { fuente: a.fuente } : {}),
+        ...(a.alcance ? { alcance: a.alcance } : {}),
         hilo: [mensaje("ia", markdown(a))],
       });
       res.notas.push(n.id);

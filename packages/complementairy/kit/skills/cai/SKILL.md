@@ -15,10 +15,12 @@ En este proyecto el programador escribe el código y tú lo acompañas. Desde el
 | ver notas / tareas | `cai notas [<archivo>]`, `cai tareas` | |
 | responder sus `@ia?` escritos en el archivo | `cai guia <archivo>` | en notas (por defecto) o en comentarios `@guia`, según `vista` |
 | plano de un archivo | `cai plano --archivo <archivo>` | resumen + nota por función + tareas por crear |
+| sobre el archivo entero ("¿cómo organizo este archivo?") | `cai responder <archivo> --archivo-entero --texto "..."` | nota arriba del archivo |
+| preguntas que ComplementAIry le hizo | `cai memoria` | muéstraselas; **las responde él** (`cai memoria responder` es suyo, no lo corras tú) |
 | revisión ("¿está bien?", "busca bugs") | `cai revisar <archivo>` | verificaciones deterministas + revisores, como notas o comentarios |
 | tests de una función | `cai tests <archivo> <función>` | casos apagados en la carpeta de tests; él los activa con `[x]` |
 | "¿cómo sigo?", "qué opinas del proyecto" | `cai panorama` | `.cai/panorama.md` (resúmelo en el chat) y preguntas en `.cai/conocimiento.md` |
-| arquitectura del proyecto | `cai plano "<qué construye>"` | `docs/ESTRUCTURA.md` |
+| arquitectura / estructura del proyecto | `cai plano "<qué construye>"` | `docs/ESTRUCTURA.md` + archivos por crear como tareas + preguntas |
 | una decisión puntual | `cai arquitectura "<tema>"` | ADR en `docs/adr/` con opciones; decide y escribe él |
 | arrancar con un proyecto ya armado | `cai conocer --sin-preguntas` | borradores de proyecto.md y reglas.md + preguntas en la memoria |
 | ¿pasan las verificaciones? | `cai gate <archivos>` | tipos, lint, tests, reglas |
@@ -26,7 +28,7 @@ En este proyecto el programador escribe el código y tú lo acompañas. Desde el
 | qué falta instalar | `cai doctor` | |
 | quién escribió qué | `cai origen` | |
 
-**Los hace el humano (están bloqueados para ti; sugiérele el comando):** `cai init`, `cai expandir` (activar snippets), `cai snippet nuevo`, `cai perfil set`.
+**Los hace el humano (están bloqueados para ti; sugiérele el comando):** `cai memoria responder`, `cai init`, `cai expandir` (activar snippets), `cai snippet nuevo`, `cai perfil set`.
 
 Además:
 - Si un comando sale con código 3, la IA ya está trabajando en ese archivo (lo pidió el editor): espera y vuelve a intentarlo, no lo fuerces.

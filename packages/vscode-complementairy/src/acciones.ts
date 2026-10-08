@@ -90,13 +90,34 @@ export class Acciones implements vscode.CodeActionProvider {
           ...(seleccion.trim() ? { seleccion } : {}),
         });
       }),
+      // Ayuda sobre el ARCHIVO entero (no una función): nota arriba del archivo.
+      vscode.commands.registerCommand("cai.ayudaArchivo", async (uri?: unknown) => {
+        const u = typeof uri === "string" ? vscode.Uri.parse(uri) : uri instanceof vscode.Uri ? uri : undefined;
+        const doc = u ? await vscode.workspace.openTextDocument(u) : vscode.window.activeTextEditor?.document;
+        if (!doc) return;
+        type Op = vscode.QuickPickItem & { pedido?: string; plano?: boolean; escribir?: boolean };
+        const ops: Op[] = [
+          { label: "$(edit) Escribir una pregunta sobre el archivo…", escribir: true },
+          { label: "🗺️ Plano del archivo", description: "qué funciones debería tener y por cuál empezar (notas + tareas)", plano: true },
+          ...BOTONES.filter((b) => !["plano", "tests"].includes(b.pedido)).map((b) => ({ label: b.etiqueta, description: "sobre el archivo entero", pedido: b.pedido })),
+        ];
+        const op = await vscode.window.showQuickPick(ops, { placeHolder: "Ayuda con este archivo" });
+        if (!op) return;
+        if (op.plano) return vscode.commands.executeCommand("cai.plano", doc.uri);
+        if (op.escribir) {
+          const texto = await vscode.window.showInputBox({ prompt: "¿Qué quieres preguntar sobre este archivo?", placeHolder: "Ej.: ¿cómo lo organizo?, ¿qué le falta?, ¿esto debería ir en otro archivo?" });
+          if (texto?.trim()) await this.notas.pedir(doc, { archivoEntero: true, texto: texto.trim() });
+          return;
+        }
+        await this.notas.pedir(doc, { archivoEntero: true, pedido: op.pedido! });
+      }),
       vscode.commands.registerCommand("cai.pedirAqui", async (uri?: unknown, linea?: unknown, pedido?: unknown) => {
         // Desde CodeLens/bombilla llegan (uri en texto, línea, pedido); desde el menú contextual, un Uri.
         const u = typeof uri === "string" ? vscode.Uri.parse(uri) : uri instanceof vscode.Uri ? uri : undefined;
         const doc = u ? await vscode.workspace.openTextDocument(u) : vscode.window.activeTextEditor?.document;
         if (!doc) return;
         const l = typeof linea === "number" ? linea : (vscode.window.activeTextEditor?.selection.active.line ?? 0) + 1;
-        const p = (typeof pedido === "string" ? pedido : undefined) ?? (await vscode.window.showQuickPick(BOTONES.map((b) => ({ label: b.etiqueta, pedido: b.pedido })), { placeHolder: "¿Qué ayuda quieres para esta parte?" }))?.pedido;
+        const p = (typeof pedido === "string" ? pedido : undefined) ?? (await vscode.window.showQuickPick(BOTONES.filter((b) => b.pedido !== "plano").map((b) => ({ label: b.etiqueta, pedido: b.pedido })), { placeHolder: "¿Qué ayuda quieres para esta parte?" }))?.pedido;
         if (p) await this.notas.pedir(doc, { linea: l, pedido: p });
       }),
     );

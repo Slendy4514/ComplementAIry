@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { dataDir, type Zoner } from "./config.js";
 import { listFiles } from "./files.js";
+import { parseMemoria, sinSugerencia, unaLinea } from "./memoria.js";
 import { snippetPolicy } from "./snippets.js";
 import { langFor } from "./lang.js";
 import { verifyCommentOnly } from "./verify.js";
@@ -35,11 +36,21 @@ const CMD = "\u0000comando";
  * Archivos que un comando de ComplementAIry (ejecutado por la IA desde el chat) puede generar.
  * Solo si el comando es UNA llamada a cai, sin encadenar nada (&&, ;, |, >, $(...)).
  */
-export function generadosPor(comando: string): ((rel: string, antes: Buffer | null) => boolean) | null {
+export function generadosPor(comando: string): ((rel: string, antes: Buffer | null, despues: Buffer | null) => boolean) | null {
   const m = /^\s*(?:cai|complementairy|aicode)\s+([\w-]+)(?:\s+[^;&|<>`$()\n]*)?$/.exec(comando);
   if (!m) return null;
   const datos = (rel: string) => /^\.(cai|aicode)\//.test(rel);
   const plantilla = (b: Buffer | null) => !b || b.toString("utf8").replace(/<!--[\s\S]*?-->/g, "").replace(/^#.*$/gm, "").trim() === "";
+  // conocimiento.md: el comando puede agregar preguntas, pero no tocar lo que TÚ respondiste ni tus notas.
+  // Con `moverR` (panorama) también puede pasar a "Lo que me contaste" lo que escribiste después de "R:".
+  const memoriaHonesta = (rel: string, antes: Buffer | null, despues: Buffer | null, moverR: boolean) => {
+    if (!/\/conocimiento\.md$/.test(rel)) return false;
+    const a = parseMemoria(antes?.toString("utf8") ?? "");
+    const d = parseMemoria(despues?.toString("utf8") ?? "");
+    if (d.notas !== a.notas || a.respondidas.some((r, i) => d.respondidas[i] !== r)) return false;
+    const movibles = new Set(a.abiertas.filter((x) => x.r).map((x) => `${sinSugerencia(x.p)} → ${unaLinea(x.r)}`));
+    return d.respondidas.slice(a.respondidas.length).every((r) => moverR && movibles.has(r));
+  };
   const notasYTareas = (rel: string) => /^\.(cai|aicode)\/(notas\/[^/]+\.json|tareas\.json)$/.test(rel);
   switch (m[1]) {
     case "guia":
@@ -48,19 +59,20 @@ export function generadosPor(comando: string): ((rel: string, antes: Buffer | nu
     case "notas":
     case "predecir":
     case "check":
-    case "acompanar":
     case "siguiente":
     case "tareas":
       return (rel) => notasYTareas(rel);
     case "tests":
       return (rel) => notasYTareas(rel); // el archivo de tests nuevo/ampliado ya pasa por "solo comentarios"
     case "panorama":
-      return (rel) => (datos(rel) && /\/(panorama|conocimiento)\.md$/.test(rel)) || notasYTareas(rel);
+      return (rel, antes, despues) => (datos(rel) && (/\/panorama\.md$/.test(rel) || memoriaHonesta(rel, antes, despues, true))) || notasYTareas(rel);
     case "conocer":
       // proyecto.md / reglas.md solo si estaban vacíos (si no, el comando escribe *.borrador.md).
       return (rel, antes) => datos(rel) && (/\/(conocimiento|proyecto\.borrador|reglas\.borrador)\.md$/.test(rel) || (/\/(proyecto|reglas)\.md$/.test(rel) && plantilla(antes)));
     case "plano":
-      return (rel) => rel === "docs/ESTRUCTURA.md" || notasYTareas(rel);
+    case "acompanar": // el acompañante propone la estructura del proyecto si no hay una
+      return (rel, antes, despues) =>
+        rel === "docs/ESTRUCTURA.md" || (datos(rel) && (/\/estructura\.json$/.test(rel) || memoriaHonesta(rel, antes, despues, false))) || notasYTareas(rel);
     case "arquitectura":
     case "adr":
       return (rel) => /^docs\/adr\/[^/]+\.md$/.test(rel);
@@ -153,7 +165,7 @@ export async function checkSnapshot(z: Zoner, id: string): Promise<Action[]> {
     if (oldHash && cur && sha1(cur) === oldHash) return;
     const zone = z.zoneOf(abs);
     if (zone === "delegada") return;
-    if (permitido && permitido(f, oldHash ? fs.readFileSync(path.join(blobs, oldHash)) : null)) return; // salida de un comando de cai
+    if (permitido && permitido(f, oldHash ? fs.readFileSync(path.join(blobs, oldHash)) : null, fs.existsSync(abs) ? fs.readFileSync(abs) : null)) return; // salida de un comando de cai
     if (zone === "snippets" && cur && snippetPolicy(z, cur.toString("utf8")).allowed) return;
     const oldBuf = oldHash ? fs.readFileSync(path.join(blobs, oldHash)) : null;
 

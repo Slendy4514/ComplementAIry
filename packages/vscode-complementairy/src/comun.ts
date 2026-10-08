@@ -114,6 +114,7 @@ export interface Nota {
   origen: string;
   prediccion?: { expresion: string; funcion: string };
   desanclada?: boolean;
+  alcance?: "archivo";
   actualizada: string;
 }
 
@@ -121,6 +122,7 @@ export const archivoNotas = (cwd: string, rel: string) => path.join(dataDir(cwd)
 
 /** Igual que en la CLI (notas.ts): misma línea, la más cercana con el mismo texto, o la función. */
 export function reanclar(lineas: string[], n: Nota): Nota {
+  if (n.alcance === "archivo") return { ...n, ancla: { ...n.ancla, linea: 1 }, desanclada: false };
   const objetivo = n.ancla.texto.trim();
   const i = n.ancla.linea - 1;
   if (objetivo && lineas[i]?.trim() === objetivo) return { ...n, desanclada: false };

@@ -196,3 +196,16 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - "Insertar aquí" para snippets;
   - preguntar sobre la selección.
 - Selftest: 127/127.
+
+## v0.6: proyecto, archivo y función (2026-10-08)
+- **Lo que notó el usuario:** no había ayuda para el archivo entero, y el botón "Plano" aparecía en cada función aunque habla del archivo. La estructura, el panorama y las preguntas eran documentos sueltos, incómodos de usar.
+- **Decisiones del usuario:** el panorama se ve en el panel (no en una página aparte), y se hace el cambio completo.
+- **Hecho:**
+  - **Botones arriba del archivo** (Plano, Ayuda con el archivo, Revisar, notas); las notas de archivo van arriba (`--archivo-entero`). "Plano" ya no está en las funciones.
+  - **`docs/ESTRUCTURA.md` en markdown limpio,** más `.cai/estructura.json`. Los archivos que faltan pasan a ser tareas ordenadas, que se marcan solas al crear el archivo.
+  - **Las sugerencias del panorama pasan a ser tareas.**
+  - **Preguntas con su sugerencia aparte,** que se responden desde el panel (`cai memoria`).
+  - **Panel → Proyecto:** estado, árbol de estructura con "Crear archivo" (clic humano, archivo vacío) y preguntas para ti.
+  - **Prueba real** de `cai plano` en una copia de demo-ts: estructura clara, 10 archivos por crear como tareas y 4 preguntas útiles, por US$0,15. Con esa prueba se corrigieron la numeración doble y el orden de las tareas, y las preguntas se separaron de la sugerencia.
+- La revisión independiente encontró 18 problemas, todos corregidos. Los más importantes: una respuesta con saltos de línea podía pisar las notas de la memoria; el panorama podía pisar una respuesta dada mientras la IA pensaba; las tareas y las preguntas se repetían en cada propuesta; y desde el chat, `cai plano` podía cambiar lo que respondiste (ahora solo puede agregar preguntas).
+- Selftest: 135/135.

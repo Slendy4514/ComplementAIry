@@ -7,6 +7,7 @@ import { contextBlock, CRITERIO, projectContext } from "./context.js";
 import { langFor } from "./lang.js";
 import { ask } from "./llm.js";
 import { medir } from "./metricas.js";
+import { cargarNotas, guardarNotas } from "./notas.js";
 import { publicar, type Aporte } from "./salida.js";
 import { agregarTareas } from "./siguiente.js";
 import { iaOpts, marcadores } from "./tutor.js";
@@ -97,6 +98,7 @@ export async function planoArchivo(root: string, rel: string): Promise<{ costoUs
     texto: `${data.resumen}\n${lista}\n${data.orden}`,
     accion: data.orden,
     origen: "plano",
+    alcance: "archivo",
   });
   for (const f of data.funciones) {
     const e = existentes.find((x) => x.nombre === f.nombre);
@@ -117,6 +119,16 @@ export async function planoArchivo(root: string, rel: string): Promise<{ costoUs
       .filter((f) => !existentes.some((e) => e.nombre === f.nombre))
       .map((f) => ({ titulo: `Crear ${f.nombre} en ${rel}: ${f.que_hace}`.slice(0, 120), archivo: rel, funcion: f.nombre, origen: "plano" as const })),
   );
+  // Un plano nuevo reemplaza al anterior: sus notas abiertas se archivan (no se acumulan).
+  if (z.config.vista === "notas") {
+    const previas = cargarNotas(root, rel, src);
+    let cambio = false;
+    for (const n of previas.filter((x) => x.origen === "plano" && x.estado === "abierta")) {
+      n.estado = "resuelta";
+      cambio = true;
+    }
+    if (cambio) guardarNotas(root, rel, previas);
+  }
   const r = await publicar(root, rel, z.config.vista === "notas" ? aportes : aportes.slice(0, 1));
   return { costoUsd: costUsd, notas: r.notas.length || r.insertados, tareas };
 }

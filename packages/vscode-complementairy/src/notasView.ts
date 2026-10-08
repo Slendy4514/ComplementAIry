@@ -131,8 +131,8 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
         mapa.set(n.id, t);
         this.idDe.set(t, { uri: k, id: n.id });
       } else if (!t.range || t.range.start.line !== linea) t.range = rango;
-      t.label = `${ICONO[n.tipo] ?? "📝"} ${n.titulo}${n.bloqueante ? "  ⚠ bloqueante" : ""}${n.desanclada ? "  (su línea cambió)" : ""}`;
-      t.contextValue = n.snippets.length ? "cai-nota cai-snippet" : "cai-nota";
+      t.label = `${n.alcance === "archivo" ? "📄 " : ""}${ICONO[n.tipo] ?? "📝"} ${n.titulo}${n.bloqueante ? "  ⚠ bloqueante" : ""}${n.desanclada ? "  (su línea cambió)" : ""}`;
+      t.contextValue = ["cai-nota", n.alcance === "archivo" ? "cai-archivo" : "cai-funcion", ...(n.snippets.length ? ["cai-snippet"] : [])].join(" ");
       t.canReply = true;
       t.comments = this.comentarios(k, n);
       if (this.desplegar.delete(n.id)) t.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
@@ -158,9 +158,17 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
     const pie: string[] = [];
     if (n.accion) pie.push(`**▶ Qué hacer:** ${n.accion}`);
     n.snippets.forEach((s, i) => pie.push(`[$(insert) Insertar \`${s.llamada.split(/\s/)[0]}\` aquí](${cmd("cai.nota.insertar", [uri, n.id, i])})`));
-    if (!n.prediccion) pie.push(BOTONES.map((b) => `[${b.etiqueta}](${cmd("cai.nota.pedir", [uri, n.id, b.pedido])})`).join(" · "));
+    // "Plano" es del archivo entero: solo en las notas de archivo, no en las de una función.
+    // "Plano" es del archivo entero (y "Tests" de una función): cada nota muestra los de su nivel.
+    const archivo = n.alcance === "archivo";
+    if (!n.prediccion)
+      pie.push(
+        BOTONES.filter((b) => (archivo ? b.pedido !== "tests" : b.pedido !== "plano"))
+          .map((b) => (b.pedido === "plano" ? `[${b.etiqueta}](${cmd("cai.plano", [uri])})` : `[${b.etiqueta}](${cmd("cai.nota.pedir", [uri, n.id, b.pedido])})`))
+          .join(" · "),
+      );
     pie.push(`[$(check) Resuelta](${cmd("cai.nota.resolver", [uri, n.id])})`);
-    out.push(new Comentario(mdBotones(pie.join("\n\n"), ["cai.nota.pedir", "cai.nota.resolver", "cai.nota.insertar"]), IA, n.prediccion ? "Responde abajo lo que crees que devuelve" : "Pide más ayuda o escríbele abajo"));
+    out.push(new Comentario(mdBotones(pie.join("\n\n"), ["cai.nota.pedir", "cai.nota.resolver", "cai.nota.insertar", "cai.plano"]), IA, n.prediccion ? "Responde abajo lo que crees que devuelve" : "Pide más ayuda o escríbele abajo"));
     return out;
   }
 
@@ -184,7 +192,7 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
    * Un pedido a la IA sobre una nota (o una nota nueva en una línea). Mientras piensa, el hilo
    * muestra "pensando…" y no acepta otro pedido.
    */
-  async pedir(doc: vscode.TextDocument, o: { id?: string; linea?: number; pedido?: string; texto?: string; seleccion?: string; thread?: vscode.CommentThread; plantilla?: vscode.CommentThread }): Promise<void> {
+  async pedir(doc: vscode.TextDocument, o: { id?: string; linea?: number; archivoEntero?: boolean; pedido?: string; texto?: string; seleccion?: string; thread?: vscode.CommentThread; plantilla?: vscode.CommentThread }): Promise<void> {
     const cwd = root(doc);
     if (!cwd) return;
     let thread = o.thread ?? o.plantilla;
@@ -192,7 +200,7 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
     if (!thread) {
       const l = Math.max(0, (o.linea ?? 1) - 1);
       thread = this.controller.createCommentThread(doc.uri, new vscode.Range(l, 0, l, 0), []);
-      thread.label = o.seleccion ? "Pregunta sobre la selección" : "Pregunta";
+      thread.label = o.archivoEntero ? "📄 Pregunta sobre el archivo" : o.seleccion ? "Pregunta sobre la selección" : "Pregunta";
     }
     if (this.ocupados.has(thread)) return void vscode.window.showWarningMessage("ComplementAIry: ya estoy respondiendo en esta nota; espera a que termine.");
     this.ocupados.add(thread);
@@ -207,7 +215,7 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
         [
           "responder",
           doc.uri.fsPath,
-          ...(o.id ? ["--nota", o.id] : ["--linea", String(o.linea ?? 1)]),
+          ...(o.id ? ["--nota", o.id] : o.archivoEntero ? ["--archivo-entero"] : ["--linea", String(o.linea ?? 1)]),
           ...(o.pedido ? ["--pedido", o.pedido] : []),
           ...(o.texto ? ["--texto", o.texto] : []),
           ...(o.seleccion ? ["--seleccion", o.seleccion] : []),
@@ -256,6 +264,7 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
     for (const b of BOTONES)
       reg(`cai.nota.${b.pedido}`, async (...args) => {
         const u = this.ubicar(args);
+        if (b.pedido === "plano" && u) return vscode.commands.executeCommand("cai.plano", u.doc.uri);
         if (u?.id) await this.pedir(u.doc, { id: u.id, pedido: b.pedido, ...(u.thread ? { thread: u.thread } : {}) });
       });
     reg("cai.nota.resolver", async (...args) => {
@@ -274,6 +283,18 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
       if (!u?.id) return;
       const n = this.notas(u.doc).find((x) => x.id === u.id);
       if (n) await this.insertar(u.doc, n, typeof args[2] === "number" ? args[2] : 0);
+    });
+    reg("cai.notasArchivo", async (...args) => {
+      const u = typeof args[0] === "string" ? vscode.Uri.parse(args[0]) : vscode.window.activeTextEditor?.document.uri;
+      if (!u) return;
+      const doc = await vscode.workspace.openTextDocument(u);
+      const notas = this.notas(doc).sort((a, b) => Number(b.bloqueante) - Number(a.bloqueante) || a.ancla.linea - b.ancla.linea);
+      if (!notas.length) return void vscode.window.showInformationMessage("ComplementAIry: este archivo no tiene notas abiertas.");
+      const pick = await vscode.window.showQuickPick(
+        notas.map((n) => ({ label: `${n.alcance === "archivo" ? "📄 " : ""}${ICONO[n.tipo] ?? "📝"} ${n.titulo}`, description: n.alcance === "archivo" ? "archivo" : `línea ${n.ancla.linea}${n.bloqueante ? " · ⚠ bloqueante" : ""}`, detail: n.accion ? `▶ ${n.accion}` : "", id: n.id })),
+        { placeHolder: "Notas de este archivo" },
+      );
+      if (pick) await vscode.commands.executeCommand("cai.nota.abrir", doc.uri.toString(), pick.id);
     });
     reg("cai.nota.abrir", async (...args) => {
       const [uri, id] = args as [string, string];

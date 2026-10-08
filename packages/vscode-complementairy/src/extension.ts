@@ -106,18 +106,19 @@ export function activate(ctx: vscode.ExtensionContext): void {
       mostrarError(e);
     }
   });
-  reg("cai.plano", async () => {
-    const ed = vscode.window.activeTextEditor;
-    const cwd = root(ed?.document);
-    if (!ed || !cwd) return;
-    await guardar(ed.document);
+  ctx.subscriptions.push(vscode.commands.registerCommand("cai.plano", async (uri?: unknown) => {
+    const u = uri instanceof vscode.Uri ? uri : typeof uri === "string" ? vscode.Uri.parse(uri) : undefined;
+    const doc = u ? await vscode.workspace.openTextDocument(u) : vscode.window.activeTextEditor?.document;
+    const cwd = root(doc);
+    if (!doc || !cwd) return;
+    await guardar(doc);
     try {
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: armando el plano del archivo…" }, () => run(["plano", "--archivo", ed.document.uri.fsPath], cwd));
-      vscode.window.setStatusBarMessage("ComplementAIry: plano listo (notas junto a cada función y tareas en el panel)", 8000);
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: armando el plano del archivo…" }, () => run(["plano", "--archivo", doc.uri.fsPath], cwd));
+      vscode.window.setStatusBarMessage("ComplementAIry: plano listo (resumen arriba del archivo, notas en cada función y tareas en el panel)", 8000);
     } catch (e) {
       mostrarError(e);
     }
-  });
+  }));
   reg("cai.predecir", () => onFile("predecir", "preparando preguntas"));
   reg("cai.check", () => onFile("check", "comprobando predicciones"));
   reg("cai.limpiar", async () => {
@@ -233,8 +234,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
           const txt = r.acciones.map((a) => msgs[a.tipo] ?? a.tipo).join(" · ");
           if (txt) vscode.window.setStatusBarMessage(`ComplementAIry: ${txt}`, 8000);
           if (r.acciones.some((a) => a.tipo === "plano-proyecto"))
-            vscode.window.showInformationMessage("ComplementAIry: te dejé una propuesta de arquitectura.", "Abrir").then(async (v) => {
-              if (v) await vscode.window.showTextDocument(vscode.Uri.joinPath(vscode.Uri.file(cwd), "docs", "ESTRUCTURA.md"));
+            vscode.window.showInformationMessage("ComplementAIry: te dejé una propuesta de estructura del proyecto (panel → Proyecto → Estructura). Lo que falta crear está en tus tareas.", "Abrir").then(async (v) => {
+              if (v) await vscode.commands.executeCommand("cai.verEstructura");
             });
         } catch {
           output.appendLine(`acompañante: salida inesperada: ${stdout.slice(0, 200)}`);
@@ -248,7 +249,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
       const uri = vscode.Uri.joinPath(vscode.Uri.file(cwd), dir, ...partes);
       try {
         await vscode.workspace.fs.stat(uri);
-        await vscode.window.showTextDocument(uri, { preview: false });
+        // panorama.md se lee (vista previa); conocimiento.md se edita (texto).
+        if (partes.at(-1) === "panorama.md") await vscode.commands.executeCommand("markdown.showPreview", uri);
+        else await vscode.window.showTextDocument(uri, { preview: false });
         return;
       } catch {
         /* probar la otra carpeta */

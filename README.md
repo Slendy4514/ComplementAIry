@@ -53,7 +53,16 @@ Después escribe con tus palabras `.cai/proyecto.md` (qué buscas) y `.cai/regla
 
 ## Uso diario
 
-### En VSCode: notas en la línea exacta (por defecto)
+### En VSCode: tres niveles que no se mezclan
+| Nivel | Dónde | Qué tienes |
+|---|---|---|
+| **Proyecto** | panel ComplementAIry → **Proyecto** | **Estado** (del panorama), **Estructura** como árbol (✓ existe · ○ por crear, con botón "Crear archivo") y **Preguntas para ti**: clic, respondes en una cajita con la sugerencia ya escrita, y queda en la memoria del proyecto al instante. |
+| **Archivo** | botones arriba del archivo | `🗺️ Plano · 💡 Ayuda con el archivo · 🔎 Revisar · 💬 N notas`. El plano deja un resumen arriba, una nota en cada función que ya existe y una tarea por cada una que falta. |
+| **Función** | botones sobre cada función | `💬 notas · 💡 Ayuda · 🧪 Tests`. |
+
+Lo que la IA propone a nivel proyecto se vuelve **tareas**: cada archivo que falta en la estructura (en el orden de "por dónde empezar") y cada sugerencia del panorama, con el archivo a tocar. Se marcan solas cuando creas el archivo o la función, y **▶ Siguiente paso** te dice cuál toca.
+
+### Notas en la línea exacta (por defecto)
 Lo que dice la IA aparece como **notas**: hilos al costado del código, como en la revisión de un PR. **El archivo no se toca**, así que el autoguardado no choca con nada.
 - **Cada nota tiene botones:** 💡 Pista · 🧩 Piezas · 📝 Pseudocódigo · 🔁 Ejemplo · 🧪 Tests · 🗺️ Plano · ❓ Explícame · ✓ Resuelta. Si sugiere un snippet, también tiene **Insertar aquí**, que lo pone dentro de la función con huecos para completar con Tab.
 - **Escribirle:** en la caja de la nota escribes y presionas Ctrl+Enter; la IA responde en el mismo hilo. "No entiendo" sube un escalón.
@@ -70,6 +79,9 @@ Lo que dice la IA aparece como **notas**: hilos al costado del código, como en 
 | Preguntar (selección o línea) | `Ctrl+Alt+G` | `cai responder <archivo> --linea N --texto "..."` (o `// @ia? ...` + `cai guia <archivo>`) |
 | Siguiente paso | panel o `Ctrl+Alt+N` | `cai siguiente` |
 | Notas y tareas | panel | `cai notas [archivo]`, `cai tareas` |
+| Estructura del proyecto | panel → Proyecto, o el botón del panel | `cai plano "<qué construyes>"` → `docs/ESTRUCTURA.md` + tareas |
+| Preguntas que te hizo la IA | panel → Preguntas para ti | `cai memoria`, `cai memoria responder <n> "..."` |
+| Ayuda sobre el archivo entero | botón "💡 Ayuda con el archivo" | `cai responder <archivo> --archivo-entero --texto "..."` |
 | Plano de un archivo | Ctrl+Shift+P → "plano de este archivo" | `cai plano --archivo <archivo>` |
 | Expandir o elegir un snippet | `Ctrl+Alt+E` | `cai expandir <archivo>` |
 | Crear un snippet tuyo | `Ctrl+Alt+S` (con selección) | `cai snippet nuevo <nombre> --archivo f --lineas a-b` |

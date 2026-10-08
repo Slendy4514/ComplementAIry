@@ -36,6 +36,8 @@ export interface PedidoNota {
   /** Si viene de un @ia? del archivo: su clave y cuántos mensajes humanos lleva. */
   fuente?: string;
   turnos?: number;
+  /** La pregunta es sobre el archivo entero (no sobre una función). */
+  archivoEntero?: boolean;
 }
 
 // Función (y no constante) para evitar el ciclo de imports con tutor.ts al cargar.
@@ -90,11 +92,12 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
     if (!p.pedido && p.texto && /!tests?\b/i.test(p.texto)) p = { ...p, pedido: "tests" };
     const ped = pedidoDe(p.pedido) ?? (p.texto ? PEDIDOS.find((x) => x.re.test(p.texto!)) : undefined);
     if (!nota) {
-      const l = Math.min(Math.max(1, p.linea ?? 1), lineas.length);
-      const fn = funcionEn(l);
+      const l = p.archivoEntero ? 1 : Math.min(Math.max(1, p.linea ?? 1), lineas.length);
+      const fn = p.archivoEntero ? undefined : funcionEn(l);
       nota = nuevaNota(notas, {
         archivo: rel,
         ancla: { linea: l, texto: (lineas[l - 1] ?? "").trim(), ...(fn ? { funcion: fn.nombre } : {}) },
+        ...(p.archivoEntero ? { alcance: "archivo" as const } : {}),
         tipo: "pregunta",
         titulo: (p.texto ?? (ped ? `${ped.que[0]!.toUpperCase()}${ped.que.slice(1)}` : "Pregunta")).slice(0, 60),
         origen: p.origen ?? "pregunta",
@@ -145,9 +148,10 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
       if (critical && ped && ped.nivel > Math.max(prev, base) + 1) nivel = Math.max(prev, base) + 1; // en lo crítico, de a un escalón
       const libreria = paraLenguaje(biblioteca(root), lang.id);
       const libTexto = libreria.map((s) => `- ${s.nombre}: ${s.descripcion}${marcadores(s).length ? ` (marcadores: ${marcadores(s).join(", ")})` : ""}`).join("\n");
-      const marca = nota.ancla.linea - 1;
-      const desde = lineas.length <= 400 ? 0 : Math.max(0, marca - 80);
-      const hasta = lineas.length <= 400 ? lineas.length : marca + 80;
+      const entero = nota.alcance === "archivo";
+      const marca = entero ? -1 : nota.ancla.linea - 1;
+      const desde = entero || lineas.length <= 400 ? 0 : Math.max(0, marca - 80);
+      const hasta = entero ? Math.min(lineas.length, 600) : lineas.length <= 400 ? lineas.length : marca + 80;
       const vista = lineas
         .slice(desde, hasta)
         .map((l, i) => `${String(desde + i + 1).padStart(4)}| ${l}${desde + i === marca ? "   ◀ NOTA" : ""}`)
@@ -159,12 +163,13 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
         `(nivel interno: ${nivel})`,
         ped ? `El programador pidió explícitamente: ${ped.que}. Responde con eso (tipo "${ped.tipo}").` : "",
         p.pedido === "explica" ? "El programador pidió que le expliques esta parte: qué hace, por qué y qué cuidar. Sin reescribirla." : "",
+        entero ? "La pregunta es sobre el ARCHIVO COMPLETO (su organización, qué funciones tiene o le faltan, cómo encaja en el proyecto), no sobre una función puntual." : "",
         contextBlock(projectContext(root, rel)),
         libTexto ? `BIBLIOTECA DE SNIPPETS (${lang.id}):\n${libTexto}` : "",
         "Formato: listas con cada ítem en su propia línea; nada de muros de texto. Si sugieres un snippet, en \"codigo\" copia la línea después de la cual va.",
         "Conversación de la nota:",
         nota.hilo.map((m) => `${m.quien === "ia" ? "TUTOR" : "PROGRAMADOR"}: ${m.texto}`).join("\n"),
-        "Código (◀ NOTA marca dónde está la nota):",
+        entero ? "Código del archivo:" : "Código (◀ NOTA marca dónde está la nota):",
         vista,
       ]
         .filter(Boolean)

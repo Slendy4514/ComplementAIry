@@ -38,6 +38,8 @@ export interface Nota {
   /** Predicción "¿qué devuelve...?" que se comprueba ejecutando el código. */
   prediccion?: { expresion: string; funcion: string };
   desanclada?: boolean;
+  /** "archivo" = sobre el archivo entero (se muestra arriba, no en una función). */
+  alcance?: "archivo";
   /** Escalón de ayuda alcanzado en esta nota (para "!mas" / "no entiendo"). */
   nivel?: number;
   /** Mensajes humanos ya respondidos que vinieron de un @ia? del archivo. */
@@ -50,6 +52,8 @@ const archivoNotas = (root: string, rel: string) => path.join(dataDir(root), "no
 
 /** Busca el ancla en el texto actual: misma línea, o la más cercana con el mismo texto, o la función. */
 export function reanclar(src: string, n: Nota): Nota {
+  // Las del archivo entero viven siempre arriba.
+  if (n.alcance === "archivo") return { ...n, ancla: { ...n.ancla, linea: 1 }, desanclada: false };
   const lineas = src.split(/\r?\n/);
   const objetivo = n.ancla.texto.trim();
   const i = n.ancla.linea - 1;

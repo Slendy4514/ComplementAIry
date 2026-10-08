@@ -293,6 +293,11 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 
 **En VSCode:** hilos de la API de comentarios (botones, caja de respuesta, "+" en el margen), CodeLens por función, hover, Problemas para lo bloqueante, panel lateral y barra de estado con cancelar y silenciar 30 min.
 
+**Tres niveles (v0.6):** proyecto, archivo y función no se mezclan.
+- **Proyecto:** `cai plano` escribe `docs/ESTRUCTURA.md` en markdown limpio (se edita a mano) y `.cai/estructura.json` (para el panel). Cada archivo que falta es una tarea `crear`, ordenada según "por dónde empezar", que se marca hecha sola cuando el archivo existe. Las sugerencias del panorama también son tareas, con el archivo a tocar. Las preguntas traen pregunta y sugerencia por separado y se responden desde el panel o con `cai memoria responder`; la respuesta pasa al instante a "Lo que me contaste". La IA del chat no puede responderlas: es conocimiento del humano, y el hook lo revierte.
+- **Archivo:** las notas con `alcance: "archivo"` van arriba y no se atan a una función (`cai responder --archivo-entero`). Un plano nuevo del archivo archiva el anterior.
+- **Función:** los botones por función ya no ofrecen "Plano", que es del archivo.
+
 **Límite conocido:** en modo comentarios, `guia` y el acompañante siguen escribiendo en disco (solo `revisar` se aplica sobre el buffer desde VSCode). Con autoguardado conviene el modo notas.
 
 ## Estado
@@ -306,6 +311,7 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 | 6 | Terminal (`explica`, `pregunta`, `corre`, `error`, `shell`), `arquitectura`, ADRs, revisor de arquitectura | ✅ |
 | 7 | Extensión de VSCode | ✅ · adaptador de Honcho: pendiente (opcional; ver abajo) |
 | 8 (v0.5) | Notas fuera del archivo, botones, panel "Siguiente paso", bloqueo por archivo, "pensando…", modelos por tamaño | ✅ |
+| 9 (v0.6) | Tres niveles (proyecto, archivo, función), estructura y panorama como tareas, preguntas desde el panel | ✅ |
 
 **Honcho:** el perfil y la memoria hoy son archivos locales legibles, que es lo que pide el principio de transparencia. Conectar Honcho, un servicio externo de modelado de usuario, requiere una cuenta y una API key tuyas, y envía datos de tu forma de programar a un tercero. Queda para cuando lo decidas.
 

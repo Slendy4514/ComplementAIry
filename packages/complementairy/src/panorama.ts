@@ -10,6 +10,8 @@ import { ask, evitada, leerUso } from "./llm.js";
 import { funcionesSinTests, medir, violaciones, type Violacion } from "./metricas.js";
 import { loadPerfil, nivelDe } from "./profile.js";
 import { findThreads } from "./threads.js";
+import { agregarPreguntas, parseMemoria, sinSugerencia, sugerenciaDe, unaLinea, type Memoria } from "./memoria.js";
+import { agregarTareas, cargarTareas, guardarTareas } from "./siguiente.js";
 import { iaOpts } from "./tutor.js";
 
 /**
@@ -39,7 +41,8 @@ interface Sugerencias {
   sugerencias: { titulo: string; porque: string; plano: string; archivos: string[] }[];
   alternativas: { sobre: string; propuesta: string; porque: string }[];
   riesgos: string[];
-  preguntas: string[];
+  /** Texto suelto en cachés de versiones anteriores. */
+  preguntas: (string | { pregunta: string; sugerencia: string })[];
 }
 
 const RESUMEN_SCHEMA = {
@@ -71,7 +74,17 @@ const PANORAMA_SCHEMA = {
       items: { type: "object", additionalProperties: false, required: ["sobre", "propuesta", "porque"], properties: { sobre: { type: "string" }, propuesta: { type: "string" }, porque: { type: "string" } } },
     },
     riesgos: { type: "array", maxItems: 4, items: { type: "string" } },
-    preguntas: { type: "array", maxItems: 4, items: { type: "string" }, description: "Lo que necesitas saber del programador para aconsejar mejor (no repitas preguntas ya respondidas)." },
+    preguntas: {
+      type: "array",
+      maxItems: 4,
+      description: "Lo que necesitas saber del programador para aconsejar mejor (no repitas preguntas ya respondidas).",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["pregunta", "sugerencia"],
+        properties: { pregunta: { type: "string", description: "Corta: una oración." }, sugerencia: { type: "string", description: "La respuesta que recomiendas, corta; \"\" si no hay una razonable." } },
+      },
+    },
   },
 };
 
@@ -87,22 +100,10 @@ ${CRITERIO}`;
 
 // --- Memoria del proyecto (.cai/conocimiento.md) -----------------------------------
 
-export interface Memoria {
-  respondidas: string[];
-  abiertas: { p: string; r: string }[];
-  notas: string;
-}
+export { agregarPreguntas, parseMemoria, sinSugerencia, unaLinea, type Memoria };
 
 export function leerMemoria(file: string): Memoria {
-  const m: Memoria = { respondidas: [], abiertas: [], notas: "" };
-  if (!fs.existsSync(file)) return m;
-  const txt = fs.readFileSync(file, "utf8");
-  const seccion = (t: string) => new RegExp(`^## ${t}\\n([\\s\\S]*?)(?=^## |$(?![\\s\\S]))`, "m").exec(txt)?.[1] ?? "";
-  m.notas = seccion("Notas tuyas").replace(/<!--[\s\S]*?-->/g, "").trim();
-  for (const l of seccion("Lo que me contaste").split("\n")) if (/^- /.test(l)) m.respondidas.push(l.slice(2).trim());
-  const abiertas = seccion("Preguntas abiertas");
-  for (const mm of abiertas.matchAll(/^- P: (.+)\n(?:\s+R: ?(.*))?/gm)) m.abiertas.push({ p: mm[1]!.trim(), r: (mm[2] ?? "").trim() });
-  return m;
+  return parseMemoria(fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "");
 }
 
 function escribirMemoria(file: string, resumenes: Record<string, { hash: string; resumen: string }>, m: Memoria): void {
@@ -238,8 +239,9 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
 
   const memFile = path.join(dir, "conocimiento.md");
   const mem = leerMemoria(memFile);
+  const nuevas: string[] = [];
   // Preguntas respondidas → "Lo que me contaste".
-  for (const a of mem.abiertas.filter((x) => x.r)) mem.respondidas.push(`${a.p} → ${a.r}`);
+  for (const a of mem.abiertas.filter((x) => x.r)) mem.respondidas.push(`${sinSugerencia(a.p)} → ${unaLinea(a.r)}`);
   mem.abiertas = mem.abiertas.filter((x) => !x.r);
 
   // 3. Sugerencias a nivel proyecto: solo si cambió algo de lo que las alimenta.
@@ -276,11 +278,27 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
     });
     costo += costUsd;
     sug = data;
-    const ya = new Set([...mem.abiertas.map((a) => a.p), ...mem.respondidas.map((r) => r.split(" → ")[0])]);
-    for (const p of data.preguntas) if (!ya.has(p) && mem.abiertas.length < 6) mem.abiertas.push({ p, r: "" }); // como mucho 6 abiertas a la vez
+    // Cada sugerencia, una tarea con el archivo a tocar. Las del panorama anterior que sigan
+    // pendientes se reemplazan (la IA reformula los títulos: si no, se acumularían).
+    guardarTareas(root, cargarTareas(root).filter((t) => t.origen !== "panorama" || t.hecha));
+    agregarTareas(
+      root,
+      data.sugerencias.map((s) => ({ titulo: unaLinea(s.titulo), detalle: unaLinea(`${s.porque} Cómo: ${s.plano}`), ...(s.archivos[0] ? { archivo: s.archivos[0] } : {}), origen: "panorama" as const })),
+    );
+    for (const q of data.preguntas) {
+      const pregunta = unaLinea(typeof q === "string" ? q : q.pregunta);
+      const s = typeof q === "string" ? "" : unaLinea(q.sugerencia);
+      nuevas.push(s ? `${pregunta} (sugerencia: ${s})` : pregunta);
+    }
   } else if (sug) evitada("panorama", "sin cambios desde el último panorama");
 
-  escribirMemoria(memFile, resumenes, mem);
+  // La memoria se vuelve a leer ahora (la llamada a la IA tarda): si respondiste algo en el panel
+  // mientras tanto, no se pisa.
+  const memFinal = leerMemoria(memFile);
+  for (const a of memFinal.abiertas.filter((x) => x.r)) memFinal.respondidas.push(`${sinSugerencia(a.p)} → ${unaLinea(a.r)}`);
+  memFinal.abiertas = memFinal.abiertas.filter((x) => !x.r);
+  agregarPreguntas(memFinal, nuevas);
+  escribirMemoria(memFile, resumenes, memFinal);
   fs.mkdirSync(path.dirname(cache), { recursive: true });
   fs.writeFileSync(cache, JSON.stringify({ resumenes, entrada, sugerencias: sug }, null, 2));
 
@@ -295,11 +313,11 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
   ];
   if (sug) {
     lineas.push("## Estado", "", sug.estado, "");
-    if (sug.sugerencias.length) lineas.push("## Sugerencias", "", ...sug.sugerencias.flatMap((s, i) => [`### ${i + 1}. ${s.titulo}`, "", `**Por qué:** ${s.porque}`, "", `**Cómo:** ${s.plano}`, ...(s.archivos.length ? ["", `Archivos: ${s.archivos.map((a) => `\`${a}\``).join(", ")}`] : []), ""]));
+    if (sug.sugerencias.length) lineas.push("## Sugerencias", "", "_Cada una está también en tus tareas (panel → Tareas)._", "", ...sug.sugerencias.flatMap((s, i) => [`### ${i + 1}. ${s.titulo}`, "", `**Por qué:** ${s.porque}`, "", `**Cómo:** ${s.plano}`, ...(s.archivos.length ? ["", `Archivos: ${s.archivos.map((a) => `\`${a}\``).join(", ")}`] : []), ""]));
     if (sug.alternativas.length) lineas.push("## Otras formas de hacerlo", "", ...sug.alternativas.map((a) => `- **${a.sobre}:** ${a.propuesta} _(${a.porque})_`), "");
     if (sug.riesgos.length) lineas.push("## Riesgos", "", ...sug.riesgos.map((r) => `- ${r}`), "");
   }
-  if (mem.abiertas.length) lineas.push("## Preguntas para ti", "", `Respóndelas en \`${path.relative(root, memFile)}\` (después de "R:"): se usan en todas las sugerencias.`, "", ...mem.abiertas.map((a) => `- ${a.p}`), "");
+  if (memFinal.abiertas.length) lineas.push("## Preguntas para ti", "", `Respóndelas en el panel de VSCode (Proyecto → Preguntas para ti), con \`cai memoria responder <n> "..."\` o en \`${path.relative(root, memFile)}\` (después de "R:"). Se usan en todas las sugerencias.`, "", ...memFinal.abiertas.map((a) => `- ${a.p}`), "");
   lineas.push("## Mediciones (sin IA)", "");
   lineas.push(`- ${archivos.length} archivos de código, ${archivos.reduce((n, a) => n + a.funciones, 0)} funciones.`);
   if (medibles.length) lineas.push(`- Prácticas que no se cumplen (umbrales en \`.cai/config.json\` → \`practicas\`):`, ...medibles.map((m) => `  - ${m}`));
@@ -319,7 +337,7 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
     sug?.sugerencias.length ? `${sug.sugerencias.length} sugerencia(s) de diseño` : "",
     medibles.length ? `${medibles.length} práctica(s) sin cumplir` : "",
     sinTests.length ? `${sinTests.length} función(es) sin tests` : "",
-    mem.abiertas.length ? `${mem.abiertas.length} pregunta(s) para ti en ${path.relative(root, memFile)}` : "",
+    memFinal.abiertas.length ? `${memFinal.abiertas.length} pregunta(s) para ti en ${path.relative(root, memFile)}` : "",
   ].filter(Boolean);
   return { archivo: out, costoUsd: costo, resumen };
 }
@@ -337,4 +355,27 @@ export function actualizarMemoria(root: string, f: (m: Memoria) => void): void {
   const m = leerMemoria(memFile);
   f(m);
   escribirMemoria(memFile, resumenes, m);
+}
+
+
+/** Preguntas abiertas numeradas, con la respuesta sugerida aparte (para el panel y `cai memoria`). */
+export function preguntasAbiertas(root: string): { n: number; pregunta: string; sugerencia: string }[] {
+  return leerMemoria(path.join(dataDir(root), "conocimiento.md")).abiertas.map((a, i) => ({
+    n: i + 1,
+    pregunta: sinSugerencia(a.p),
+    sugerencia: sugerenciaDe(a.p),
+  }));
+}
+
+/** Tu respuesta pasa al instante a "Lo que me contaste" (sin esperar al próximo panorama). */
+export function responderPregunta(root: string, n: number, respuesta: string): string {
+  let p = "";
+  actualizarMemoria(root, (m) => {
+    const a = m.abiertas[n - 1];
+    if (!a) throw new Error(`no hay pregunta abierta número ${n} (hay ${m.abiertas.length}); míralas con: cai memoria`);
+    p = sinSugerencia(a.p);
+    m.respondidas.push(`${p} → ${unaLinea(respuesta)}`);
+    m.abiertas.splice(n - 1, 1);
+  });
+  return p;
 }

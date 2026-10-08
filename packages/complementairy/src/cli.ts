@@ -19,7 +19,7 @@ import { watch } from "./watch.js";
 import { acompanar } from "./acompanante.js";
 import { planoProyecto } from "./plano.js";
 import { proponerTests } from "./tests.js";
-import { panorama } from "./panorama.js";
+import { leerMemoria, panorama, preguntasAbiertas, responderPregunta } from "./panorama.js";
 import { enCurso, OcupadoError, ocuparEsperando } from "./ocupado.js";
 import { responderNota } from "./responder.js";
 import { cargarNotas, guardarNotas, nuevaNota, mensaje, todasLasNotas } from "./notas.js";
@@ -41,6 +41,12 @@ import { arquitectura, nuevoAdr } from "./arquitectura.js";
 const HELP = `ComplementAIry (cai) — tú programas, la IA te acompaña
 
   cai init [dir]                 instala hooks, config y pre-commit en un proyecto
+  cai siguiente                  qué hacer ahora (una sola cosa, elegida sin IA) y qué viene después
+  cai responder <archivo> (--linea N | --nota <id> | --archivo-entero) [--texto "..."] [--pedido pista|piezas|pseudo|ejemplo|tests|explica]
+                                    pregunta en una nota (en modo notas el archivo no se toca)
+  cai notas [<archivo>|--todas]  notas abiertas · cai notas resolver <archivo> <id> · cai notas importar <archivo>
+  cai tareas [hecha|pendiente <id>]  tareas del plano, la estructura y el panorama
+  cai memoria [responder <n> "..."]  preguntas que la IA te hizo sobre el proyecto (y tus respuestas)
   cai guia <archivo>             responde los @ia? / @yo: pendientes con comentarios @guia
   cai revisar <archivo> [--sin-ia] [--solo bugs,seguridad] [--todo]
                                     verificaciones deterministas + revisores de IA, como comentarios
@@ -65,7 +71,8 @@ const HELP = `ComplementAIry (cai) — tú programas, la IA te acompaña
   cai adr nuevo "<título>"       ADR vacío con la estructura
   cai acompanar <archivo>        lo que pasa al guardar: expande snippets activados [x], responde @ia?,
                                     propone planos y ofrece ayuda si una función sigue con errores
-  cai plano ["<qué construyes>"] plano del proyecto (arquitectura) en docs/ESTRUCTURA.md
+  cai plano ["<qué construyes>"] plano del proyecto en docs/ESTRUCTURA.md; lo que falta crear, a tus tareas
+  cai plano --archivo <archivo>  plano de un archivo: resumen, nota por función y tareas
   cai uso [--dias 7]             consumo de IA: llamadas, tokens, caché, costo y llamadas evitadas
   cai watch                      responde solo al guardar (cualquier editor)
   cai perfil                     muestra tu perfil (nivel por tema, errores frecuentes)
@@ -76,6 +83,7 @@ const HELP = `ComplementAIry (cai) — tú programas, la IA te acompaña
                                     reemplaza // @snippet: nombre arg=valor por el snippet real
                                     (con --linea también acepta una sugerencia @guia ... snippet:)
   cai snippet lista [archivo]    snippets disponibles (tuyos y base)
+  cai snippet cuerpo <archivo> "<nombre clave=valor>"  el snippet listo para VSCode (con huecos)
   cai guia list [archivos...]    lista comentarios @guia / @ia? / @yo:
   cai guia clean [archivos...]   borra los comentarios de conversación (--solo-guia: solo @guia)
   cai guia check [--staged]      falla si quedan comentarios de conversación (pre-commit)
@@ -355,7 +363,7 @@ async function ejecutar(argv: string[]): Promise<number> {
       return 0;
     }
     case "responder": {
-      // cai responder <archivo> (--nota <id> | --linea <n>) [--pedido pseudo] [--texto "..."] [--seleccion "..."] [--json]
+      // cai responder <archivo> (--nota <id> | --linea <n> | --archivo-entero) [--pedido pseudo] [--texto "..."] [--seleccion "..."] [--json]
       if (!sub) throw new Error('uso: cai responder <archivo> (--nota <id> | --linea <n>) [--pedido pista|piezas|pseudo|ejemplo|plano|snippet|tests|explica] [--texto "..."]');
       const opt = (k: string) => (rest.includes(k) ? rest[rest.indexOf(k) + 1] : undefined);
       const json = rest.includes("--json");
@@ -369,6 +377,7 @@ async function ejecutar(argv: string[]): Promise<number> {
             ...(opt("--pedido") ? { pedido: opt("--pedido")! } : {}),
             ...(opt("--texto") ? { texto: opt("--texto")! } : {}),
             ...(opt("--seleccion") ? { seleccion: opt("--seleccion")! } : {}),
+            ...(rest.includes("--archivo-entero") ? { archivoEntero: true } : {}),
           },
           json ? () => {} : (l) => console.log(l),
         );
@@ -434,6 +443,26 @@ async function ejecutar(argv: string[]): Promise<number> {
       if (!abiertas.length) console.log("(sin notas abiertas)");
       return 0;
     }
+    case "memoria": {
+      // cai memoria [--json] · cai memoria responder <n> "<respuesta>"  (las preguntas que la IA te hizo)
+      if (sub === "responder") {
+        const n = Number(rest[0]);
+        const r = rest.slice(1).join(" ").trim();
+        if (!Number.isInteger(n) || n < 1 || !r) throw new Error('uso: cai memoria responder <número de pregunta> "<respuesta>" (los números salen en: cai memoria)');
+        const p = responderPregunta(root, n, r);
+        console.log(`✓ Anotado en la memoria del proyecto: ${p} → ${r}`);
+        return 0;
+      }
+      const abiertas = preguntasAbiertas(root);
+      if (argv.includes("--json")) {
+        process.stdout.write(JSON.stringify({ abiertas, respondidas: leerMemoria(path.join(dataDir(root), "conocimiento.md")).respondidas }));
+        return 0;
+      }
+      for (const a of abiertas) console.log(`${a.n}. ${a.pregunta}${a.sugerencia ? `\n   (sugerencia: ${a.sugerencia})` : ""}`);
+      if (!abiertas.length) console.log("(sin preguntas abiertas)");
+      else console.log('\nResponde con: cai memoria responder <n> "<tu respuesta>"');
+      return 0;
+    }
     case "siguiente": {
       const pasos = await siguiente(root);
       const ocup = enCurso(root);
@@ -491,7 +520,7 @@ async function ejecutar(argv: string[]): Promise<number> {
       }
       const desc = argv.slice(1).join(" ").trim();
       const r = await planoProyecto(root, desc || undefined);
-      console.log(`✓ ${path.relative(root, r.file)} con la propuesta de arquitectura · US$${r.costoUsd.toFixed(3)}\n  Pregunta o pide cambios con <!-- @ia? ... --> en ese archivo (Ctrl+Alt+G).`);
+      console.log(`✓ ${path.relative(root, r.file)} con la propuesta de arquitectura${r.tareas ? ` · ${r.tareas} archivo(s) por crear en tus tareas` : ""} · US$${r.costoUsd.toFixed(3)}\n  Edítalo con lo que decidas; en VSCode la ves en el panel → Proyecto → Estructura.`);
       return 0;
     }
     case "conocer": {

@@ -28,8 +28,12 @@ export interface Tarea {
   archivo?: string;
   /** Si se indica, la tarea se marca hecha sola cuando la función aparece en el archivo. */
   funcion?: string;
+  /** Si es true, se marca hecha sola cuando el archivo existe (archivos que propone la estructura). */
+  crear?: boolean;
+  /** Por qué y cómo (en palabras), para el tooltip del panel. */
+  detalle?: string;
   hecha: boolean;
-  origen: "plano" | "panorama" | "manual";
+  origen: "plano" | "estructura" | "panorama" | "manual";
   creada: string;
 }
 
@@ -91,6 +95,11 @@ export function agregarTareas(root: string, nuevas: Omit<Tarea, "id" | "hecha" |
 export async function actualizarTareas(root: string): Promise<Tarea[]> {
   const tareas = cargarTareas(root);
   let cambio = false;
+  for (const t of tareas.filter((x) => !x.hecha && x.crear && x.archivo))
+    if (fs.existsSync(path.join(root, t.archivo!))) {
+      t.hecha = true;
+      cambio = true;
+    }
   for (const t of tareas.filter((x) => !x.hecha && x.funcion && x.archivo)) {
     const abs = path.join(root, t.archivo!);
     const lang = langFor(t.archivo!);
@@ -114,7 +123,7 @@ export async function siguiente(root: string): Promise<Paso[]> {
     pasos.push({ prioridad: 1, tipo: "responder", titulo: n.titulo, accion: "Responde la predicción en la nota (sin ejecutar el código)", archivo: n.archivo, linea: n.ancla.linea, ref: n.id });
   const mem = leerMemoria(path.join(dataDir(root), "conocimiento.md"));
   if (mem.abiertas.length)
-    pasos.push({ prioridad: 1, tipo: "responder", titulo: `${mem.abiertas.length} pregunta(s) sobre el proyecto`, accion: `Responde después de "R:": ${mem.abiertas[0]!.p}`, archivo: path.relative(root, path.join(dataDir(root), "conocimiento.md")) });
+    pasos.push({ prioridad: 1, tipo: "responder", titulo: `${mem.abiertas.length} pregunta(s) sobre el proyecto`, accion: `Responde: ${mem.abiertas[0]!.p.replace(/\s*\(sugerencia: [^)]*\)\s*$/, "")}`, archivo: path.relative(root, path.join(dataDir(root), "conocimiento.md")) });
 
   // 2. Verificaciones que fallan.
   try {
@@ -127,7 +136,14 @@ export async function siguiente(root: string): Promise<Paso[]> {
 
   // 3. Tareas del plano.
   for (const t of (await actualizarTareas(root)).filter((x) => !x.hecha))
-    pasos.push({ prioridad: 3, tipo: "tarea", titulo: t.titulo, accion: t.funcion ? `Crea \`${t.funcion}\` en ${t.archivo}` : t.titulo, ...(t.archivo ? { archivo: t.archivo } : {}), ref: t.id });
+    pasos.push({
+      prioridad: 3,
+      tipo: "tarea",
+      titulo: t.detalle ? `${t.titulo} — ${t.detalle}` : t.titulo,
+      accion: t.funcion ? `Crea \`${t.funcion}\` en ${t.archivo}` : t.crear ? `Crea el archivo ${t.archivo}` : t.titulo,
+      ...(t.archivo ? { archivo: t.archivo } : {}),
+      ref: t.id,
+    });
 
   // 4 y 5. Notas.
   for (const n of notas.filter((x) => !x.prediccion))

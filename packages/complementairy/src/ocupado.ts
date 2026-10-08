@@ -65,6 +65,7 @@ export function ocupar(root: string, archivo: string, tarea: string, linea?: num
   const liberar = () => {
     if (liberado) return;
     liberado = true;
+    process.removeListener("exit", liberar);
     const yo = leer(f);
     if (yo?.pid === process.pid) fs.rmSync(f, { force: true });
   };
