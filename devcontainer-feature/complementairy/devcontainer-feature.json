@@ -1,6 +1,6 @@
 {
   "id": "complementairy",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "name": "ComplementAIry",
   "description": "Tú programas, la IA te acompaña: comando `cai` y extensión de VSCode de ComplementAIry en el contenedor.",
   "documentationURL": "https://github.com/Slendy4514/ComplementAIry",

@@ -17,6 +17,15 @@ MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 echo "ComplementAIry: instalando la CLI…"
 npm install -g --no-audit --no-fund ${CAI_NPM_PREFIX:+--prefix "$CAI_NPM_PREFIX"} "$DIR/complementairy.tgz"
 
+# Que el usuario del contenedor pueda actualizar o enlazar `cai` sin sudo (si no, npm falla con EACCES).
+USUARIO="${_REMOTE_USER:-}"
+if [ -n "$USUARIO" ] && [ "$USUARIO" != "root" ] && id "$USUARIO" >/dev/null 2>&1; then
+  RAIZ_NPM="$(npm root -g ${CAI_NPM_PREFIX:+--prefix "$CAI_NPM_PREFIX"})"
+  BIN_NPM="$(dirname "$RAIZ_NPM")/../bin"
+  [ -d "$RAIZ_NPM/complementairy" ] && chown -R "$USUARIO" "$RAIZ_NPM/complementairy"
+  for b in cai complementairy aicode; do [ -L "$BIN_NPM/$b" ] && chown -h "$USUARIO" "$BIN_NPM/$b"; done
+fi
+
 mkdir -p "$DEST"
 if [ "$EXTENSION" = "true" ] && [ -f "$DIR/complementairy.vsix" ]; then
   cp "$DIR/complementairy.vsix" "$DEST/complementairy.vsix"
@@ -25,10 +34,19 @@ fi
 cat > "$DEST/al-conectar.sh" <<'SH'
 #!/bin/sh
 # Se ejecuta al conectar VSCode (postAttachCommand): instala o actualiza la extensión.
+# Desde los hooks, `code` no siempre puede hablar con la ventana; si falla, se usa el binario
+# del servidor de VSCode (no necesita la ventana; la extensión aparece al recargar).
 VSIX=/usr/local/share/complementairy/complementairy.vsix
 [ -f "$VSIX" ] || exit 0
-command -v code >/dev/null 2>&1 || exit 0
-code --install-extension "$VSIX" --force >/dev/null 2>&1 || true
+command -v code >/dev/null 2>&1 && code --install-extension "$VSIX" --force >/dev/null 2>&1 && exit 0
+for d in $(ls -dt /vscode/vscode-server/bin/*/*/ "$HOME"/.vscode-server/bin/*/ "$HOME"/.vscode-server/cli/servers/*/server/ 2>/dev/null); do
+  if [ -x "${d}bin/code-server" ] && "${d}bin/code-server" --install-extension "$VSIX" --force >/dev/null 2>&1; then
+    echo "ComplementAIry: extensión instalada (si no la ves: Ctrl+Shift+P → Developer: Reload Window)"
+    exit 0
+  fi
+done
+echo "ComplementAIry: no pude instalar la extensión automáticamente; instálala desde $VSIX (Extensiones → … → Install from VSIX)" >&2
+exit 0
 SH
 chmod +x "$DEST/al-conectar.sh"
 echo "ComplementAIry: listo. En cada proyecto: cai init . && cai doctor"

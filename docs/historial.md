@@ -165,3 +165,14 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
 - **Siguen siendo del humano:** `cai init`, `cai expandir`, `cai snippet nuevo` y `cai perfil set` quedan bloqueados para la IA.
 - **Skill nueva `cai`:** indica qué comando corresponde a cada pedido. Las otras skills ahora corren los comandos en vez de pedirle al humano que apriete el atajo.
 - Selftest: 114/114.
+
+## Error al reconstruir el devcontainer (v0.4.2)
+- **Síntoma:** error en la terminal o en la creación del contenedor, y la extensión no aparecía.
+- **Causa 1:** la feature (aplicada por `dev.containers.defaultFeatures`) instalaba `cai` como root. Después, `post-create.sh` hacía `npm link`, fallaba con EACCES y, con `set -e`, se cortaba todo lo que seguía.
+- **Causa 2:** en los hooks del devcontainer, `code --install-extension` no siempre puede hablar con la ventana, y fallaba en silencio.
+- **Arreglos:**
+  - la feature deja el paquete a nombre del usuario del contenedor (`_REMOTE_USER`);
+  - para la extensión, si `code` falla, se usa el binario del servidor de VSCode (`code-server`), que no necesita la ventana;
+  - `post-create.sh` ahora tiene pasos independientes (avisa y sigue), y `npm link` reintenta con sudo;
+  - `post-attach.sh` instala la extensión de la misma forma robusta.
+- **El chat no se pierde en un rebuild:** `~/.claude` es un volumen que se conserva entre reconstrucciones, y además está el respaldo en `.claude-backup/`, que se restaura solo si el volumen está vacío.

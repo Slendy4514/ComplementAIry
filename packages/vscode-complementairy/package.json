@@ -2,7 +2,7 @@
   "name": "complementairy",
   "displayName": "ComplementAIry — tú programas, la IA te acompaña",
   "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "complementairy",
   "license": "MIT",
   "engines": {

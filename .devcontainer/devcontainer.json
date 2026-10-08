@@ -29,5 +29,5 @@
 
   "forwardPorts": [3000],
   "postCreateCommand": "sh .devcontainer/post-create.sh",
-  "postAttachCommand": "[ -f packages/vscode-complementairy/complementairy.vsix ] && code --install-extension packages/vscode-complementairy/complementairy.vsix --force >/dev/null 2>&1 || true"
+  "postAttachCommand": "sh .devcontainer/post-attach.sh"
 }
