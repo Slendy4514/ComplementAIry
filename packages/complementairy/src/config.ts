@@ -52,7 +52,8 @@ export interface Config {
   /** Qué ayuda dar cuando preguntas sin pedir un escalón: "auto" (según tu nivel) o uno fijo. */
   ayuda: { porDefecto: "auto" | "pista" | "piezas" | "pseudo" | "ejemplo" };
   /** Sugerencias rápidas (texto gris al final de la línea, en VSCode). */
-  rapidas: { activas: boolean; esperaMs: number; procesoAbierto: boolean };
+  /** soloConNota: guiar solo en funciones con nota · maxHora: tope de sugerencias por hora (~US$0,002 c/u). */
+  rapidas: { activas: boolean; esperaMs: number; procesoAbierto: boolean; soloConNota: boolean; maxHora: number };
   /**
    * Dónde se muestra lo que dice la IA: "notas" (hilos de VSCode al costado del código; el archivo no
    * se toca) o "comentarios" (comentarios @guia dentro del archivo, para terminal y otros editores).
@@ -86,6 +87,10 @@ export interface Config {
     carpeta: string;
     /** Avisar (sin IA) cuando terminás una función exportada que no tiene tests. */
     avisarSinTests: boolean;
+    /** Al pedir 🧪 Tests, guardar los casos como tests de verdad en la carpeta de tests (nunca toca tu código). */
+    crearConIa: boolean;
+    /** Volver a probar los casos al guardar (Ctrl+S; con autoguardado, cuando dejas de editar). */
+    alGuardar: boolean;
   };
   ia: {
     /** Modelo para la guía y la revisión; vacío = el predeterminado de Claude Code. */
@@ -150,10 +155,10 @@ export const DEFAULT_CONFIG: Config = {
   modo: "programar",
   modos: { porCarpeta: {}, porArchivo: {}, porFuncion: {} },
   ayuda: { porDefecto: "auto" },
-  rapidas: { activas: true, esperaMs: 2000, procesoAbierto: true },
+  rapidas: { activas: true, esperaMs: 1200, procesoAbierto: true, soloConNota: false, maxHora: 240 },
   practicas: { maxFuncionesArchivo: 12, maxLineasArchivo: 300, maxLineasFuncion: 40, maxAnidamiento: 3, maxParametros: 4 },
   autoria: { heredado: [], terceros: [], acompanarHeredado: false },
-  tests: { carpeta: "tests", avisarSinTests: true },
+  tests: { carpeta: "tests", avisarSinTests: true, crearConIa: true, alGuardar: true },
   ia: { modelo: "", context7: false, modeloRapido: "", modelos: { chico: "claude-haiku-4-5", mediano: "claude-sonnet-5-5", grande: "claude-opus-5-5" } },
   vista: "notas",
 };

@@ -24,7 +24,7 @@ import { esModo, MODOS, modoEfectivo } from "./modos.js";
 import { funcionesDe, funcionPorClave } from "./notasFuncion.js";
 import { rapida } from "./rapida.js";
 import { cargarDialogos, conversar, olvidarDialogo } from "./dialogo.js";
-import { proponerTests } from "./tests.js";
+import { correrTests, probarCasos, proponerTests, recorrerCasos } from "./tests.js";
 import { estadoPanorama, leerMemoria, panorama, preguntasAbiertas, responderPregunta } from "./panorama.js";
 import { conBloqueo, enCurso, OcupadoError, ocuparEsperando } from "./ocupado.js";
 import { responderNota } from "./responder.js";
@@ -742,8 +742,38 @@ async function ejecutar(argv: string[]): Promise<number> {
       return 0;
     }
     case "tests": {
-      if (!sub) throw new Error("uso: cai tests <archivo> [función]");
-      const r = await proponerTests(root, path.relative(root, path.resolve(sub)), rest.find((a) => !a.startsWith("--")));
+      if (!sub) throw new Error("uso: cai tests <archivo> [función] [--probar | --guardar | --correr] [--json]");
+      const rel = path.relative(root, path.resolve(sub));
+      const fn = rest.find((a) => !a.startsWith("--"));
+      const json = rest.includes("--json");
+      if (rest.includes("--probar")) {
+        // Propone casos y los EJECUTA ya contra tu código (no escribe archivos).
+        const r = await probarCasos(root, rel, fn);
+        if (json) process.stdout.write(JSON.stringify(r));
+        else for (const c of r.resultados) console.log(`${{ pasa: "✓", falla: "✗", decidir: "?", "no-ejecutable": "!" }[c.estado]} ${c.descripcion}: ${c.llamada} → esperado ${c.esperado}${c.obtenido ? `, obtuvo ${c.obtenido}` : ""}${c.duda ? ` (${c.duda})` : ""}`);
+        return 0;
+      }
+      if (rest.includes("--guardar")) {
+        // Con tu clic: los casos probados se escriben como tests (activos; los que tienen pregunta, apagados).
+        const r = await proponerTests(root, rel, fn, { usarProbados: true, activos: true });
+        if (json) process.stdout.write(JSON.stringify(r));
+        else console.log(`✓ ${r.casos} caso(s) en ${r.archivo}${r.preguntas ? ` (${r.preguntas} apagados, esperan tu respuesta)` : ""}`);
+        return 0;
+      }
+      if (rest.includes("--recorrer")) {
+        // Sin IA: vuelve a probar los casos guardados de este archivo (lo que corre al guardar).
+        const r = await recorrerCasos(root, rel);
+        if (json) process.stdout.write(JSON.stringify(r));
+        else for (const f of r.funciones) console.log(`🧪 ${f.funcion}: ${f.pasan} ✅ · ${f.fallan} ❌`);
+        return 0;
+      }
+      if (rest.includes("--correr")) {
+        const r = await correrTests(root, rel);
+        if (json) process.stdout.write(JSON.stringify(r));
+        else console.log(r.ok ? `✓ los tests de ${r.archivo} pasan` : `✗ ${r.archivo}:\n  ${r.fallos.join("\n  ")}`);
+        return r.ok ? 0 : 1;
+      }
+      const r = await proponerTests(root, rel, fn);
       console.log(`✓ ${r.casos} caso(s) propuestos en ${r.archivo}${r.preguntas ? ` (${r.preguntas} con pregunta para ti)` : ""} · US$${r.costoUsd.toFixed(3)}`);
       for (const d of r.descartados) console.log(`  ! descartado: ${d}`);
       console.log("  Revisa cada caso, ajusta el valor esperado y márcalo [x] (se convierte en test al guardar o con Ctrl+Alt+E).");

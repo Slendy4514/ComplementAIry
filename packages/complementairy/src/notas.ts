@@ -59,6 +59,10 @@ export interface Nota {
   huellaInicial?: string;
   /** Tu explicación de la función con tus palabras (modo aprender) y cómo se compara con el código. */
   explicacion?: { texto: string; coincide: boolean; comentario: string; fecha: string };
+  /** Se probaron casos de test (para ofrecer "Guardar como tests" y "Correr tests"). */
+  testsProbados?: { funcion: string; fecha: string; archivo?: string };
+  /** Última vez que se volvieron a probar sus casos (al guardar): se reemplaza, no se acumula. */
+  ultimaPrueba?: { fecha: string; pasan: number; fallan: number; detalle: { descripcion: string; estado: string; obtenido?: string; esperado: string; llamada: string }[] };
   /** Resultado de "¿quedó lista?" (cai verificar). */
   verificacion?: { estado: "lista" | "casi" | "falta"; resumen: string; fecha: string; hash: string; lineas?: string[] };
   creada: string;

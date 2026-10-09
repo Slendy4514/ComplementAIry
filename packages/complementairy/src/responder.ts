@@ -18,7 +18,7 @@ import { coincide, ejecutar } from "./predict.js";
 import { loadPerfil, nivelDe, puntaje, registrar } from "./profile.js";
 import { separarListas, type Reply } from "./render.js";
 import { markdown } from "./salida.js";
-import { proponerTests } from "./tests.js";
+import { noProbable, probarCasos, proponerTests } from "./tests.js";
 import { iaOpts, marcadores, NIVEL_BASE, PEDIDOS, SYSTEM, TIPOS } from "./tutor.js";
 
 /**
@@ -135,18 +135,46 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
     }
     // 2b. Tests: casos apagados en la carpeta de tests.
     else if (p.pedido === "tests") {
+      // Casos propuestos y PROBADOS ya contra tu código (sin escribir archivos): ves qué pasa y qué no.
       const fn = funcionEn(nota.ancla.linea);
-      const r = await proponerTests(root, rel, fn?.exportada ? fn.nombre : undefined);
-      costo += r.costoUsd;
-      nota.hilo.push(
-        mensaje(
-          "ia",
-          r.casos
-            ? `**🧪 Tests** · Te propuse ${r.casos} caso(s) en \`${r.archivo}\`${r.preguntas ? `; en ${r.preguntas} te pregunto qué debería pasar` : ""}. Ábrelo, ajusta los valores esperados y activa cada caso.`
-            : `No pude proponer casos válidos (${r.descartados.join("; ") || "no hay funciones exportadas"}).`,
-        ),
-      );
-      nota.accion = r.casos ? `Revisa y activa los casos en ${r.archivo}` : nota.accion;
+      const motivo = noProbable(lang.id, src, fn?.nombre);
+      if (motivo) nota.hilo.push(mensaje("ia", `**🧪 Tests** · No puedo ejecutar \`${fn?.nombre ?? "esto"}\` fuera de su programa: ${motivo}.`, { kind: "tests" }));
+      else {
+        const r = await probarCasos(root, rel, fn?.nombre);
+        costo += r.costoUsd;
+        const icono = { pasa: "✅", falla: "❌", decidir: "❓", "no-ejecutable": "⚠️" };
+        const n = (e: string) => r.resultados.filter((x) => x.estado === e).length;
+        const filas = r.resultados.map(
+          (c) =>
+            `- ${icono[c.estado]} ${c.descripcion}: \`${c.llamada}\` → esperado \`${c.esperado || "error"}\`${c.obtenido ? `, obtuvo \`${c.obtenido.slice(0, 80)}\`` : ""}${c.duda ? `\n  ❓ ${c.duda}` : ""}`,
+        );
+        nota.hilo.push(
+          mensaje(
+            "ia",
+            r.resultados.length
+              ? `**🧪 Tests** · Probé ${r.resultados.length} caso(s) contra tu código: ${n("pasa")} pasan, ${n("falla")} fallan${n("decidir") ? `, ${n("decidir")} esperan que decidas el resultado` : ""}${n("no-ejecutable") ? `, ${n("no-ejecutable")} no se pudieron ejecutar` : ""}.\n${filas.join("\n")}`
+              : `**🧪 Tests** · No pude proponer casos válidos (${r.descartados.join("; ") || "sin funciones exportadas"}).`,
+            { kind: "tests", costo: r.costoUsd },
+          ),
+        );
+        // La IA crea los tests (opción tests.crearConIa): en la carpeta de tests, nunca en tu código.
+        let creado = "";
+        if (z.config.tests.crearConIa && r.resultados.length) {
+          const t = await proponerTests(root, rel, fn?.nombre, { usarProbados: true, activos: true }).catch(() => null);
+          if (t?.casos) {
+            creado = t.archivo;
+            nota.hilo.push(mensaje("ia", `💾 Los guardé como tests en \`${t.archivo}\`${t.preguntas ? ` (${t.preguntas} quedan apagados hasta que decidas el resultado)` : ""}. Se vuelven a probar cada vez que guardas con Ctrl+S.`, { kind: "tests" }));
+          }
+        }
+        nota.testsProbados = { funcion: fn?.nombre ?? "", fecha: new Date().toISOString(), ...(creado ? { archivo: creado } : {}) };
+        nota.ultimaPrueba = {
+          fecha: new Date().toISOString(),
+          pasan: n("pasa"),
+          fallan: n("falla"),
+          detalle: r.resultados.map((d) => ({ descripcion: d.descripcion, estado: d.estado, ...(d.obtenido ? { obtenido: d.obtenido } : {}), esperado: d.esperado, llamada: d.llamada })),
+        };
+        if (n("falla")) nota.accion = `Revisa los ${n("falla")} caso(s) que fallan: ¿es el código o el valor esperado?`;
+      }
     }
     // 2c. La IA responde en el hilo.
     else {

@@ -3,16 +3,17 @@ import path from "node:path";
 import { dataDir, makeZoner } from "./config.js";
 import { langFor } from "./lang.js";
 import { ask, evitada } from "./llm.js";
-import { cargarNotas } from "./notas.js";
+import { cargarNotas, type Nota } from "./notas.js";
 import { claveFuncion, funcionEn, funcionesDe } from "./notasFuncion.js";
 import { iaOpts } from "./tutor.js";
 import { huella } from "./verificar.js";
 import { modoEfectivo } from "./modos.js";
 
 /**
- * Sugerencia rápida: una pista de UNA línea donde estás escribiendo (la extensión la muestra en gris
- * al final de la línea; no se inserta nada). Solo dentro de una función con nota abierta.
- * Límites sin IA: caché por código + línea, una cada 6 s por función y 60 por hora.
+ * Guía mientras escribes: en la línea del cursor, UNA indicación corta de qué sigue (o qué está mal en
+ * esa línea), siguiendo los pasos de la nota de la función si los hay. La extensión la muestra en gris
+ * al final de la línea y la actualiza en cada pausa; no se inserta nada.
+ * Límites sin IA: caché por código + línea, una cada 1,5 s por función y un tope por hora (configurable).
  */
 
 interface Cache {
@@ -22,8 +23,7 @@ interface Cache {
 }
 
 // Con el proceso abierto (cai servir) cada una tarda ~1 s y cuesta ~US$0,002.
-const MAX_HORA = 60;
-const ENTRE_MS = 6_000;
+const ENTRE_MS = 1_500;
 const archivo = (root: string) => path.join(dataDir(root), "cache", "rapidas.json");
 
 function cargar(root: string): Cache {
@@ -34,7 +34,11 @@ function cargar(root: string): Cache {
   }
 }
 
-const SYSTEM = `Das UNA pista corta (máximo 80 caracteres) para el próximo paso, en la línea donde está escribiendo el programador. Sin código ni nombres de variables nuevas: una idea ("valida que dest no esté vacío antes de mover"). Si la línea ya va bien o no hay nada útil que decir, devuelve texto vacío. Español neutro con tuteo.`;
+const SYSTEM = `Acompañas al programador MIENTRAS escribe una función, línea por línea. Da UNA indicación corta (máximo 90 caracteres) para lo que toca AHORA donde está el cursor (◀):
+- si la línea del cursor tiene un error o un caso sin cuidar, dilo ("ojo: si dest es '' esto falla");
+- si va bien, di el próximo paso concreto, siguiendo los pasos de su nota si los hay ("ahora busca el archivo en la bóveda");
+- en una línea vacía, qué escribir ahí (en palabras).
+Nunca escribas código, expresiones ni la línea corregida (nada de "x === y"): solo la idea en palabras ("compara en vez de asignar"). Devuelve texto vacío solo si la función ya está completa. Español neutro con TUTEO ("valida", "usa", "revisa"), nunca voseo ("validá", "usá").`;
 
 /**
  * `texto`: el contenido del editor (aunque no esté guardado); si no viene, se lee el disco.
@@ -49,12 +53,13 @@ export async function rapida(root: string, rel: string, linea: number, o: { text
   const f = funcionEn(funciones, linea);
   if (!f) return { texto: "", motivo: "el cursor no está dentro de una función", costoUsd: 0 };
   const nota = cargarNotas(root, rel, src).find((n) => n.estado === "abierta" && n.ancla.funcion === claveFuncion(funciones, f));
-  if (!nota) return { texto: "", motivo: `${f.nombre} no tiene nota (pide ayuda con 💡 sobre la función y desde ahí hay sugerencias)`, costoUsd: 0 };
+  if (!nota && z.config.rapidas.soloConNota) return { texto: "", motivo: `${f.nombre} no tiene nota (y la configuración pide guiar solo funciones con nota)`, costoUsd: 0 };
   // En modo aprender no hay sugerencias rápidas: primero lo piensas tú.
   if (!modoEfectivo(z.config, rel, claveFuncion(funciones, f)).c.rapidas) return { texto: "", motivo: "modo aprender (primero lo piensas tú)", costoUsd: 0 };
 
   const lineas = src.split(/\r?\n/);
   const codigo = lineas.slice(f.linea - 1, f.linea - 1 + f.lineas);
+  // Misma función, mismo código y misma línea → misma guía (sin IA).
   const clave = `${rel}:${f.nombre}:${huella(codigo.join("\n"))}:${linea - f.linea}`;
   const c = cargar(root);
   if (clave in c.respuestas) {
@@ -63,33 +68,46 @@ export async function rapida(root: string, rel: string, linea: number, o: { text
   }
   const ahora = Date.now();
   c.llamadas = c.llamadas.filter((t) => ahora - t < 3600_000);
-  if (!o.aPedido && ahora - (c.ultima[`${rel}:${f.nombre}`] ?? 0) < ENTRE_MS) return { texto: "", motivo: "espera (una cada 6 s por función)", costoUsd: 0 };
-  if (c.llamadas.length >= MAX_HORA) return { texto: "", motivo: "límite por hora", costoUsd: 0 };
+  if (!o.aPedido && ahora - (c.ultima[`${rel}:${f.nombre}`] ?? 0) < ENTRE_MS) return { texto: "", motivo: "espera (una cada 1,5 s por función)", costoUsd: 0 };
+  if (c.llamadas.length >= z.config.rapidas.maxHora) return { texto: "", motivo: `tope de ${z.config.rapidas.maxHora} por hora (configurable)`, costoUsd: 0 };
 
   // Se registra ANTES de llamar: un segundo pedido mientras este está en curso respeta la espera.
   c.ultima[`${rel}:${f.nombre}`] = ahora;
   c.llamadas.push(ahora);
   fs.mkdirSync(path.dirname(archivo(root)), { recursive: true });
   fs.writeFileSync(archivo(root), JSON.stringify(c));
-  const { data, costUsd } = await ask<{ texto: string }>({
-    kind: "rapida",
-    ref: { archivo: rel, funcion: f.nombre },
-    system: SYSTEM,
-    cwd: root,
-    sinHerramientas: true,
-    schema: { type: "object", additionalProperties: false, required: ["texto"], properties: { texto: { type: "string" } } },
-    ...iaOpts(z.config, "chico"),
-    effort: "low",
-    sinRazonar: true, // una línea: sin razonamiento largo (más rápido y barato)
-    prompt: [
-      nota.accion ? `Lo que su nota dice que haga: ${nota.accion}` : "",
-      `Función ${f.nombre} (◀ = línea del cursor):`,
-      codigo.map((l, i) => `${l}${f.linea + i === linea ? "   ◀" : ""}`).join("\n"),
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-  });
-  const texto = (data.texto ?? "").replace(/\s+/g, " ").trim().slice(0, 100);
+  const pedirGuia = (extra: string) =>
+    ask<{ texto: string }>({
+      kind: "rapida",
+      ref: { archivo: rel, funcion: f.nombre },
+      system: SYSTEM,
+      cwd: root,
+      sinHerramientas: true,
+      schema: { type: "object", additionalProperties: false, required: ["texto"], properties: { texto: { type: "string" } } },
+      ...iaOpts(z.config, "chico"),
+      effort: "low",
+      sinRazonar: true, // una línea: sin razonamiento largo (más rápido y barato)
+      prompt: [
+        nota?.accion ? `Objetivo (de su nota): ${nota.accion}` : `Función ${f.nombre}: deduce el objetivo por el nombre y el código.`,
+        // Los pasos que ya le dio la IA (pseudocódigo, plano…): la guía los sigue.
+        pasosDeNota(nota) ? `Pasos que ya le diste:\n${pasosDeNota(nota)}` : "",
+        `Función ${f.nombre} (◀ = línea del cursor):`,
+        codigo.map((l, i) => `${l}${f.linea + i === linea ? "   ◀" : ""}`).join("\n"),
+        extra,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    });
+  // Sin código en la guía (determinista): si trae expresiones o código, se pide de nuevo solo con palabras.
+  const conCodigo = (t: string) => /`[^`]*[=(){};<>][^`]*`|[=!]==|=>|\b(return|const|let|var)\s+\w+\s*=/.test(t);
+  let { data, costUsd } = await pedirGuia("");
+  let texto = (data.texto ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+  if (conCodigo(texto)) {
+    const otra = await pedirGuia(`Tu indicación anterior traía código ("${texto}"). Dila SOLO con palabras, sin código ni expresiones.`);
+    costUsd += otra.costUsd;
+    texto = (otra.data.texto ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+    if (conCodigo(texto)) texto = "";
+  }
   c.respuestas[clave] = texto;
   // La caché no crece sin fin: se quedan las últimas 300.
   const claves = Object.keys(c.respuestas);
@@ -97,4 +115,10 @@ export async function rapida(root: string, rel: string, linea: number, o: { text
   fs.mkdirSync(path.dirname(archivo(root)), { recursive: true });
   fs.writeFileSync(archivo(root), JSON.stringify(c));
   return { texto, costoUsd: costUsd };
+}
+
+/** Lo último que dijo la IA en la nota (pasos, pseudocódigo), recortado: el hilo de la guía. */
+function pasosDeNota(n: Nota | undefined): string {
+  const m = n ? [...n.hilo].reverse().find((x) => x.quien === "ia" && !/^\*\*(🟢|🟡|🔴)/.test(x.texto)) : undefined;
+  return m ? m.texto.replace(/\*\*/g, "").slice(0, 900) : "";
 }

@@ -290,3 +290,18 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - se piden también al guardar;
   - **Ctrl+Alt+Espacio** pide una ya y, si no hay, dice por qué.
 - Selftest: 162/162.
+
+## v0.8.2: guía línea a línea y tests que se prueban solos (2026-10-09)
+- **Pedido del usuario:** que las sugerencias vayan guiando línea por línea mientras se escribe la función. Que 🧪 Tests cree los tests (con IA) y que se prueben al guardar con Ctrl+S, a salvo del autoguardado, mostrando el resultado.
+- **Guía:**
+  - en cualquier función, en cada pausa (~1 s): el próximo paso según los pasos de la nota, o qué está mal en la línea;
+  - la anterior queda tenue mientras escribes;
+  - sin código (si lo trae, se pide de nuevo solo con palabras) y con tuteo.
+  - Prueba real: avisó "compara en vez de asignar" apenas se escribió `if (destino = "")`.
+- **Tests:**
+  - propone casos y los prueba ya;
+  - los guarda como tests (`tests.crearConIa`), con los dudosos apagados;
+  - al guardar con Ctrl+S se vuelven a probar sin IA (`tests.alGuardar`), y el resultado aparece en el panel Nota.
+  - Prueba real: 8 casos (7 ✅, 1 ❓), el archivo creado pasa en vitest (7/7), y al meter un bug se detectó al guardar (6 ✅ · 1 ❌).
+  - Un resultado con decimales usa `toBeCloseTo`, para que no falle por la imprecisión de los decimales.
+- Selftest: 164/164.

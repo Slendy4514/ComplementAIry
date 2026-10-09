@@ -427,6 +427,17 @@ texto.addEventListener("keydown", (e) => {
       html += `<div class="sub">Modo ${m.funcion ? "de esta función" : "de este archivo"}: <select data-cmd="modo">${opcion("heredar", `heredado (${heredado})`, !propio)}${opcion("programar", "programar", propio === "programar")}${opcion("aprender", "aprender", propio === "aprender")}</select> <span class="quien">· rige: ${ef.modo} (por ${{ funcion: "esta función", archivo: "el archivo", carpeta: "la carpeta", proyecto: "el proyecto" }[ef.origen]})</span></div>`;
       if (ocupado) html += `<div class="pensando">⏳ pensando…${this.vivo ? `<div class="msg">${esc(this.vivo).replace(/\n/g, "<br>")}</div>` : ""}</div>`;
       if (nota?.accion) html += `<div class="accion"><b>▶ Qué hacer:</b> ${esc(nota.accion)}</div>`;
+      // Tests de esta función: el resultado de la última prueba (al pedirlos o al guardar con Ctrl+S).
+      if (nota?.ultimaPrueba) {
+        const u = nota.ultimaPrueba;
+        const icono: Record<string, string> = { pasa: "✅", falla: "❌", decidir: "❓", "no-ejecutable": "⚠️" };
+        const hace = Math.round((Date.now() - Date.parse(u.fecha)) / 1000);
+        const cuando = hace < 90 ? `hace ${hace} s` : new Date(u.fecha).toLocaleTimeString();
+        const filas = u.detalle
+          .map((d) => `<div>${icono[d.estado] ?? "·"} ${esc(d.descripcion)} <span class="quien"><code>${esc(d.llamada)}</code> → esperado <code>${esc(d.esperado || "error")}</code>${d.obtenido && d.estado !== "pasa" ? `, obtuvo <code>${esc(d.obtenido.slice(0, 80))}</code>` : ""}</span></div>`)
+          .join("");
+        html += `<details class="accion"${u.fallan ? " open" : ""}><summary><b>🧪 Tests</b> (${cuando}): ${u.pasan} ✅ · ${u.fallan} ❌${nota.testsProbados?.archivo ? ` · <code>${esc(nota.testsProbados.archivo)}</code>` : ""}</summary>${filas}</details>`;
+      }
       // Lo que ya se dio no se vuelve a ofrecer (queda en el historial); "Más ayuda" pide el escalón que falta.
       const dados = new Set(nota?.dados ?? []);
       const botones = BOTONES.filter((b) => (m.funcion ? b.pedido !== "plano" : b.pedido !== "tests") && !dados.has(b.pedido)).map((b) => this.boton("pedir", b.etiqueta, b.pedido, { off: ocupado }));

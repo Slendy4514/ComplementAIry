@@ -120,6 +120,8 @@ export interface Nota {
   modo?: string;
   dados?: string[];
   explicacion?: { texto: string; coincide: boolean; comentario: string };
+  testsProbados?: { funcion: string; fecha: string; archivo?: string };
+  ultimaPrueba?: { fecha: string; pasan: number; fallan: number; detalle: { descripcion: string; estado: string; obtenido?: string; esperado: string; llamada: string }[] };
   actualizada: string;
 }
 
@@ -254,10 +256,10 @@ export interface ConfigProyecto {
   modo?: string;
   modos?: { porCarpeta?: Record<string, string>; porArchivo?: Record<string, string>; porFuncion?: Record<string, string> };
   ayuda?: { porDefecto?: string };
-  rapidas?: { activas?: boolean; esperaMs?: number; procesoAbierto?: boolean };
+  rapidas?: { activas?: boolean; esperaMs?: number; procesoAbierto?: boolean; soloConNota?: boolean; maxHora?: number };
   acompanar?: { nivel?: string; revisar?: boolean; verificar?: boolean; esperaAutoguardado?: number; maxLlamadasHora?: number };
   ia?: { modelos?: { chico?: string; mediano?: string; grande?: string } };
-  tests?: { carpeta?: string };
+  tests?: { carpeta?: string; crearConIa?: boolean; alGuardar?: boolean };
   [k: string]: unknown;
 }
 

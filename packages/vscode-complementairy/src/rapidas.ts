@@ -97,6 +97,8 @@ export class Rapidas implements vscode.Disposable {
   });
   private timer?: NodeJS.Timeout;
   private turno = 0;
+  /** Dónde está la guía que se ve (para dejarla mientras escribes en esa misma línea). */
+  private vista?: { doc: vscode.TextDocument; linea: number; texto: string };
   private readonly servidores = new Map<string, Servidor>();
 
   /** El proceso abierto del proyecto (si está activado en la configuración). */
@@ -112,7 +114,7 @@ export class Rapidas implements vscode.Disposable {
     return s;
   }
 
-  constructor(private readonly notas: NotasView) {}
+  constructor(_notas: NotasView) {}
 
   registrar(ctx: vscode.ExtensionContext): void {
     // Precalentar: si el proyecto usa notas y sugerencias rápidas, el proceso arranca ya.
@@ -146,15 +148,21 @@ export class Rapidas implements vscode.Disposable {
 
   private limpiar(ed: vscode.TextEditor): void {
     ed.setDecorations(this.deco, []);
+    this.vista = undefined;
   }
 
-  private mostrar(ed: vscode.TextEditor, linea: number, texto: string): void {
+  private mostrar(ed: vscode.TextEditor, linea: number, texto: string, vieja = false): void {
     const fin = ed.document.lineAt(linea).range.end;
-    ed.setDecorations(this.deco, [{ range: new vscode.Range(fin, fin), renderOptions: { after: { contentText: `💡 ${texto}` } } }]);
+    // Mientras escribes, la guía anterior queda (más tenue) hasta que llega la nueva.
+    ed.setDecorations(this.deco, [{ range: new vscode.Range(fin, fin), renderOptions: { after: { contentText: `💡 ${texto}`, ...(vieja ? { color: new vscode.ThemeColor("disabledForeground") } : {}) } } }]);
+    this.vista = { doc: ed.document, linea, texto };
   }
 
   private programar(ed: vscode.TextEditor): void {
-    this.limpiar(ed);
+    // Misma línea: la guía se queda (tenue) y se actualiza en la pausa. Otra línea: se limpia.
+    const linea = ed.selection.active.line;
+    if (this.vista && this.vista.doc === ed.document && this.vista.linea === linea && linea < ed.document.lineCount) this.mostrar(ed, linea, this.vista.texto, true);
+    else this.limpiar(ed);
     clearTimeout(this.timer);
     this.turno++;
     const doc = ed.document;
@@ -162,10 +170,8 @@ export class Rapidas implements vscode.Disposable {
     if (!cwd || doc.uri.scheme !== "file" || vista(cwd) !== "notas" || silenciado()) return;
     const cfg = leerConfig(cwd).rapidas ?? {};
     if (cfg.activas === false) return;
-    // Solo si el archivo tiene alguna nota de función (si no, ni se consulta la CLI).
-    if (!this.notas.notas(doc).some((n) => n.ancla.funcion)) return;
     const turno = this.turno;
-    this.timer = setTimeout(() => void this.pedir(ed, cwd, turno), Math.max(800, cfg.esperaMs ?? 2000));
+    this.timer = setTimeout(() => void this.pedir(ed, cwd, turno), Math.max(600, cfg.esperaMs ?? 1200));
   }
 
   /**

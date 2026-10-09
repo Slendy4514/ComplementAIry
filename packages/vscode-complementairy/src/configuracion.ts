@@ -51,7 +51,9 @@ function inicial(c: ConfigProyecto, enLinea: boolean): Record<string, string | b
     procesoAbierto: c.rapidas?.procesoAbierto !== false,
     ayuda: c.ayuda?.porDefecto ?? "auto",
     rapidas: c.rapidas?.activas !== false,
-    rapidasEspera: String((c.rapidas?.esperaMs ?? 2000) / 1000),
+    rapidasEspera: String((c.rapidas?.esperaMs ?? 1200) / 1000),
+    soloConNota: c.rapidas?.soloConNota === true,
+    maxHoraRapidas: String(c.rapidas?.maxHora ?? 240),
     nivel: c.acompanar?.nivel ?? "normal",
     revisar: c.acompanar?.revisar !== false,
     verificar: c.acompanar?.verificar !== false,
@@ -90,7 +92,9 @@ async function guardar(cwd: string, d: Record<string, string | boolean>): Promis
   poner(["rapidas", "procesoAbierto"], "procesoAbierto", d.procesoAbierto === true);
   poner(["ayuda", "porDefecto"], "ayuda", texto("ayuda") || "auto");
   poner(["rapidas", "activas"], "rapidas", d.rapidas === true);
-  poner(["rapidas", "esperaMs"], "rapidasEspera", num("rapidasEspera", 0.8, 30) * 1000);
+  poner(["rapidas", "esperaMs"], "rapidasEspera", num("rapidasEspera", 0.6, 30) * 1000);
+  poner(["rapidas", "soloConNota"], "soloConNota", d.soloConNota === true);
+  poner(["rapidas", "maxHora"], "maxHoraRapidas", num("maxHoraRapidas", 0, 2000));
   poner(["acompanar", "nivel"], "nivel", texto("nivel") || "normal");
   poner(["acompanar", "revisar"], "revisar", d.revisar === true);
   poner(["acompanar", "verificar"], "verificar", d.verificar === true);
@@ -138,9 +142,11 @@ button{font:inherit;background:var(--vscode-button-background);color:var(--vscod
 ${fila("Modo del proyecto", sel("modo", c.modo ?? "programar", [["programar", "🚀 Programar: ayuda directa, snippets, sugerencias rápidas"], ["aprender", "🎓 Aprender: ayuda gradual, predecir, explicar con tus palabras"]]), "Se puede cambiar por carpeta, archivo o función desde la barra de estado o el panel Nota (gana el más específico). Cambiar de modo no toca lo ya hecho: notas, tareas, estructura y panorama quedan igual.")}
 <h2>Ayuda</h2>
 ${fila("Al preguntar, dame", sel("ayuda", c.ayuda?.porDefecto ?? "auto", [["auto", "Según mi nivel (automático)"], ["pista", "💡 Una pista"], ["piezas", "🧩 Las piezas (funciones/APIs)"], ["pseudo", "📝 Pseudocódigo"], ["ejemplo", "🔁 Un ejemplo análogo"]]), "Lo que responde cuando preguntas sin pedir un escalón. Siempre puedes pedir otro con los botones o \"no entiendo\" para subir uno.")}
-${fila("Sugerencias rápidas", chk("rapidas", c.rapidas?.activas !== false), "Texto gris al final de la línea tras una pausa, en funciones con nota. No se inserta nada.")}
+${fila("Guía mientras escribes", chk("rapidas", c.rapidas?.activas !== false), "Texto gris al final de la línea del cursor: qué sigue o qué está mal ahí. Se actualiza en cada pausa. No se inserta nada.")}
 ${fila("Proceso de Claude Code abierto", chk("procesoAbierto", c.rapidas?.procesoAbierto !== false), "Mantiene Claude Code arrancado para las sugerencias rápidas: ~1 s y ~US$0,002 cada una (sin él, ~20 s). Si falla, se usa la llamada normal.")}
-${fila("Pausa antes de sugerir (s)", numero("rapidasEspera", (c.rapidas?.esperaMs ?? 2000) / 1000, 0.5), "Cuántos segundos sin escribir antes de pedir la sugerencia.")}
+${fila("Pausa antes de guiar (s)", numero("rapidasEspera", (c.rapidas?.esperaMs ?? 1200) / 1000, 0.2), "Segundos sin escribir antes de actualizar la guía de la línea.")}
+${fila("Solo en funciones con nota", chk("soloConNota", c.rapidas?.soloConNota === true), "Apagado: te guía en cualquier función (en las que tienen nota, siguiendo sus pasos).")}
+${fila("Tope de guías por hora", numero("maxHoraRapidas", c.rapidas?.maxHora ?? 240), "Cada una cuesta ~US$0,002 con el proceso abierto (240/h ≈ US$0,50/h como máximo).")}
 <h2>Acompañante (al guardar)</h2>
 ${fila("Nivel", sel("nivel", a.nivel ?? "normal", [["silencioso", "Silencioso: solo responde lo que preguntas"], ["normal", "Normal: planos, ayuda si te trabas, comentarios"], ["activo", "Activo: ayuda antes"]]), "")}
 ${fila("Comentar lo que terminas", chk("revisar", a.revisar !== false), "Al terminar una función, una revisión corta en su nota.")}

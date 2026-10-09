@@ -261,6 +261,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     { dispose: () => asentados.forEach((t) => clearTimeout(t)) },
   );
   function acompanarAhora(doc: vscode.TextDocument, motivo: "manual" | "asentado"): void {
+    probarAlGuardar(doc);
     {
       if (!vscode.workspace.getConfiguration("cai").get<boolean>("acompanar", true) || silenciado()) return;
       const cwd = root(doc);
@@ -300,6 +301,25 @@ export function activate(ctx: vscode.ExtensionContext): void {
         }
       });
     }
+  }
+
+  /**
+   * Al guardar (Ctrl+S, o con autoguardado cuando dejas de editar): se vuelven a probar los casos de
+   * test de las funciones de ese archivo, sin IA. El resultado queda en la nota de cada función.
+   */
+  function probarAlGuardar(doc: vscode.TextDocument): void {
+    const cwd = root(doc);
+    if (!cwd || doc.uri.scheme !== "file" || leerConfig(cwd).tests?.alGuardar === false) return;
+    correr(["tests", doc.uri.fsPath, "--recorrer", "--json"], cwd, { silencioso: true })
+      .then((out) => {
+        const r = JSON.parse(out) as { funciones: { funcion: string; pasan: number; fallan: number }[] };
+        if (!r.funciones.length) return;
+        const pasan = r.funciones.reduce((a, f) => a + f.pasan, 0);
+        const fallan = r.funciones.reduce((a, f) => a + f.fallan, 0);
+        const malas = r.funciones.filter((f) => f.fallan).map((f) => f.funcion);
+        vscode.window.setStatusBarMessage(`🧪 ${pasan} ✅ · ${fallan} ❌${malas.length ? ` (falla: ${malas.join(", ")})` : ""}`, 10_000);
+      })
+      .catch(() => undefined);
   }
 
   const abrir = async (cwd: string, ...partes: string[]) => {

@@ -31,6 +31,7 @@ import { init } from "./init.js";
 import { actualizarMemoria, agregarPreguntas, leerMemoria, panorama, preguntasAbiertas, responderPregunta } from "./panorama.js";
 import { planoProyecto } from "./plano.js";
 import { cegar, verificar } from "./verificar.js";
+import { recorrerCasos } from "./tests.js";
 import { ubicarSnippet } from "./responder.js";
 import { modoEfectivo } from "./modos.js";
 import { conSesion, Sesion, type Fabrica } from "./sesion.js";
@@ -1464,7 +1465,9 @@ CASES.push(
     run: async (r) => {
       conNotas(r);
       const calls = fakeLLM(() => ({ texto: "valida que meses no sea 0" }));
+      conNotas(r, { rapidas: { soloConNota: true } });
       const sinNota = await rapida(r, "src/cuota.ts", 3);
+      conNotas(r);
       await responderNota(r, { archivo: "src/cuota.ts", linea: 3, texto: "?" });
       const antes = calls.length;
       const a = await rapida(r, "src/cuota.ts", 3);
@@ -1720,6 +1723,48 @@ CASES.push(
       const fuera = await rapida(r, "src/cuota.ts", 99, { aPedido: true });
       const pr = calls.filter((c) => c.kind === "rapida");
       return a.texto === "ok" && b.texto === "ok" && pr.length === 2 && pr[0]!.prompt.includes("nuevaLineaSinGuardar") && !!fuera.motivo;
+    },
+  },
+  {
+    name: "[0.8.2] guía línea a línea: en cualquier función, siguiendo los pasos de la nota, y nunca con código",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/m.ts"), "export function mover(a: string, b: string) {\n  if (!a) return false;\n\n}\n");
+      let n = 0;
+      const calls = fakeLLM((o) => (o.kind === "rapida" ? { texto: ++n === 1 ? "ahora valida b" : "usa `b === ''`" } : respNota("Pasos: 1) valida a 2) valida b")));
+      const sinNota = await rapida(r, "src/m.ts", 3);
+      await responderNota(r, { archivo: "src/m.ts", linea: 2, pedido: "pseudo" });
+      const conCodigo = await rapida(r, "src/m.ts", 3, { aPedido: true, texto: "export function mover(a: string, b: string) {\n  if (!a) return false;\n  x\n}\n" });
+      const pr = calls.filter((c) => c.kind === "rapida");
+      return sinNota.texto === "ahora valida b" && conCodigo.texto === "" && pr[1]!.prompt.includes("Pasos que ya le diste");
+    },
+  },
+  {
+    name: "[0.8.2] 🧪 Tests: prueba los casos ya, los guarda como tests (los dudosos apagados) y al guardar se vuelven a probar",
+    run: async (r) => {
+      conNotas(r);
+      fakeLLM((o) =>
+        o.kind === "tests"
+          ? { casos: [
+              { tipo: "normal", descripcion: "divide", llamada: "cuota(10, 2)", esperado: "5", duda: "" },
+              { tipo: "error", descripcion: "meses cero", llamada: "cuota(1, 0)", esperado: "ZeroDivision", duda: "" },
+              { tipo: "normal", descripcion: "redondeo", llamada: "cuota(10, 3)", esperado: "?", duda: "¿redondea?" },
+            ] }
+          : respNota(),
+      );
+      const { nota } = await responderNota(r, { archivo: "src/cuota.py", linea: 2, pedido: "tests" });
+      const test = path.join(r, "tests/test_cuota.py");
+      const creado = fs.existsSync(test) ? fs.readFileSync(test, "utf8") : "";
+      const p1 = nota.ultimaPrueba;
+      // Un bug nuevo: al guardar, se detecta (sin IA).
+      fs.writeFileSync(path.join(r, "src/cuota.py"), "def cuota(monto, meses):\n    return monto\n");
+      const rr = await recorrerCasos(r, "src/cuota.py");
+      const p2 = cargarNotas(r, "src/cuota.py").find((n) => n.ultimaPrueba)?.ultimaPrueba;
+      const infra = p1?.detalle.every((d) => d.estado === "no-ejecutable");
+      return (
+        !!p1 && (infra || (p1.pasan === 2 && p1.fallan === 0)) && /def test_/.test(creado) && creado.includes("snippet [ ]") && creado.includes("¿redondea?") &&
+        rr.funciones.length === 1 && (infra || (p2!.fallan >= 1))
+      );
     },
   },
   {
