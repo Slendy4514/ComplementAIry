@@ -19,6 +19,9 @@ export interface Pedido {
   linea?: number;
   /** Hasta cuándo le sirve la respuesta a quien pidió (ms desde 1970): después no se gasta en él. */
   vence?: number;
+  /** El contenido del editor (puede no estar guardado). */
+  texto?: string;
+  aPedido?: boolean;
 }
 
 export async function atender(root: string, linea: string): Promise<string> {
@@ -37,7 +40,7 @@ export async function atender(root: string, linea: string): Promise<string> {
       const queda = typeof p.vence === "number" ? p.vence - Date.now() : 15_000;
       if (queda < 500) throw new Error("vencido: la extensión ya no espera esta respuesta");
       fijarPlazo(queda - 300);
-      const r = await rapida(root, path.relative(root, path.resolve(root, p.archivo)), p.linea);
+      const r = await rapida(root, path.relative(root, path.resolve(root, p.archivo)), p.linea, { ...(typeof p.texto === "string" ? { texto: p.texto } : {}), ...(p.aPedido ? { aPedido: true } : {}) });
       return JSON.stringify({ id: p.id, ok: true, ...r });
     }
     throw new Error(`tipo de pedido desconocido: ${String(p.tipo)}`);

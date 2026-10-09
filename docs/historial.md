@@ -281,3 +281,12 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - el texto en vivo mostraba respuestas que el filtro iba a descartar;
   - cambiar el modo de una función tocaba notas.
 - Selftest: 161/161.
+
+## v0.8.1: dónde salen las sugerencias rápidas (2026-10-09)
+- **Reporte del usuario:** no veía las sugerencias rápidas.
+- **Causa:** la extensión solo las pedía con el archivo guardado (la CLI leía el disco). Sin autoguardado, mientras escribes nunca se pedían, y al guardar tampoco se disparaban.
+- **Arreglo:**
+  - el proceso abierto recibe el **texto del editor** (sirve sin guardar);
+  - se piden también al guardar;
+  - **Ctrl+Alt+Espacio** pide una ya y, si no hay, dice por qué.
+- Selftest: 162/162.

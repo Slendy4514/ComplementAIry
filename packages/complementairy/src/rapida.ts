@@ -36,18 +36,22 @@ function cargar(root: string): Cache {
 
 const SYSTEM = `Das UNA pista corta (máximo 80 caracteres) para el próximo paso, en la línea donde está escribiendo el programador. Sin código ni nombres de variables nuevas: una idea ("valida que dest no esté vacío antes de mover"). Si la línea ya va bien o no hay nada útil que decir, devuelve texto vacío. Español neutro con tuteo.`;
 
-export async function rapida(root: string, rel: string, linea: number): Promise<{ texto: string; motivo?: string; costoUsd: number }> {
+/**
+ * `texto`: el contenido del editor (aunque no esté guardado); si no viene, se lee el disco.
+ * `aPedido`: lo pediste tú (atajo): se saltea la espera entre sugerencias.
+ */
+export async function rapida(root: string, rel: string, linea: number, o: { texto?: string; aPedido?: boolean } = {}): Promise<{ texto: string; motivo?: string; costoUsd: number }> {
   const z = makeZoner(root);
-  if (!z.config.rapidas.activas) return { texto: "", motivo: "desactivadas", costoUsd: 0 };
+  if (!z.config.rapidas.activas && !o.aPedido) return { texto: "", motivo: "desactivadas en la configuración", costoUsd: 0 };
   const abs = path.join(root, rel);
-  const src = fs.readFileSync(abs, "utf8");
+  const src = o.texto ?? fs.readFileSync(abs, "utf8");
   const funciones = await funcionesDe(src, langFor(rel));
   const f = funcionEn(funciones, linea);
-  if (!f) return { texto: "", motivo: "fuera de una función", costoUsd: 0 };
+  if (!f) return { texto: "", motivo: "el cursor no está dentro de una función", costoUsd: 0 };
   const nota = cargarNotas(root, rel, src).find((n) => n.estado === "abierta" && n.ancla.funcion === claveFuncion(funciones, f));
-  if (!nota) return { texto: "", motivo: "la función no tiene nota", costoUsd: 0 };
+  if (!nota) return { texto: "", motivo: `${f.nombre} no tiene nota (pide ayuda con 💡 sobre la función y desde ahí hay sugerencias)`, costoUsd: 0 };
   // En modo aprender no hay sugerencias rápidas: primero lo piensas tú.
-  if (!modoEfectivo(z.config, rel, claveFuncion(funciones, f)).c.rapidas) return { texto: "", motivo: "modo aprender", costoUsd: 0 };
+  if (!modoEfectivo(z.config, rel, claveFuncion(funciones, f)).c.rapidas) return { texto: "", motivo: "modo aprender (primero lo piensas tú)", costoUsd: 0 };
 
   const lineas = src.split(/\r?\n/);
   const codigo = lineas.slice(f.linea - 1, f.linea - 1 + f.lineas);
@@ -59,7 +63,7 @@ export async function rapida(root: string, rel: string, linea: number): Promise<
   }
   const ahora = Date.now();
   c.llamadas = c.llamadas.filter((t) => ahora - t < 3600_000);
-  if (ahora - (c.ultima[`${rel}:${f.nombre}`] ?? 0) < ENTRE_MS) return { texto: "", motivo: "espera (una cada 20 s por función)", costoUsd: 0 };
+  if (!o.aPedido && ahora - (c.ultima[`${rel}:${f.nombre}`] ?? 0) < ENTRE_MS) return { texto: "", motivo: "espera (una cada 6 s por función)", costoUsd: 0 };
   if (c.llamadas.length >= MAX_HORA) return { texto: "", motivo: "límite por hora", costoUsd: 0 };
 
   // Se registra ANTES de llamar: un segundo pedido mientras este está en curso respeta la espera.

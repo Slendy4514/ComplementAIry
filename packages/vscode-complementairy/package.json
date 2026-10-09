@@ -2,7 +2,7 @@
   "name": "complementairy",
   "displayName": "ComplementAIry — tú programas, la IA te acompaña",
   "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "complementairy",
   "license": "MIT",
   "engines": {
@@ -213,6 +213,10 @@
       {
         "command": "cai.notaPanel.pregunta",
         "title": "Ver pregunta"
+      },
+      {
+        "command": "cai.sugerenciaAhora",
+        "title": "ComplementAIry: sugerencia rápida aquí (ahora)"
       }
     ],
     "keybindings": [
@@ -254,6 +258,12 @@
         "command": "cai.verificarFuncion",
         "key": "ctrl+alt+l",
         "mac": "cmd+alt+l",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "cai.sugerenciaAhora",
+        "key": "ctrl+alt+space",
+        "mac": "cmd+alt+space",
         "when": "editorTextFocus"
       }
     ],

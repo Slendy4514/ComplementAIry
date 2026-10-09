@@ -85,7 +85,7 @@ En el código **no se abre nada entre las líneas** ni te quita el foco: solo un
 
 **✅ ¿Quedó lista?** (`Ctrl+Alt+L` o el botón): revisa la función con lo que ya escribiste. Primero sin IA (sintaxis, tipos, lint, reglas); si eso pasa, la IA dice 🟢 lista (cierra la nota), 🟡 casi o 🔴 falta, con qué mejorar. También corre solo al guardar las funciones con nota que cambiaron. **Con autoguardado:** Ctrl+S actúa enseguida; un autoguardado espera a que dejes de editar (45 s por defecto) y corre una sola vez.
 
-**Sugerencias rápidas:** tras una pausa escribiendo en una función con nota, aparece en gris al final de la línea una pista de una línea (no se inserta nada). Con el **proceso de Claude Code abierto** (`cai servir`, lo arranca la extensión) tardan **~1 s y cuestan ~US$0,002**; si ese proceso falla, se usa la llamada normal (~20 s). Se apagan en la configuración; en modo aprender no aparecen.
+**Sugerencias rápidas:** tras una pausa (~2 s) escribiendo **dentro de una función que tiene nota**, aparece en gris **al final de la línea del cursor** una pista de una línea (no se inserta nada; si la línea va bien, no aparece nada). Funcionan aunque no hayas guardado. **Ctrl+Alt+Espacio** pide una ya, y si no hay, la barra de estado dice por qué (sin nota, fuera de una función, modo aprender…). Con el **proceso de Claude Code abierto** (`cai servir`, lo arranca la extensión) tardan **~1 s y cuestan ~US$0,002**; si ese proceso falla, se usa la llamada normal (~20 s). Se apagan en la configuración; en modo aprender no aparecen.
 
 **Panel lateral:**
 | Sección | Qué tiene |

@@ -123,13 +123,34 @@ export class Rapidas implements vscode.Disposable {
       vscode.window.onDidChangeTextEditorSelection((e) => this.programar(e.textEditor)),
       vscode.workspace.onDidChangeTextDocument((e) => {
         const ed = vscode.window.activeTextEditor;
-        if (ed && e.document === ed.document) this.programar(ed);
+        if (ed && e.document === ed.document && e.contentChanges.length) this.programar(ed);
+      }),
+      // Al guardar también (con Ctrl+S el cursor no se mueve y no habría otro aviso).
+      vscode.workspace.onDidSaveTextDocument((doc) => {
+        const ed = vscode.window.activeTextEditor;
+        if (ed && ed.document === doc) this.programar(ed);
+      }),
+      // A pedido (Ctrl+Alt+Espacio): siempre dice algo, la pista o por qué no hay.
+      vscode.commands.registerCommand("cai.sugerenciaAhora", async () => {
+        const ed = vscode.window.activeTextEditor;
+        const c = ed && root(ed.document);
+        if (!ed || !c) return;
+        this.limpiar(ed);
+        vscode.window.setStatusBarMessage("$(sync~spin) ComplementAIry: pensando una sugerencia…", 3000);
+        const r = await this.consultar(ed, c, true);
+        if (r.texto) this.mostrar(ed, ed.selection.active.line, r.texto);
+        else vscode.window.setStatusBarMessage(`ComplementAIry: sin sugerencia aquí${r.motivo ? ` (${r.motivo})` : " (la línea va bien)"}`, 6000);
       }),
     );
   }
 
   private limpiar(ed: vscode.TextEditor): void {
     ed.setDecorations(this.deco, []);
+  }
+
+  private mostrar(ed: vscode.TextEditor, linea: number, texto: string): void {
+    const fin = ed.document.lineAt(linea).range.end;
+    ed.setDecorations(this.deco, [{ range: new vscode.Range(fin, fin), renderOptions: { after: { contentText: `💡 ${texto}` } } }]);
   }
 
   private programar(ed: vscode.TextEditor): void {
@@ -147,23 +168,32 @@ export class Rapidas implements vscode.Disposable {
     this.timer = setTimeout(() => void this.pedir(ed, cwd, turno), Math.max(800, cfg.esperaMs ?? 2000));
   }
 
+  /**
+   * Pide la sugerencia. Con el proceso abierto se manda el TEXTO DEL EDITOR (sirve aunque no esté
+   * guardado); la llamada de respaldo lee el disco, así que solo se usa con el archivo guardado.
+   */
+  private async consultar(ed: vscode.TextEditor, cwd: string, aPedido: boolean): Promise<{ texto?: string; motivo?: string }> {
+    const doc = ed.document;
+    const linea = ed.selection.active.line + 1;
+    const respaldo = async () =>
+      doc.isDirty
+        ? { motivo: "el archivo tiene cambios sin guardar y el proceso abierto no respondió" }
+        : (JSON.parse(await correr(["rapida", doc.uri.fsPath, "--linea", String(linea), "--json"], cwd, { silencioso: true })) as { texto?: string; motivo?: string });
+    const s = this.servidor(cwd);
+    if (!s) return respaldo();
+    return s.pedir<{ texto?: string; motivo?: string }>({ tipo: "rapida", archivo: doc.uri.fsPath, linea, texto: doc.getText(), ...(aPedido ? { aPedido: true } : {}) }).catch(respaldo);
+  }
+
   private async pedir(ed: vscode.TextEditor, cwd: string, turno: number): Promise<void> {
     const doc = ed.document;
-    // La CLI lee el disco: con cambios sin guardar (sin autoguardado) no hay sugerencia.
-    if (doc.isDirty || doc.isClosed) return;
+    if (doc.isClosed) return;
     const linea = ed.selection.active.line;
     const version = doc.version;
     try {
-      const pedido = { tipo: "rapida", archivo: doc.uri.fsPath, linea: linea + 1 };
-      const s = this.servidor(cwd);
-      // Primero el proceso abierto (~1 s); si no responde, la llamada de siempre (~20 s).
-      const r = s
-        ? await s.pedir<{ texto?: string }>(pedido).catch(async () => JSON.parse(await correr(["rapida", doc.uri.fsPath, "--linea", String(linea + 1), "--json"], cwd, { silencioso: true })) as { texto?: string })
-        : (JSON.parse(await correr(["rapida", doc.uri.fsPath, "--linea", String(linea + 1), "--json"], cwd, { silencioso: true })) as { texto?: string });
+      const r = await this.consultar(ed, cwd, false);
       // Si mientras tanto escribiste o te moviste, la sugerencia ya no corresponde.
       if (turno !== this.turno || doc.version !== version || ed.selection.active.line !== linea || !r.texto) return;
-      const fin = doc.lineAt(linea).range.end;
-      ed.setDecorations(this.deco, [{ range: new vscode.Range(fin, fin), renderOptions: { after: { contentText: `💡 ${r.texto}` } } }]);
+      this.mostrar(ed, linea, r.texto);
     } catch {
       /* sin sugerencia: no molesta */
     }

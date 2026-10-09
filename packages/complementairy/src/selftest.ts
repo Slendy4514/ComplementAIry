@@ -1471,7 +1471,7 @@ CASES.push(
       const b = await rapida(r, "src/cuota.ts", 3);
       conNotas(r, { rapidas: { activas: false } });
       const off = await rapida(r, "src/cuota.ts", 3);
-      return sinNota.texto === "" && a.texto === "valida que meses no sea 0" && b.motivo === "caché" && calls.length === antes + 1 && off.motivo === "desactivadas";
+      return sinNota.texto === "" && a.texto === "valida que meses no sea 0" && b.motivo === "caché" && calls.length === antes + 1 && off.motivo!.startsWith("desactivadas");
     },
   },
   {
@@ -1600,7 +1600,7 @@ CASES.push(
         modoEfectivo(base, "lib/x.ts").modo,
         modoEfectivo(base, "src/legacy/v.ts").modo, // la carpeta más específica gana, aunque se haya agregado después
       ];
-      return p.includes("MODO ESCALERA") && p.includes("todavía no sugieras snippets") && rap.motivo === "modo aprender" && !!nota && orden.join(",") === "carpeta,archivo,aprender,programar,programar";
+      return p.includes("MODO ESCALERA") && p.includes("todavía no sugieras snippets") && rap.motivo!.startsWith("modo aprender") && !!nota && orden.join(",") === "carpeta,archivo,aprender,programar,programar";
     },
   },
   {
@@ -1706,6 +1706,20 @@ CASES.push(
       await verificar(r, "src/d.ts", { funcion: "a", explicacion: "divide 10 por x" });
       const n = cargarNotas(r, "src/d.ts")[0]!;
       return calls.filter((c) => c.kind === "verificar").length === 2 && n.explicacion?.texto === "divide 10 por x";
+    },
+  },
+  {
+    name: "[0.8.1] sugerencia rápida con el texto del editor (sin guardar) y a pedido sin esperar; si no hay, dice por qué",
+    run: async (r) => {
+      conNotas(r);
+      const calls = fakeLLM((o) => (o.kind === "rapida" ? { texto: "ok" } : respNota()));
+      await responderNota(r, { archivo: "src/cuota.ts", linea: 3, texto: "?" });
+      const sinGuardar = TS.replace("  return monto / meses;", "  const nuevaLineaSinGuardar = 1;\n  return monto / meses;");
+      const a = await rapida(r, "src/cuota.ts", 3, { texto: sinGuardar });
+      const b = await rapida(r, "src/cuota.ts", 4, { texto: sinGuardar, aPedido: true }); // a pedido: no espera los 6 s
+      const fuera = await rapida(r, "src/cuota.ts", 99, { aPedido: true });
+      const pr = calls.filter((c) => c.kind === "rapida");
+      return a.texto === "ok" && b.texto === "ok" && pr.length === 2 && pr[0]!.prompt.includes("nuevaLineaSinGuardar") && !!fuera.motivo;
     },
   },
   {
