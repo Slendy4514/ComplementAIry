@@ -1,4 +1,5 @@
 import { cegar } from "./verificar.js";
+import { contextoComun } from "./contexto.js";
 import fs from "node:fs";
 import path from "node:path";
 import { parse } from "./comments.js";
@@ -243,7 +244,7 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
               `Foco de esta revisión: ${r.foco}.`,
               notaOrigen(origen),
               `Archivo: ${rel} (${lang.id})${z.isCritical(abs) ? " — ZONA CRÍTICA" : ""}. Programador: ${nivel} en ${lang.id}.`,
-              contextBlock(ctx),
+              contextoComun(root, rel),
               gate.diags.length ? `Ya detectado por herramientas (no lo repitas):\n${gate.diags.map((d) => `- línea ${d.line}: ${d.msg}`).join("\n")}` : "",
               `Código:\n${numbered}`,
             ]
@@ -283,7 +284,7 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
           schema: { type: "object", additionalProperties: false, required: ["plan"], properties: { plan: { type: "string" } } },
           ...iaOpts(z.config, "chico"),
           effort: "low",
-          prompt: [`Archivo: ${rel} (${lang.id}). Solo ves sus firmas:\n${firmas}`, contextBlock(ctx)].join("\n\n"),
+          prompt: [`Archivo: ${rel} (${lang.id}). Solo ves sus firmas:\n${firmas}`, contextoComun(root, rel)].join("\n\n"),
         });
         res.costoUsd += plan.costUsd;
         const comp = await ask<{ diferencias: { codigo: string; texto: string }[] }>({

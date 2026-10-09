@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { contextoComun } from "./contexto.js";
 import path from "node:path";
 import { biblioteca, paraLenguaje, parseLlamada } from "./biblioteca.js";
 import { parse } from "./comments.js";
@@ -75,7 +76,7 @@ export async function planoArchivo(root: string, rel: string): Promise<{ costoUs
     ...iaOpts(z.config, "mediano"),
     prompt: [
       `Archivo: ${rel} (${lang.id}).`,
-      contextBlock(projectContext(root, rel)),
+      contextoComun(root, rel),
       fs.existsSync(estructura) ? `docs/ESTRUCTURA.md:\n${fs.readFileSync(estructura, "utf8").slice(0, 6000)}` : "",
       `Archivos en la misma carpeta: ${hermanos.join(", ") || "(ninguno)"}`,
       libreria.length ? `BIBLIOTECA DE SNIPPETS:\n${libreria.map((s) => `- ${s.nombre}: ${s.descripcion}${marcadores(s).length ? ` (marcadores: ${marcadores(s).join(", ")})` : ""}`).join("\n")}` : "",

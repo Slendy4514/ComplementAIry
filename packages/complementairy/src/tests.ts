@@ -1,9 +1,12 @@
 import fs from "node:fs";
+import { contextoComun } from "./contexto.js";
 import path from "node:path";
 import { parse } from "./comments.js";
 import { makeZoner } from "./config.js";
 import { contextBlock, CRITERIO, projectContext } from "./context.js";
-import { langFor } from "./lang.js";
+import { langFor, type LangSpec } from "./lang.js";
+import { sonLiterales } from "./literales.js";
+import { analizarScript, AYUDANTE_AISLADO, validarExpresionAislada, type Analisis } from "./sandbox.js";
 import { ask } from "./llm.js";
 import { rutaTest } from "./metricas.js";
 import { coincide, ejecutar, exportedFunctions, validarExpresion } from "./predict.js";
@@ -21,6 +24,8 @@ import { inlineSolutions } from "./guard.js";
  */
 
 interface Caso {
+  /** Solo en modo aislado: qué devuelven las partes del entorno que el caso usa (datos, no código). */
+  dobles?: Record<string, unknown>;
   /** Lo calcula el script al probar: el resultado real tiene decimales que no están en lo esperado (usar "aproximado"). */
   aprox?: boolean;
   tipo: "normal" | "error";
@@ -49,6 +54,37 @@ const SCHEMA = {
           llamada: { type: "string", description: "UNA llamada a una función exportada, con argumentos literales." },
           esperado: { type: "string", description: 'Valor esperado como literal del lenguaje; "?" si no estás seguro. En tipo error: un fragmento del mensaje o "".' },
           duda: { type: "string", description: "Si esperado es ?, la pregunta concreta para el programador; si no, vacío." },
+        },
+      },
+    },
+  },
+};
+
+/** Para código que no exporta o usa su entorno: la llamada puede ser a una clase, y el caso trae dobles (datos). */
+const SCHEMA_AISLADO = {
+  ...SCHEMA,
+  properties: {
+    casos: {
+      ...SCHEMA.properties.casos,
+      items: {
+        ...SCHEMA.properties.casos.items,
+        required: [...SCHEMA.properties.casos.items.required, "dobles"],
+        properties: {
+          ...SCHEMA.properties.casos.items.properties,
+          llamada: { type: "string", description: "UNA llamada sobre lo declarado en el archivo, con argumentos literales: funcion(...), new Clase().metodo(...) o Clase.metodo(...)." },
+          dobles: {
+            type: "array",
+            description: "Qué devuelve cada parte del ENTORNO que el caso necesita (variables globales que el archivo usa sin declarar). Vacío si el caso no depende del entorno.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["ruta", "valor"],
+              properties: {
+                ruta: { type: "string", description: 'Lo que se usa, sin "window.": "app.vault.getAbstractFileByPath(…)" (el (…) indica el resultado de llamarla) o "config.modo".' },
+                valor: { type: "string", description: "El valor como JSON (null, true, 3, \"texto\", {\"path\": \"a\"})." },
+              },
+            },
+          },
         },
       },
     },
@@ -85,8 +121,15 @@ export interface ResultadoTests {
 /** Por qué no se pueden probar las funciones de un archivo (o "" si se puede). */
 export function noProbable(lang: string, src: string, funcion?: string): string {
   const exportadas = exportedFunctions(lang, src);
+  if (lang === "javascript") {
+    // Un script sin import/export (o una clase/método) se prueba aislado, sin modificar el archivo.
+    // Un MÓDULO se carga normal: solo se puede probar lo que exporta.
+    const esModulo = /^\s*(import\s[^(]|import\s*\{|export\s)/m.test(src);
+    if (esModulo && funcion && !exportadas.has(funcion)) return `${funcion} no está exportada y el archivo es un módulo (usa import/export): exporta la función para probarla, o prueba a mano`;
+    return "";
+  }
   if (!exportadas.size)
-    return "el archivo no exporta funciones: para probarlas fuera de su programa, expórtalas (si es un script que corre dentro de otra app, como Obsidian, los casos quedan para probar a mano)";
+    return "el archivo no exporta funciones: para probarlas fuera de su programa, expórtalas (si es un script que carga otra aplicación tal cual, los casos quedan para probar a mano)";
   if (funcion && !exportadas.has(funcion)) return `${funcion} no es una función exportada (si es un método de una clase, exporta la clase o prueba a mano)`;
   return "";
 }
@@ -100,19 +143,22 @@ export async function generarCasos(root: string, rel: string, funcion?: string):
   const motivo = noProbable(lang.id, src, funcion);
   if (motivo) throw new Error(motivo);
   const exportadas = exportedFunctions(lang.id, src);
+  const a = await analisisAislado(lang, src, funcion, exportadas);
   const z = makeZoner(root);
   const testAbs = path.join(root, rutaTest(rel, z.config.tests.carpeta));
   const existente = fs.existsSync(testAbs) ? fs.readFileSync(testAbs, "utf8") : "";
-  const { data, costUsd } = await ask<{ casos: Caso[] }>({
+  const { data, costUsd } = await ask<{ casos: (Omit<Caso, "dobles"> & { dobles?: { ruta: string; valor: string }[] })[] }>({
     kind: "tests",
     system: SYSTEM,
     cwd: root,
-    schema: SCHEMA,
+    schema: a ? SCHEMA_AISLADO : SCHEMA,
     ...iaOpts(z.config, "mediano"),
     prompt: [
-      `Archivo: ${rel} (${lang.id}). Funciones exportadas: ${[...exportadas].join(", ")}.`,
+      a
+        ? `Archivo: ${rel} (${lang.id}). No exporta: se prueba cargándolo tal cual en un entorno aislado. Declara: ${a.declaraciones.join(", ")}. Usa de su entorno (sin declararlo): ${a.globales.join(", ") || "nada"}. Si un caso necesita algo del entorno, di qué devuelve en "dobles" (datos); lo que no digas responde vacío.`
+        : `Archivo: ${rel} (${lang.id}). Funciones exportadas: ${[...exportadas].join(", ")}.`,
       funcion ? `Propón casos SOLO para ${funcion}.` : "Propón casos para las funciones más importantes.",
-      contextBlock(projectContext(root, rel)),
+      contextoComun(root, rel, { funcion }),
       existente ? `Tests que ya existen (no repitas casos):\n${existente.slice(0, 4000)}` : "",
       `Código:\n${src}`,
     ]
@@ -120,13 +166,30 @@ export async function generarCasos(root: string, rel: string, funcion?: string):
       .join("\n\n"),
   });
 
-  // Validación determinista de cada caso.
+  // Validación determinista de cada caso (y de sus dobles: JSON válido).
   const descartados: string[] = [];
-  const casos = data.casos.filter((c) => {
-    const err = validarExpresion(c.llamada, exportadas);
+  const casos: Caso[] = [];
+  for (const c of data.casos) {
+    const err = a ? validarExpresionAislada(c.llamada, new Set(a.declaraciones)) : validarExpresion(c.llamada, exportadas, lang.id);
+    const deEsta = !funcion || c.llamada.trim().startsWith(funcion + "(") || c.llamada.includes(`.${funcion}(`);
     if (err) descartados.push(`${c.llamada}: ${err}`);
-    return !err && (!funcion || c.llamada.trim().startsWith(funcion + "("));
-  });
+    if (err || !deEsta) continue;
+    const dobles: Record<string, unknown> = {};
+    for (const d of c.dobles ?? [])
+      try {
+        dobles[d.ruta.replace(/^(window|globalThis|self)\./, "").replace(/\(\.\.\.\)$/, "(…)")] = JSON.parse(d.valor);
+      } catch {
+        descartados.push(`${c.llamada}: el doble ${d.ruta} no es JSON válido`);
+      }
+    // El valor esperado va al archivo de tests: si no es un literal (lista blanca), lo decides tú.
+    const esp = c.esperado.trim();
+    if (c.tipo !== "error" && esp && esp !== "?" && !esLiteral(esp)) {
+      descartados.push(`${c.llamada}: el valor esperado no es un literal (${esp.slice(0, 40)}); queda para que lo decidas`);
+      c.esperado = "?";
+      c.duda = c.duda || `¿Qué debería devolver ${c.llamada}?`;
+    }
+    casos.push({ ...c, ...(a ? { dobles } : {}) } as Caso);
+  }
   return { casos, descartados, costoUsd: costUsd };
 }
 
@@ -140,6 +203,9 @@ export interface ResultadoCaso {
   estado: "pasa" | "falla" | "decidir" | "no-ejecutable";
   obtenido?: string;
   duda?: string;
+  /** Se probó aislado (sin export); qué partes del entorno se reemplazaron por dobles. */
+  aislado?: boolean;
+  dobles?: string[];
 }
 
 /**
@@ -149,7 +215,9 @@ export interface ResultadoCaso {
 export async function probarCasos(root: string, rel: string, funcion?: string): Promise<{ resultados: ResultadoCaso[]; descartados: string[]; costoUsd: number }> {
   const lang = langFor(rel)!;
   const { casos, descartados, costoUsd } = await generarCasos(root, rel, funcion);
-  const resultados: ResultadoCaso[] = casos.map((c) => ejecutarCaso(root, rel, lang.id, c));
+  const src = fs.readFileSync(path.join(root, rel), "utf8");
+  const a = await analisisAislado(lang, src, funcion, exportedFunctions(lang.id, src));
+  const resultados: ResultadoCaso[] = casos.map((c) => ejecutarCaso(root, rel, lang.id, c, a));
   // Si el valor real tiene decimales que no están en lo esperado (1049.9999… vs 1050), el test será aproximado.
   casos.forEach((c, i) => {
     const o = resultados[i]?.obtenido;
@@ -175,6 +243,13 @@ export async function proponerTests(root: string, rel: string, funcion?: string,
   if (o.usarProbados && fs.existsSync(guardados)) casos = JSON.parse(fs.readFileSync(guardados, "utf8")) as Caso[];
   else ({ casos, descartados, costoUsd } = await generarCasos(root, rel, funcion));
   if (!casos.length) return { archivo: testRel, casos: 0, preguntas: 0, costoUsd, descartados };
+  // Código que no exporta: tests que lo cargan aislado (con tu clic; tu archivo no se toca).
+  const srcFuente = fs.readFileSync(path.join(root, rel), "utf8");
+  const aislado = await analisisAislado(lang, srcFuente, funcion, exportedFunctions(lang.id, srcFuente));
+  if (aislado) {
+    if (!o.activos) return { archivo: testRel, casos: 0, preguntas: 0, costoUsd, descartados: [...descartados, "el código sin export se guarda como tests solo con tu clic (Guardar como tests)"] };
+    return escribirTestsAislados(root, rel, testRel, existente, casos, aislado, funcion, costoUsd, descartados);
+  }
 
   const tlang = langFor(testRel)!;
   const parsed = await parse(existente, tlang);
@@ -288,7 +363,9 @@ export async function recorrerCasos(root: string, rel: string): Promise<{ funcio
   for (const f of fs.readdirSync(dir).filter((x) => x.startsWith(prefijo) && x.endsWith(".json"))) {
     const funcion = decodeURIComponent(f.slice(prefijo.length, -5));
     const casos = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as Caso[];
-    const detalle = casos.map((c) => ejecutarCaso(root, rel, lang.id, c));
+    const src = fs.readFileSync(path.join(root, rel), "utf8");
+    const a = await analisisAislado(lang, src, funcion === "_" ? undefined : funcion, exportedFunctions(lang.id, src));
+    const detalle = casos.map((c) => ejecutarCaso(root, rel, lang.id, c, a));
     out.push({ funcion, pasan: detalle.filter((d) => d.estado === "pasa").length, fallan: detalle.filter((d) => d.estado === "falla").length, detalle });
   }
   if (out.length) {
@@ -306,13 +383,74 @@ export async function recorrerCasos(root: string, rel: string): Promise<{ funcio
   return { funciones: out };
 }
 
-function ejecutarCaso(root: string, rel: string, langId: string, c: Caso): ResultadoCaso {
+function ejecutarCaso(root: string, rel: string, langId: string, c: Caso, a?: Analisis): ResultadoCaso {
   const base = { descripcion: c.descripcion, llamada: c.llamada, esperado: c.esperado };
   if (c.esperado.trim() === "?" || (!c.esperado.trim() && c.tipo !== "error")) return { ...base, estado: "decidir", duda: c.duda || `¿Qué debería devolver ${c.llamada}?` };
   const fn = /^([\w$]+)/.exec(c.llamada.trim())![1]!;
-  const r = ejecutar(root, rel, langId, { expresion: c.llamada, funcion: fn });
-  if (r.infra) return { ...base, estado: "no-ejecutable", obtenido: r.error ?? "" };
+  const r = ejecutar(root, rel, langId, { expresion: c.llamada, funcion: fn }, a ? { aislado: a, dobles: c.dobles ?? {} } : {});
+  const conDobles = r.aislado ? { aislado: true, dobles: r.dobles ?? [] } : {};
+  if (r.infra) return { ...base, estado: "no-ejecutable", obtenido: r.error ?? "", ...conDobles };
   const obtenido = r.ok ? JSON.stringify(r.valor) : `error: ${r.error ?? ""}`;
   const pasa = c.tipo === "error" ? !r.ok && (!c.esperado.trim() || (r.error ?? "").includes(c.esperado.replace(/^["']|["']$/g, ""))) : coincide(c.esperado, r);
-  return { ...base, estado: pasa ? "pasa" : "falla", obtenido };
+  return { ...base, estado: pasa ? "pasa" : "falla", obtenido, ...conDobles };
 }
+
+/**
+ * ¿Se prueba aislado? JavaScript cuando lo pedido no está exportado (o el archivo no exporta nada):
+ * se carga tal cual en un contexto aislado. Devuelve el análisis (declaraciones y entorno) o undefined.
+ */
+async function analisisAislado(lang: LangSpec, src: string, funcion: string | undefined, exportadas: Set<string>): Promise<Analisis | undefined> {
+  if (lang.id !== "javascript") return undefined;
+  if (exportadas.size && (!funcion || exportadas.has(funcion))) return undefined;
+  const a = await analizarScript(src, lang);
+  return a.esModulo ? undefined : a;
+}
+
+/** Tests de vitest para código sin export: usan el ayudante genérico `_cai/aislado.mjs` de la carpeta de tests. */
+function escribirTestsAislados(root: string, rel: string, testRel: string, existente: string, casos: Caso[], a: Analisis, funcion: string | undefined, costoUsd: number, descartados: string[]): ResultadoTests {
+  const testAbs = path.join(root, testRel);
+  const ayudante = path.join(path.dirname(testAbs), "_cai", "aislado.mjs");
+  fs.mkdirSync(path.dirname(ayudante), { recursive: true });
+  fs.writeFileSync(ayudante, AYUDANTE_AISLADO);
+  let fuente = path.relative(path.dirname(testAbs), path.join(root, rel)).split(path.sep).join("/");
+  if (!fuente.startsWith(".")) fuente = `./${fuente}`;
+  const lineas: string[] = [];
+  let preguntas = 0;
+  if (!existente.includes("ejecutarAislado"))
+    lineas.push(
+      `// Tests de ${funcion ?? rel} creados por ComplementAIry (con tu clic). ${rel} se carga tal cual, aislado: no hace falta exportar nada.`,
+      `import { expect, test } from "vitest";`,
+      `import { ejecutarAislado } from "./_cai/aislado.mjs";`,
+      `const ARCHIVO = new URL(${JSON.stringify(fuente)}, import.meta.url);`,
+      `const ENTORNO = ${JSON.stringify({ declaraciones: a.declaraciones, globales: a.globales })};`,
+      "",
+    );
+  const js = (v: string) => JSON.stringify(v);
+  for (const c of casos) {
+    const desc = c.descripcion.replace(/\s+/g, " ").trim().slice(0, 90);
+    const dobles = JSON.stringify(c.dobles ?? {});
+    const esperado = c.esperado.trim();
+    if (esperado === "?" || (!esperado && c.tipo !== "error")) {
+      preguntas++;
+      lineas.push(`test.todo(${js(`${desc} — ${c.duda || "decide el resultado esperado"}`)});`);
+      continue;
+    }
+    if (c.tipo === "error")
+      lineas.push(`test(${js(desc)}, async () => {`, `  await expect(ejecutarAislado(ARCHIVO, ENTORNO, ${js(c.llamada)}, ${dobles})).rejects.toThrow(${esperado ? js(esperado.replace(/^["']|["']$/g, "")) : ""});`, `});`);
+    else {
+      const numero = /^-?\d+(\.\d+)?$/.test(esperado);
+      lineas.push(
+        `test(${js(desc)}, async () => {`,
+        `  expect(await ejecutarAislado(ARCHIVO, ENTORNO, ${js(c.llamada)}, ${dobles}))${numero && c.aprox ? `.toBeCloseTo(${esperado}, 2)` : `.toEqual(${esLiteral(esperado) ? esperado : js(esperado)})`};`,
+        `});`,
+      );
+    }
+  }
+  const next = (existente && !existente.endsWith("\n") ? existente + "\n" : existente) + (existente.trim() ? "\n" : "") + lineas.join("\n") + "\n";
+  fs.mkdirSync(path.dirname(testAbs), { recursive: true });
+  fs.writeFileSync(testAbs, next);
+  return { archivo: testRel, casos: casos.length, preguntas, costoUsd, descartados };
+}
+
+/** ¿Es un literal (número, texto, booleano, null, lista u objeto de esos)? Lista blanca: nada que se ejecute. */
+const esLiteral = (v: string) => v.trim() !== "" && sonLiterales(v);

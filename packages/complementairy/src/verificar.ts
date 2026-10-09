@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
+import { contextoComun } from "./contexto.js";
+import { proponerDecisiones, SCHEMA_DECISIONES, type Opcion } from "./decisiones.js";
 import fs from "node:fs";
 import path from "node:path";
-import { syntaxErrors } from "./acompanante.js";
+import { syntaxErrors } from "./sintaxis.js";
 import { parse } from "./comments.js";
 import { makeZoner } from "./config.js";
 import { contextBlock, CRITERIO, projectContext } from "./context.js";
@@ -38,7 +40,7 @@ export interface Veredicto {
 const schema = (o: { independiente: boolean; explicacion: boolean }) => ({
   type: "object",
   additionalProperties: false,
-  required: ["que_hace", "deberia", "estado", "resumen", "mejoras", "que_hacer", ...(o.independiente ? ["otra_mirada"] : []), ...(o.explicacion ? ["explicacion"] : [])],
+  required: ["que_hace", "deberia", "estado", "resumen", "mejoras", "que_hacer", "decisiones", ...(o.independiente ? ["otra_mirada"] : []), ...(o.explicacion ? ["explicacion"] : [])],
   properties: {
     que_hace: { type: "string", description: "Qué hace el código, citando las líneas (\"línea 3: …\"). Sin opinar todavía." },
     deberia: { type: "string", description: "Qué debería hacer según lo que pedía su nota y las reglas." },
@@ -46,6 +48,7 @@ const schema = (o: { independiente: boolean; explicacion: boolean }) => ({
     resumen: { type: "string", description: "Una o dos oraciones: qué hace bien o qué le falta." },
     mejoras: { type: "array", maxItems: 4, items: { type: "string" }, description: "Concretas y cortas, sin código. Vacío si no hay." },
     que_hacer: { type: "string", description: "El próximo paso en una oración (vacío si está lista)." },
+    decisiones: SCHEMA_DECISIONES,
     ...(o.independiente ? { otra_mirada: { type: "string", description: "Comparando con el plan hecho SIN ver el código: SOLO diferencias que importen (un caso borde no cubierto, un enfoque claramente mejor) y por qué. \"\" si coinciden." } } : {}),
     ...(o.explicacion
       ? { explicacion: { type: "object", additionalProperties: false, required: ["coincide", "comentario"], properties: { coincide: { type: "boolean" }, comentario: { type: "string", description: "¿Su explicación describe lo que el código hace de verdad? Qué falta o qué está confundido, en una oración." } } } }
@@ -101,6 +104,8 @@ export async function verificar(
     noAntesDe?: string;
     /** "Otra mirada": la IA arma su plan SIN ver tu código y luego compara (contra el sesgo de lo ya hecho). */
     independiente?: boolean;
+    /** Revisión completa: "otra mirada" solo en las funciones que cambiaron (las otras reutilizan su veredicto). */
+    independienteSiCambio?: boolean;
     /** Modo aprender: tu explicación de la función con tus palabras (la IA la compara con el código). */
     explicacion?: string;
   } = {},
@@ -141,6 +146,7 @@ export async function verificar(
       const previa = notas.filter((n) => !n.prediccion && n.ancla.funcion === clave && n.verificacion?.hash === h).sort((a, b) => b.actualizada.localeCompare(a.actualizada))[0];
       // Con tu explicación o "otra mirada" se verifica igual: es un pedido distinto al anterior.
       if (!o.forzar && !o.explicacion?.trim() && !o.independiente && previa?.verificacion) {
+        // (con independienteSiCambio, una función sin cambios también reutiliza su veredicto)
         res.veredictos.push({ funcion: clave, estado: previa.verificacion.estado, resumen: previa.verificacion.resumen, sinIa: true, omitida: true, nota: previa.id });
         continue;
       }
@@ -164,8 +170,9 @@ export async function verificar(
       // 2. Con IA, a ciegas: solo el código, el objetivo y las reglas (sin la conversación ni comentarios que aprueban).
       o.log?.(`cai: verificando ${f.nombre} en ${rel}`);
       const firma = (lineas[f.linea - 1] ?? "").trim();
-      let plan = "";
-      if (o.independiente) {
+      const otraMirada = o.independiente || o.independienteSiCambio;
+      let plan = otraMirada ? (nota.planIndependiente ?? "") : "";
+      if (otraMirada && !plan) {
         // "Otra mirada": cómo lo haría la IA SIN ver tu código (para no anclarse en lo que ya hiciste).
         const p = await ask<{ pasos: string[]; casos_borde: string[] }>({
           kind: "verificar:plan-ciego",
@@ -175,13 +182,14 @@ export async function verificar(
           sinHerramientas: true,
           ...iaOpts(z.config, "chico"),
           effort: "low",
-          prompt: [`Función: ${firma} (archivo ${rel}, ${lang.id}).`, nota.accion ? `Objetivo: ${nota.accion}` : "", contextBlock(projectContext(root, rel))].filter(Boolean).join("\n\n"),
+          prompt: [`Función: ${firma} (archivo ${rel}, ${lang.id}).`, nota.accion ? `Objetivo: ${nota.accion}` : "", contextoComun(root, rel, { funcion: clave, corto: true })].filter(Boolean).join("\n\n"),
         });
         res.costoUsd += p.costUsd;
         plan = `Pasos: ${p.data.pasos.join(" / ")}\nCasos borde: ${p.data.casos_borde.join(" / ")}`;
+        nota.planIndependiente = plan; // ya pagado: se reutiliza (p. ej. en "Revisar archivo completo")
       }
       const conExplicacion = !!o.explicacion?.trim();
-      const { data, costUsd, modelo } = await ask<{ estado: Estado; resumen: string; mejoras: string[]; que_hacer: string; otra_mirada?: string; explicacion?: { coincide: boolean; comentario: string } }>({
+      const { data, costUsd, modelo } = await ask<{ estado: Estado; resumen: string; mejoras: string[]; que_hacer: string; otra_mirada?: string; explicacion?: { coincide: boolean; comentario: string }; decisiones?: { pregunta: string; opciones: Opcion[]; recomendada: string }[] }>({
         kind: "verificar",
         ref: { archivo: rel, funcion: clave },
         system: SYSTEM,
@@ -191,7 +199,7 @@ export async function verificar(
         ...iaOpts(z.config, o.tamano ?? "mediano"),
         prompt: [
           `Archivo: ${rel} (${lang.id}). Función: ${f.nombre}.`,
-          contextBlock(projectContext(root, rel)),
+          contextoComun(root, rel, { funcion: clave }),
           nota.accion ? `Lo que su nota pedía hacer: ${nota.accion}` : "",
           plan ? `Plan hecho SIN ver el código (otra mirada; compáralo con lo que hizo):\n${plan}` : "",
           conExplicacion ? `Cómo explica el programador su función, con sus palabras: "${o.explicacion!.trim().slice(0, 800)}"` : "",
@@ -203,6 +211,7 @@ export async function verificar(
       res.costoUsd += costUsd;
       llamadas++;
       registrar(nota, data.estado, data.resumen, data.mejoras, data.que_hacer, h, false, { otra: data.otra_mirada ?? "", modelo, costo: costUsd });
+      if (data.decisiones?.length) proponerDecisiones(root, data.decisiones, { archivo: rel, funcion: clave }, "verificar");
       nota.verificacion!.lineas = codigo.split("\n");
       if (conExplicacion && data.explicacion) nota.explicacion = { texto: o.explicacion!.trim(), coincide: data.explicacion.coincide, comentario: data.explicacion.comentario, fecha: new Date().toISOString() };
       res.veredictos.push({ funcion: clave, estado: data.estado, resumen: data.resumen, sinIa: false, nota: nota.id });
@@ -222,6 +231,7 @@ function registrar(n: Nota, estado: Estado, resumen: string, mejoras: string[], 
   const otra = extra.otra?.trim() ? `\n\n🔀 **Otra mirada** (pensada sin ver tu código): ${extra.otra.trim()}` : "";
   n.hilo.push(mensaje("ia", `**${ICONO[estado]} ${titulo}**${sinIa ? " (sin IA)" : ""} · ${resumen}${masLista}${lista}${otra}`, { kind: "verificar", ...(extra.modelo ? { modelo: extra.modelo } : {}), ...(extra.costo !== undefined ? { costo: extra.costo } : {}) }));
   n.verificacion = { estado, resumen, fecha: new Date().toISOString(), hash };
+  delete n.impacto; // se volvió a verificar: el aviso de impacto ya se atendió
   if (estado === "lista") {
     n.estado = "resuelta"; // se archiva: el panel no se llena
     n.bloqueante = false;

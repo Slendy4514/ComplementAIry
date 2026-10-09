@@ -7,7 +7,7 @@ import { makeZoner } from "./config.js";
 import { listFiles } from "./files.js";
 import { cleanText, conversation } from "./guia.js";
 import { runHook, type HookInput } from "./hook.js";
-import { init, KEYBINDINGS } from "./init.js";
+import { init, KEYBINDINGS, refrescarClaudeMd } from "./init.js";
 import { langFor } from "./lang.js";
 import { runSelftest } from "./selftest.js";
 import { verifyCommentOnly } from "./verify.js";
@@ -20,6 +20,11 @@ import { acompanar } from "./acompanante.js";
 import { planoProyecto } from "./plano.js";
 import { verificar } from "./verificar.js";
 import { servir } from "./servir.js";
+import { deuda, hoy, resumenSesion } from "./resumenSesion.js";
+import { cargarChat, conversar as conversarProyecto, limpiarChat as limpiarChatProyecto } from "./chat.js";
+import { revisarCompleto } from "./revisionCompleta.js";
+import { actualizarIndice, leerIndice, lineaIndice } from "./indice.js";
+import { cargarDecisiones, decidir, retractar } from "./decisiones.js";
 import { esModo, MODOS, modoEfectivo } from "./modos.js";
 import { funcionesDe, funcionPorClave } from "./notasFuncion.js";
 import { rapida } from "./rapida.js";
@@ -29,7 +34,7 @@ import { estadoPanorama, leerMemoria, panorama, preguntasAbiertas, responderPreg
 import { conBloqueo, enCurso, OcupadoError, ocuparEsperando } from "./ocupado.js";
 import { responderNota } from "./responder.js";
 import { cargarNotas, guardarNotas, nuevaNota, mensaje, todasLasNotas } from "./notas.js";
-import { cargarTareas, guardarTareas, siguiente, actualizarTareas } from "./siguiente.js";
+import { cargarTareas, guardarTareas, siguiente, actualizarTareas, agregarTareas } from "./siguiente.js";
 import { planoArchivo } from "./planoArchivo.js";
 import { conContenido, conocer, sugerirAutoria } from "./conocer.js";
 import { createInterface } from "node:readline/promises";
@@ -50,6 +55,12 @@ const HELP = `ComplementAIry (cai) — tú programas, la IA te acompaña
   cai siguiente                  qué hacer ahora (una sola cosa, elegida sin IA) y qué viene después
   cai responder <archivo> (--linea N | --nota <id> | --archivo-entero) [--texto "..."] [--pedido pista|piezas|pseudo|ejemplo|tests|explica]
                                     pregunta en una nota (en modo notas el archivo no se toca)
+  cai hoy [--marcar]              qué cambió desde tu última visita (sin IA)
+  cai deuda                      lo pendiente por archivo: notas, tests apagados, sin tests, decisiones
+  cai sesion [--desde hoy]       resumen de la sesión + mensaje de commit sugerido (lo usas tú)
+  cai chat --texto "…"           chat del proyecto (lee el proyecto, conoce estructura, índice y decisiones)
+  cai indice [actualizar [archivo]]   mapa de funciones (estado, tests, quién llama a quién), sin IA
+  cai decisiones [decidir <id> "<opción>" | retractar <id>]   lo que decidiste (la IA lo respeta; se puede retractar)
   cai servir                      proceso abierto para la extensión (sugerencias rápidas sin esperar el arranque)
   cai actividad [--n 20]          qué hizo la IA (hora, qué, archivo, modelo, costo, tiempo)
   cai modo [programar|aprender|heredar] [--archivo f | --funcion f:nombre | --carpeta glob]
@@ -142,6 +153,13 @@ async function ejecutar(argv: string[]): Promise<number> {
       return 0;
     }
     case "init": {
+      if (argv.includes("--solo-claude")) {
+        // Solo actualiza las instrucciones de Claude Code (sección ComplementAIry del CLAUDE.md).
+        const target = path.resolve(sub && !sub.startsWith("--") ? sub : ".");
+        const c = refrescarClaudeMd(target);
+        console.log(c.length ? `✓ ${c.join(" · ")}` : "✓ CLAUDE.md ya estaba al día");
+        return 0;
+      }
       const target = path.resolve(sub ?? ".");
       const { changes } = init(target);
       console.log(`cai instalado en ${target}:\n` + changes.map((c) => `  · ${c}`).join("\n"));
@@ -281,6 +299,13 @@ async function ejecutar(argv: string[]): Promise<number> {
     case "revisar": {
       if (!sub) throw new Error("uso: cai revisar <archivo>");
       const rel = path.relative(root, path.resolve(sub));
+      if (rest.includes("--completo")) {
+        // Revisión + "¿quedó lista?" de cada función + tests + veredicto del archivo.
+        const r = await revisarCompleto(root, rel, rest.includes("--json") ? () => {} : (l) => console.log(l));
+        if (rest.includes("--json")) process.stdout.write(JSON.stringify(r));
+        else console.log(`${{ lista: "🟢", casi: "🟡", falta: "🔴" }[r.veredicto.estado]} ${rel}: ${r.veredicto.listas}/${r.veredicto.total} funciones listas${r.veredicto.testsFallan ? ` · ${r.veredicto.testsFallan} tests fallan` : ""} · US$${r.costoUsd.toFixed(3)}`);
+        return 0;
+      }
       const soloI = rest.indexOf("--solo");
       const r = await runReview(root, rel, {
         sinIa: rest.includes("--sin-ia"),
@@ -476,6 +501,104 @@ async function ejecutar(argv: string[]): Promise<number> {
       if (!abiertas.length) console.log("(sin notas abiertas)");
       return 0;
     }
+    case "hoy": {
+      // Qué cambió desde tu última visita (sin IA). --marcar: esta visita pasa a ser la referencia.
+      const h = hoy(root, argv.includes("--marcar"));
+      if (argv.includes("--json")) {
+        process.stdout.write(JSON.stringify(h));
+        return 0;
+      }
+      if (h.desde) console.log(`Desde ${h.desde.slice(0, 16).replace("T", " ")}:`);
+      if (h.cambiadas.length) console.log(`  cambiaron: ${h.cambiadas.join(", ")}`);
+      if (h.nuevas.length) console.log(`  nuevas: ${h.nuevas.join(", ")}`);
+      if (h.empezaronAFallar.length) console.log(`  ❌ empezaron a fallar sus tests: ${h.empezaronAFallar.join(", ")}`);
+      if (h.decisionesPendientes) console.log(`  ❓ ${h.decisionesPendientes} decisión(es) esperan que elijas`);
+      for (const c of h.conviene) console.log(`  · ${c}`);
+      return 0;
+    }
+    case "deuda": {
+      const d = deuda(root);
+      if (argv.includes("--json")) {
+        process.stdout.write(JSON.stringify(d));
+        return 0;
+      }
+      for (const [rel, x] of Object.entries(d))
+        console.log(`${rel}: ${x.notasAbiertas} nota(s)${x.bloqueantes ? ` (${x.bloqueantes} bloqueantes)` : ""} · ${x.testsApagados} test(s) apagados · ${x.sinTests.length ? `sin tests: ${x.sinTests.join(", ")}` : "todas con tests"}${x.decisionesPendientes ? ` · ${x.decisionesPendientes} decisión(es)` : ""}`);
+      if (!Object.keys(d).length) console.log("✓ sin deuda pendiente");
+      return 0;
+    }
+    case "sesion": {
+      // cai sesion [--desde ISO|hoy] [--sin-ia] [--json]: resumen de lo hecho + commit sugerido (lo usas tú)
+      const desdeArg = argv.includes("--desde") ? argv[argv.indexOf("--desde") + 1] : "hoy";
+      const fecha = !desdeArg || desdeArg === "hoy" ? new Date(new Date().setHours(0, 0, 0, 0)) : new Date(desdeArg);
+      if (Number.isNaN(fecha.getTime())) throw new Error(`--desde "${desdeArg}" no es una fecha válida: usa "hoy" o una fecha como 2026-10-09 o 2026-10-09T14:30`);
+      const desde = fecha.toISOString();
+      const r = await resumenSesion(root, desde, argv.includes("--sin-ia"));
+      if (argv.includes("--json")) process.stdout.write(JSON.stringify(r));
+      else console.log(`${r.medido}${r.resumen ? `\n\nResumen:\n${r.resumen}` : ""}${r.commit ? `\n\nCommit sugerido (edítalo):\n${r.commit}` : ""}`);
+      return 0;
+    }
+    case "chat": {
+      // cai chat --texto "…" [--json] · cai chat --historial [--json] · cai chat --limpiar
+      if (argv.includes("--limpiar")) {
+        await limpiarChatProyecto(root);
+        console.log("✓ chat del proyecto vacío");
+        return 0;
+      }
+      if (argv.includes("--historial")) {
+        const h = cargarChat(root);
+        if (argv.includes("--json")) process.stdout.write(JSON.stringify(h));
+        else for (const m of h) console.log(`${m.quien === "ia" ? "IA" : "Tú"}: ${m.texto}\n`);
+        return 0;
+      }
+      const t = argv.includes("--texto") ? argv[argv.indexOf("--texto") + 1] : argv.slice(1).filter((a) => !a.startsWith("--")).join(" ");
+      if (!t?.trim()) throw new Error('uso: cai chat --texto "<tu pregunta sobre el proyecto>"');
+      const r = await conversarProyecto(root, t);
+      if (argv.includes("--json")) process.stdout.write(JSON.stringify(r));
+      else {
+        console.log(r.respuesta.texto);
+        for (const d of r.decisiones) console.log(`\n❓ [${d.id}] ${d.pregunta}: ${d.opciones.map((o) => o.opcion).join(" / ")}  (decide con: cai decisiones decidir ${d.id} "<opción>")`);
+        for (const x of r.respuesta.tareas ?? []) console.log(`\n➕ tarea sugerida: ${x.titulo} (${x.archivo})`);
+      }
+      return 0;
+    }
+    case "indice": {
+      // cai indice [actualizar [archivo…]] [--json]: el mapa de funciones del proyecto (sin IA)
+      const archivos = sub === "actualizar" ? rest.filter((a) => !a.startsWith("--")).map((a) => path.relative(root, path.resolve(a))) : undefined;
+      const idx = sub === "actualizar" ? await actualizarIndice(root, archivos?.length ? archivos : undefined) : leerIndice(root);
+      if (argv.includes("--json")) {
+        process.stdout.write(JSON.stringify(idx));
+        return 0;
+      }
+      for (const [rel, a] of Object.entries(idx.archivos)) {
+        if (!a.funciones.length) continue;
+        console.log(rel);
+        for (const f of a.funciones) console.log(`  ${lineaIndice(f)}${f.llamadaPor.length ? `  ← la usan: ${f.llamadaPor.map((x) => x.split(":").pop()).join(", ")}` : ""}`);
+      }
+      if (!Object.keys(idx.archivos).length) console.log("(índice vacío: cai indice actualizar)");
+      return 0;
+    }
+    case "decisiones": {
+      // cai decisiones [--json] · decidir <id> "<opción>" · retractar <id>
+      if (sub === "decidir") {
+        const d = decidir(root, rest[0] ?? "", rest.slice(1).filter((a) => !a.startsWith("--")).join(" "));
+        console.log(`✓ ${d.pregunta} → ${d.eleccion} (la IA la respeta desde ahora; puedes retractarla)`);
+        return 0;
+      }
+      if (sub === "retractar") {
+        const d = retractar(root, rest[0] ?? "");
+        console.log(`✓ retractada: ${d.pregunta} (queda en el historial; ya no rige)`);
+        return 0;
+      }
+      const ds = cargarDecisiones(root);
+      if (argv.includes("--json")) {
+        process.stdout.write(JSON.stringify(ds));
+        return 0;
+      }
+      for (const d of ds) console.log(`${{ pendiente: "❓", vigente: "✓", retractada: "↩" }[d.estado]} [${d.id}] ${d.pregunta}${d.eleccion ? ` → ${d.eleccion}` : ` (${d.opciones.map((o) => o.opcion).join(" / ")})`}`);
+      if (!ds.length) console.log("(sin decisiones)");
+      return 0;
+    }
     case "servir": {
       // Proceso de larga vida para la extensión (pedidos JSON por línea). Ver servir.ts.
       await servir(root);
@@ -650,6 +773,15 @@ async function ejecutar(argv: string[]): Promise<number> {
       const cambiar = ["hecha", "pendiente", "descartar"].includes(sub ?? "");
       // Al listar: se actualizan (hechas solas, separadas, archivadas) y no se muestran las archivadas.
       const tareas = cambiar ? cargarTareas(root) : (await actualizarTareas(root)).filter((t) => !t.archivada);
+      if (sub === "agregar") {
+        // cai tareas agregar "<título>" [--archivo f] [--detalle "…"]  (p. ej. desde una sugerencia del chat)
+        const opt = (k: string) => (rest.includes(k) ? rest[rest.indexOf(k) + 1] : undefined);
+        const titulo = rest.find((a, i) => !a.startsWith("--") && !["--archivo", "--detalle"].includes(rest[i - 1] ?? ""));
+        if (!titulo) throw new Error('uso: cai tareas agregar "<título>" [--archivo f] [--detalle "…"]');
+        const n = agregarTareas(root, [{ titulo, ...(opt("--archivo") ? { archivo: opt("--archivo")! } : {}), ...(opt("--detalle") ? { detalle: opt("--detalle")! } : {}), origen: "manual" }]);
+        console.log(n ? `✓ tarea agregada: ${titulo}` : "(ya existía)");
+        return 0;
+      }
       if (sub === "hecha" || sub === "pendiente" || sub === "descartar") {
         const t = tareas.find((x) => x.id === rest[0]);
         if (!t) throw new Error(`no existe la tarea ${rest[0]} (míralas con: cai tareas)`);

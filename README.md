@@ -75,6 +75,25 @@ Se elige por **proyecto, carpeta, archivo o función** (gana el más específico
 - **Pasos chicos:** sobre la función, "✅ ¿Lista? (40 líneas sin revisar)" cuando cambiaste mucho sin verificar.
 - La barra de estado muestra el **modo** donde estás y el **▶ siguiente paso**.
 
+### Todo se conoce: índice, decisiones e impacto
+- **Índice vivo** (`.cai/indice.json`, sin IA): cada función con su firma, a quién llama y quién la llama, el estado de su nota, sus tests y un resumen. Se actualiza al guardar, y solo lo que cambió.
+- **Nadie piensa de cero:** cada pedido a la IA (responder, ¿quedó lista?, revisar, tests, guía gris) recibe un contexto común: estructura, panorama, las funciones del archivo, las que llama y las que la llaman, y **tus decisiones**. Lo ya calculado (resúmenes, veredictos, la "otra mirada" de cada función) se reutiliza, no se vuelve a pagar.
+- **Decisiones con botones:** cuando la IA necesita que elijas ("¿un monto negativo lanza error?"), aparece la pregunta con **un botón por opción** (⭐ la recomendada) y "Otra…". Lo que eliges queda **vigente**: la IA lo respeta y no lo vuelve a preguntar. Si cambias de opinión, **↩ Retractar** (panel → Proyecto → Decisiones): queda en el historial y deja de regir. Solo tú decides y retractas (desde el chat de Claude Code, no).
+- **Avisos de impacto:** si cambias una función que otras usan, esas funciones avisan ("⚠ cambió `calcularCuota`, revisa") en su nota y sobre ellas en el código, y sus tests se vuelven a probar.
+
+### Revisar un archivo: ¿quedó listo?
+**🔎 Revisar** corre en segundo plano (puedes seguir y revisar otro archivo a la vez) y hace todo: la revisión a ciegas, **"¿quedó lista?" de cada función** (reutiliza la de las que no cambiaron), sus tests y un **veredicto del archivo**: 🟢 listo · 🟡 casi · 🔴 falta ("0/1 funciones listas"). El veredicto aparece arriba del archivo y en su nota.
+
+**Al salir de un archivo** (opcional, `revisar.alSalir`): si lo cambiaste y no vuelves en `revisar.minutosFuera` minutos (10), se revisa una vez. Por defecto **nunca** (a pedido); se puede poner en **ligera** (solo "¿quedó lista?" de lo que cambió) o **completa**.
+
+### Tests de código que no exporta
+Hay código que no puede llevar `export`: scripts que carga otra aplicación tal cual, o archivos que usan variables de su entorno (`window`, `document`, `app`…). Para esos, 🧪 Tests **carga el archivo sin modificarlo** en un entorno aislado de Node y reemplaza lo que viene del entorno por **dobles** que registran qué se usó. Cuando un caso depende del entorno, la IA propone como **datos** (no como código) qué devuelve cada llamada. El resultado lo dice ("✅ pasa, con dobles de `app.vault`"), porque no se probó contra la aplicación real. Los tests guardados usan un ayudante que se crea en la carpeta de tests (`_cai/aislado.mjs`). Es un mecanismo genérico: no hay nada especial para ninguna aplicación.
+
+### Retomar y cerrar
+- **Al abrir el proyecto** (panel → Proyecto → "Desde tu última visita"), sin IA: funciones nuevas o cambiadas, tests que empezaron a fallar, decisiones pendientes y si conviene un commit (`cai hoy`).
+- **Deuda visible** (`cai deuda`): por archivo, notas abiertas, tests apagados y funciones sin tests.
+- **📝 Resumen de la sesión** (en el chat, o `cai sesion`): qué hiciste, qué quedó listo, las decisiones y lo que falta commitear, con un **mensaje de commit sugerido** que editas y usas tú.
+
 ### En VSCode
 **Una nota por función, en el panel "Nota".** Lo que dice la IA de una función va a **su** nota, que se va ampliando (revisión, plano, respuestas, verificación): sin duplicados. El panel **Nota** (barra lateral ComplementAIry) **sigue al cursor**: muestra la nota de la función donde estás, con:
 - su estado (🟢 lista · 🟡 casi · 🔴 falta · sin verificar) y el **▶ Qué hacer**;
@@ -85,7 +104,7 @@ En el código **no se abre nada entre las líneas** ni te quita el foco: solo un
 
 **✅ ¿Quedó lista?** (`Ctrl+Alt+L` o el botón): revisa la función con lo que ya escribiste. Primero sin IA (sintaxis, tipos, lint, reglas); si eso pasa, la IA dice 🟢 lista (cierra la nota), 🟡 casi o 🔴 falta, con qué mejorar. También corre solo al guardar las funciones con nota que cambiaron. **Con autoguardado:** Ctrl+S actúa enseguida; un autoguardado espera a que dejes de editar (45 s por defecto) y corre una sola vez.
 
-**Guía mientras escribes:** dentro de cualquier función, tras una pausa (~1 s), aparece en gris **al final de la línea del cursor** qué toca ahora: el próximo paso (siguiendo los pasos de la nota, si los hay) o qué está mal en esa línea ("compara en vez de asignar"). Se actualiza en cada pausa, la anterior queda tenue mientras escribes, nunca trae código y no se inserta nada. Funciona sin guardar. **Ctrl+Alt+Espacio** la pide ya. Con el proceso abierto: ~1 s y ~US$0,002 cada una (tope por hora configurable).
+**Guía mientras escribes:** dentro de cualquier función, tras una pausa (~1 s), aparece en gris **al final de la línea del cursor** qué toca ahora: el próximo paso (siguiendo los pasos de la nota, si los hay) o qué está mal en esa línea ("compara en vez de asignar"). Se actualiza en cada pausa, la anterior queda tenue mientras escribes, nunca trae código y no se inserta nada. Es corta (≤ 70 caracteres) y, si no cabe, se corta en una palabra: el **hover** sobre la línea y el panel Nota ("💡 Guía actual") la muestran completa. Funciona sin guardar. **Ctrl+Alt+Espacio** la pide ya. Con el proceso abierto: ~1 s y ~US$0,002 cada una (tope por hora configurable).
 
 **🧪 Tests:** el botón propone casos y **los prueba al instante** contra tu código (✅ pasa · ❌ falla · ❓ decide tú el resultado), y los **guarda como tests** en la carpeta de tests (los dudosos, apagados con su pregunta). **Cada vez que guardas con Ctrl+S** (con autoguardado: cuando dejas de editar) se vuelven a probar y el resultado aparece en la nota de la función y en la barra de estado: si un cambio rompe algo, lo ves en el momento. Tu código nunca se toca; los tests los crea tu clic (desde el chat no). Con el **proceso de Claude Code abierto** (`cai servir`, lo arranca la extensión) tardan **~1 s y cuestan ~US$0,002**; si ese proceso falla, se usa la llamada normal (~20 s). Se apagan en la configuración; en modo aprender no aparecen.
 
@@ -94,9 +113,11 @@ En el código **no se abre nada entre las líneas** ni te quita el foco: solo un
 |---|---|
 | **▶ Ahora** | una sola cosa, elegida sin IA (lo que espera tu respuesta, errores, tareas, notas) |
 | **Pendientes** | todo lo demás en orden; clic = detalle completo en el panel Nota |
-| **Proyecto** | estado (y aviso si el panorama está desactualizado), **Estructura** (✓ existe · ○ por crear · "fuera de la propuesta"), **Preguntas para ti** (respondes o **conversas** con la IA antes de responder) |
+| **Proyecto** | desde tu última visita, estado (y aviso si el panorama está desactualizado), **Decisiones** (pendientes con botones, vigentes con ↩ Retractar, historial), **Funciones** (quién llama a quién, con su estado), **Deuda**, **Estructura** (✓ existe · ○ por crear · "fuera de la propuesta"), **Preguntas para ti** (respondes o **conversas** con la IA antes de responder) |
 | **Hechas recientes** | se archivan solas al día siguiente; cualquier tarea se puede descartar |
 | **IA** | qué está haciendo ahora (cancelar, silenciar 30 min) |
+
+**Chat "Proyecto"** (vista propia en la barra lateral, fuera de los archivos): preguntas generales como "¿por dónde sigo?", "¿qué falta para terminar?" o "¿cómo encaja X?". La IA **solo lee** el proyecto y conoce la estructura, el panorama, el índice y tus decisiones. Sus respuestas pueden traer decisiones (botones) y tareas (➕ Agregar tarea). Ahí también está **📝 Resumen de la sesión**.
 
 Arriba de cada archivo: `🗺️ Plano · 💡 Ayuda con el archivo · 🔎 Revisar · 💬 N notas`.
 
@@ -123,11 +144,17 @@ Arriba de cada archivo: `🗺️ Plano · 💡 Ayuda con el archivo · 🔎 Revi
 | Visión del proyecto completo | `Ctrl+Alt+P` | `cai panorama` |
 | Memoria del proyecto (responder preguntas) | Ctrl+Shift+P → "memoria del proyecto" | `.cai/conocimiento.md` |
 | Consumo de IA | — | `cai uso` |
+| Funciones del proyecto (índice) | panel → Proyecto → Funciones | `cai indice [actualizar]` |
+| Decisiones | botones en la nota, el chat y el panel | `cai decisiones`, `cai decisiones decidir <id> "<opción>"`, `cai decisiones retractar <id>` |
+| Chat del proyecto | vista "Proyecto" | `cai chat --texto "..."` |
+| Revisar con veredicto | 🔎 Revisar | `cai revisar <archivo> --completo` |
+| Retomar y cerrar | panel y chat | `cai hoy`, `cai deuda`, `cai sesion` |
 
 ### Desde el chat de Claude Code
 En un proyecto con `cai init`, el chat de Claude Code también es ComplementAIry:
 - **Sabe usarlo:** viene con la skill `cai`, que indica qué comando corresponde a cada pedido, más `cai-guia`, `cai-revisar` y `cai-snippet`. La sección de `CLAUDE.md` le explica las reglas.
 - **Corre los mismos comandos que los atajos.** Por ejemplo, "revisa src/cuota.ts" lleva a `cai revisar`, "¿cómo sigo?" a `cai panorama` y "tests para calcularCuota" a `cai tests`. Lo que esos comandos escriben (`panorama.md`, `conocimiento.md`, ADRs, `ESTRUCTURA.md`) se conserva, solo si el comando es **una sola llamada a `cai`, sin encadenar**.
+- **Conoce el proyecto:** consulta `cai indice`, `cai decisiones` y `cai chat` antes de responder. En modo notas, lo que diga sobre tu código va a las notas (`cai responder`), no como comentarios en el archivo. Si tu `CLAUDE.md` tiene instrucciones de una versión anterior, la extensión ofrece actualizarlas (`cai init --solo-claude`).
 - **No puede escribir tu código:** los hooks lo bloquean. Tampoco puede activar snippets (`cai expandir`), instalar (`cai init`), crear snippets ni declarar tu perfil: eso lo haces tú.
 
 ## Qué IA usa y cómo ahorra tokens

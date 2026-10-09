@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
-import { claveDeSimbolo, notasDe, root, vista } from "./comun";
+import fs from "node:fs";
+import path from "node:path";
+import { claveDeSimbolo, dataDir, notasDe, relDe, root, vista } from "./comun";
 import { ESTADO, type NotasView } from "./notasView";
 
 /** Sobre cada función: `💬 2 notas · 💡 Ayuda · 🧪 Tests`. Las funciones las da VSCode (símbolos del documento). */
@@ -35,8 +37,16 @@ export class Lentes implements vscode.CodeLensProvider {
       new vscode.CodeLens(arriba, { title: "📄 Archivo:", command: "" }),
       new vscode.CodeLens(arriba, { title: "🗺️ Plano", tooltip: "Qué funciones debería tener este archivo y por cuál empezar (notas + tareas)", command: "cai.plano", arguments: [doc.uri] }),
       new vscode.CodeLens(arriba, { title: "💡 Ayuda con el archivo", tooltip: "Preguntar o pedir pista/piezas/ejemplo sobre el archivo entero", command: "cai.ayudaArchivo", arguments: [u] }),
-      new vscode.CodeLens(arriba, { title: "🔎 Revisar", tooltip: "Revisión completa del archivo", command: "cai.revisar" }),
+      new vscode.CodeLens(arriba, { title: "🔎 Revisar", tooltip: "Revisión completa en segundo plano: revisores, ¿quedó lista? de cada función (con otra mirada), tests y veredicto del archivo", command: "cai.revisar" }),
     ];
+    // Veredicto de la última revisión completa (si el archivo no cambió desde entonces).
+    try {
+      const v = (JSON.parse(fs.readFileSync(path.join(dataDir(cwd), "cache", "veredictos.json"), "utf8")) as Record<string, { estado: string; listas: number; total: number; testsFallan: number; fecha: string }>)[relDe(cwd, doc.uri.fsPath)];
+      if (v)
+        out.splice(1, 0, new vscode.CodeLens(arriba, { title: `${{ lista: "🟢", casi: "🟡", falta: "🔴" }[v.estado] ?? ""} ${v.listas}/${v.total} listas${v.testsFallan ? ` · ${v.testsFallan} test(s) fallan` : ""}`, tooltip: `Revisión completa del ${new Date(v.fecha).toLocaleString()}. "🔎 Revisar" la actualiza.`, command: "cai.notasArchivo", arguments: [u] }));
+    } catch {
+      /* sin revisión completa todavía */
+    }
     if (todas.length)
       out.push(new vscode.CodeLens(arriba, { title: `💬 ${todas.length} nota${todas.length > 1 ? "s" : ""}${todas.some((n) => n.bloqueante) ? " ⚠" : ""}`, tooltip: "Ver las notas de este archivo", command: "cai.notasArchivo", arguments: [u] }));
     const funciones = aplanar(simbolos);
@@ -48,6 +58,8 @@ export class Lentes implements vscode.CodeLensProvider {
       const nota = notas.find((n) => n.ancla.funcion === nombre) ?? notas.find((n) => n.ancla.linea - 1 >= f.range.start.line && n.ancla.linea - 1 <= f.range.end.line);
       const lista = !nota && resueltas.find((n) => n.ancla.funcion === nombre);
       if (lista) out.push(new vscode.CodeLens(r, { title: "🟢 lista", tooltip: lista.verificacion?.resumen ?? "", command: "cai.notaPanel.mostrar", arguments: [doc.uri.toString(), lista.id] }));
+      // Impacto (sin IA): una función que esta usa cambió.
+      if (nota?.impacto?.length) out.push(new vscode.CodeLens(r, { title: `⚠ cambió ${nota.impacto.map((i) => i.funcion).join(", ")}`, tooltip: "Una función que esta usa cambió: revisa si sigue bien (✅ ¿Lista? lo limpia)", command: "cai.verificarFuncion", arguments: [doc.uri.toString(), nombre] }));
       if (nota) {
         const v = nota.verificacion ? ` · ${ESTADO[nota.verificacion.estado]}` : "";
         out.push(new vscode.CodeLens(r, { title: `💬 nota${nota.bloqueante ? " ⚠" : ""}${v}`, tooltip: nota.accion ? `▶ ${nota.accion}` : "Ver la nota", command: "cai.nota.abrir", arguments: [doc.uri.toString(), nota.id] }));

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { contextoComun } from "./contexto.js";
 import path from "node:path";
 import { dataDir, makeZoner } from "./config.js";
 import { langFor } from "./lang.js";
@@ -34,7 +35,7 @@ function cargar(root: string): Cache {
   }
 }
 
-const SYSTEM = `Acompañas al programador MIENTRAS escribe una función, línea por línea. Da UNA indicación corta (máximo 90 caracteres) para lo que toca AHORA donde está el cursor (◀):
+const SYSTEM = `Acompañas al programador MIENTRAS escribe una función, línea por línea. Da UNA indicación corta (MÁXIMO 70 caracteres) para lo que toca AHORA donde está el cursor (◀):
 - si la línea del cursor tiene un error o un caso sin cuidar, dilo ("ojo: si dest es '' esto falla");
 - si va bien, di el próximo paso concreto, siguiendo los pasos de su nota si los hay ("ahora busca el archivo en la bóveda");
 - en una línea vacía, qué escribir ahí (en palabras).
@@ -44,7 +45,7 @@ Nunca escribas código, expresiones ni la línea corregida (nada de "x === y"): 
  * `texto`: el contenido del editor (aunque no esté guardado); si no viene, se lee el disco.
  * `aPedido`: lo pediste tú (atajo): se saltea la espera entre sugerencias.
  */
-export async function rapida(root: string, rel: string, linea: number, o: { texto?: string; aPedido?: boolean } = {}): Promise<{ texto: string; motivo?: string; costoUsd: number }> {
+export async function rapida(root: string, rel: string, linea: number, o: { texto?: string; aPedido?: boolean } = {}): Promise<{ texto: string; completo?: string; motivo?: string; costoUsd: number }> {
   const z = makeZoner(root);
   if (!z.config.rapidas.activas && !o.aPedido) return { texto: "", motivo: "desactivadas en la configuración", costoUsd: 0 };
   const abs = path.join(root, rel);
@@ -64,7 +65,7 @@ export async function rapida(root: string, rel: string, linea: number, o: { text
   const c = cargar(root);
   if (clave in c.respuestas) {
     evitada("rapida", "misma función y línea que antes (caché)");
-    return { texto: c.respuestas[clave]!, motivo: "caché", costoUsd: 0 };
+    return { texto: corta(c.respuestas[clave]!), completo: c.respuestas[clave]!, motivo: "caché", costoUsd: 0 };
   }
   const ahora = Date.now();
   c.llamadas = c.llamadas.filter((t) => ahora - t < 3600_000);
@@ -91,6 +92,7 @@ export async function rapida(root: string, rel: string, linea: number, o: { text
         nota?.accion ? `Objetivo (de su nota): ${nota.accion}` : `Función ${f.nombre}: deduce el objetivo por el nombre y el código.`,
         // Los pasos que ya le dio la IA (pseudocódigo, plano…): la guía los sigue.
         pasosDeNota(nota) ? `Pasos que ya le diste:\n${pasosDeNota(nota)}` : "",
+        contextoComun(root, rel, { funcion: claveFuncion(funciones, f), corto: true }),
         `Función ${f.nombre} (◀ = línea del cursor):`,
         codigo.map((l, i) => `${l}${f.linea + i === linea ? "   ◀" : ""}`).join("\n"),
         extra,
@@ -101,24 +103,35 @@ export async function rapida(root: string, rel: string, linea: number, o: { text
   // Sin código en la guía (determinista): si trae expresiones o código, se pide de nuevo solo con palabras.
   const conCodigo = (t: string) => /`[^`]*[=(){};<>][^`]*`|[=!]==|=>|\b(return|const|let|var)\s+\w+\s*=/.test(t);
   let { data, costUsd } = await pedirGuia("");
-  let texto = (data.texto ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
-  if (conCodigo(texto)) {
-    const otra = await pedirGuia(`Tu indicación anterior traía código ("${texto}"). Dila SOLO con palabras, sin código ni expresiones.`);
+  let completo = (data.texto ?? "").replace(/\s+/g, " ").trim();
+  let texto = corta(completo);
+  // Se mira el texto COMPLETO (el hover y el panel lo muestran entero, no solo lo que cabe en la línea).
+  if (conCodigo(completo)) {
+    const otra = await pedirGuia(`Tu indicación anterior traía código ("${completo.slice(0, 200)}"). Dila SOLO con palabras, sin código ni expresiones.`);
     costUsd += otra.costUsd;
-    texto = (otra.data.texto ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
-    if (conCodigo(texto)) texto = "";
+    completo = (otra.data.texto ?? "").replace(/\s+/g, " ").trim();
+    texto = corta(completo);
+    if (conCodigo(completo)) texto = completo = "";
   }
-  c.respuestas[clave] = texto;
+  c.respuestas[clave] = completo;
   // La caché no crece sin fin: se quedan las últimas 300.
   const claves = Object.keys(c.respuestas);
   for (const k of claves.slice(0, Math.max(0, claves.length - 300))) delete c.respuestas[k];
   fs.mkdirSync(path.dirname(archivo(root)), { recursive: true });
   fs.writeFileSync(archivo(root), JSON.stringify(c));
-  return { texto, costoUsd: costUsd };
+  // `texto` cabe en la línea (cortado en una palabra); `completo` es para el hover y el panel.
+  return { texto, completo, costoUsd: costUsd };
 }
 
 /** Lo último que dijo la IA en la nota (pasos, pseudocódigo), recortado: el hilo de la guía. */
 function pasosDeNota(n: Nota | undefined): string {
   const m = n ? [...n.hilo].reverse().find((x) => x.quien === "ia" && !/^\*\*(🟢|🟡|🔴)/.test(x.texto)) : undefined;
   return m ? m.texto.replace(/\*\*/g, "").slice(0, 900) : "";
+}
+
+/** Máximo ~90 caracteres, cortado en una palabra (nunca a mitad), con "…" si se recortó. */
+export function corta(t: string, max = 90): string {
+  if (t.length <= max) return t;
+  const i = t.lastIndexOf(" ", max - 1);
+  return `${t.slice(0, i > 40 ? i : max - 1).replace(/[,;:.]$/, "")}…`;
 }

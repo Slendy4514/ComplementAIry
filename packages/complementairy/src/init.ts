@@ -25,7 +25,10 @@ interface HookEntry {
 type Settings = { hooks?: Record<string, HookEntry[]> } & Record<string, unknown>;
 
 const CLAUDE_MD_MARK = "<!-- cai:inicio -->";
+/** Versión de estas instrucciones: la extensión ofrece actualizarlas si el CLAUDE.md tiene una más vieja. */
+export const CLAUDE_MD_VERSION = "0.9";
 const CLAUDE_MD = `${CLAUDE_MD_MARK}
+<!-- cai:version ${CLAUDE_MD_VERSION} -->
 ## ComplementAIry: el humano programa, la IA acompaña
 
 El código lo escribe el humano. Tu rol es **acompañar**: dar ideas, estructura, piezas y revisión.
@@ -39,12 +42,15 @@ El código lo escribe el humano. Tu rol es **acompañar**: dar ideas, estructura
 - Modo DIRECTO por defecto: si pide un plan, cómo seguir, cómo estructurar un archivo o la arquitectura, dalo directo (plano, piezas, snippets), sin escalonar.
 - Escalera (pista → piezas → pasos en palabras → ejemplo) solo en zonas críticas o si pide aprender (\`!aprender\`). Una pregunta nueva empieza de cero; solo sube si pide más ayuda.
 - Escalones a pedido: \`!pista\`, \`!piezas\`, \`!pseudo\`, \`!ejemplo\`, \`!plano\`, \`!snippet\`, \`!arquitectura\`, \`!tests\`.
-- Tests: propón casos (qué probar y qué debería pasar según la intención, no según el código actual); se escriben apagados con \`cai tests <archivo> <función>\` en la carpeta de tests. Si el valor esperado depende del programador, pregúntale.
+- Tests: \`cai tests <archivo> <función> --probar\` propone casos (según la intención, no según el código actual) y los ejecuta; también funciona con código sin export (se carga aislado). Guardarlos como tests lo decide el programador (botón 🧪). Si el valor esperado depende de él, pregúntale.
 - Criterio: no te ancles a cómo está hecho; si hay un enfoque claramente mejor, propónlo con su porqué. Si te falta contexto, pregunta en vez de suponer.
 - Memoria del proyecto: \`.cai/conocimiento.md\` (módulos y respuestas del programador); visión general: \`cai panorama\`.
 - Autoría: lo marcado como \`heredado\` en \`.cai/config.json\` no lo escribió el programador (no se lo atribuyas; explícalo); \`terceros\` se ignora.
 - El humano te habla con \`@ia? <pregunta>\` y responde con \`@yo: <intento>\`. No borres ni cambies sus comentarios.
 - Desde el chat puedes correr los comandos \`cai\` (uno por llamada, sin encadenar): \`cai siguiente\`, \`cai responder …\`, \`cai verificar …\`, \`cai guia <archivo>\`, \`cai revisar <archivo>\`, \`cai tests <archivo> <función>\`, \`cai panorama\`, \`cai plano\`, \`cai arquitectura\`, \`cai conocer --sin-preguntas\`, \`cai gate\`, \`cai uso\`, \`cai doctor\`, \`cai origen\` (detalle en la skill \`cai\`). Los hace el humano: \`cai init\`, \`cai expandir\`, \`cai snippet nuevo\`, \`cai perfil set\`, \`cai memoria responder\`.
+- **Lo que ya se sabe** (úsalo antes de responder; no pienses de cero): \`cai indice\` (cada función con su estado, tests y quién llama a quién), \`cai decisiones\` (lo que el programador decidió: respétalo, no lo vuelvas a preguntar), \`cai hoy\` (qué cambió), \`cai deuda\` (lo pendiente), \`.cai/estructura.json\` y \`.cai/panorama.md\`.
+- **Preguntas generales del proyecto:** responde en el chat (puedes usar \`cai chat --texto "…"\`, que deja decisiones y tareas con botones en el panel). Si algo depende de una decisión del programador, pregúntale; **nunca decidas ni retractes por él** (\`cai decisiones decidir/retractar\` es suyo).
+- **"¿Está listo?"**: \`cai verificar <archivo> --funcion <nombre>\` (una función) o \`cai revisar <archivo> --completo\` (el archivo, con veredicto). Tests: \`cai tests <archivo> <función> --probar\`.
 - Otros comandos (instalar, git, mover archivos): sugiérelos y que los corra el humano.
 - Biblioteca de snippets: \`cai snippet lista\`. Zonas donde sí puedes escribir: \`zonas.delegadas\` en \`.cai/config.json\`.
 - Qué busca el proyecto y las reglas de estilo del programador (respétalas y señala cuando no se cumplen):
@@ -115,7 +121,14 @@ export function init(target: string): InitResult {
     changes.push("(no es repo git: cuando hagas `git init`, corré `git config core.hooksPath .githooks`)");
   }
 
-  // 5. CLAUDE.md
+  // 5. CLAUDE.md (solo la sección de ComplementAIry) y 6. lo que escribe el humano.
+  changes.push(...refrescarClaudeMd(target));
+  return initResto(target, changes);
+}
+
+/** Solo la sección ComplementAIry del CLAUDE.md (entre sus marcadores); el resto del archivo no se toca. */
+export function refrescarClaudeMd(target: string): string[] {
+  const changes: string[] = [];
   const md = path.join(target, "CLAUDE.md");
   const mdText = fs.existsSync(md) ? fs.readFileSync(md, "utf8") : "";
   if (!mdText.includes(CLAUDE_MD_MARK) && !mdText.includes("<!-- aicode:inicio -->")) {
@@ -129,6 +142,10 @@ export function init(target: string): InitResult {
       changes.push("CLAUDE.md: sección ComplementAIry actualizada");
     }
   }
+  return changes;
+}
+
+function initResto(target: string, changes: string[]): InitResult {
   // 6. Qué busca el proyecto y reglas, escritas por el humano.
   for (const [name, content] of Object.entries(TEMPLATES)) {
     const f = path.join(dataDir(target), name);

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { contextoComun } from "./contexto.js";
 import path from "node:path";
 import { parse } from "./comments.js";
 import { contextBlock, projectContext, CRITERIO } from "./context.js";
@@ -184,7 +185,7 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
   const estado = loadEstado(root);
   const threads = findThreads(src, parsed.comments);
   const result: GuiaResult = { respondidos: 0, resueltos: 0, costoUsd: 0, avisos: [] };
-  const ctx = contextBlock(projectContext(root, rel));
+  const ctx = contextoComun(root, rel);
   const libreria = paraLenguaje(biblioteca(root), lang.id);
   const bibliotecaTexto = libreria
     .map((sn) => `- ${sn.nombre}: ${sn.descripcion}${marcadores(sn).length ? ` (marcadores: ${marcadores(sn).join(", ")})` : ""}`)

@@ -17,6 +17,10 @@ En este proyecto el programador escribe el código y tú lo acompañas. Desde el
 | responder sus `@ia?` escritos en el archivo | `cai guia <archivo>` | en notas (por defecto) o en comentarios `@guia`, según `vista` |
 | plano de un archivo | `cai plano --archivo <archivo>` | resumen + nota por función + tareas por crear |
 | sobre el archivo entero ("¿cómo organizo este archivo?") | `cai responder <archivo> --archivo-entero --texto "..."` | nota arriba del archivo |
+| "¿cómo va el proyecto?", "¿qué falta?", preguntas generales | `cai chat --texto "…"` (o `cai indice`, `cai deuda`, `cai hoy`) | responde con estructura, índice, decisiones; deja decisiones y tareas con botones |
+| "¿está listo el archivo?" | `cai revisar <archivo> --completo` | revisión + "¿quedó lista?" de cada función + tests + veredicto 🟢/🟡/🔴 |
+| tests de una función | `cai tests <archivo> <función> --probar` | propone y EJECUTA casos (también sin export); guardarlos lo decide él |
+| decisiones tomadas | `cai decisiones` | respétalas; decidir/retractar es suyo |
 | preguntas que ComplementAIry le hizo | `cai memoria` | muéstraselas; **las responde él** (`cai memoria responder` es suyo, no lo corras tú) |
 | revisión ("¿está bien?", "busca bugs") | `cai revisar <archivo>` | verificaciones deterministas + revisores, como notas o comentarios |
 | tests de una función | `cai tests <archivo> <función>` | casos apagados en la carpeta de tests; él los activa con `[x]` |

@@ -121,6 +121,7 @@ export interface Nota {
   dados?: string[];
   explicacion?: { texto: string; coincide: boolean; comentario: string };
   testsProbados?: { funcion: string; fecha: string; archivo?: string };
+  impacto?: { funcion: string; archivo: string; fecha: string }[];
   ultimaPrueba?: { fecha: string; pasan: number; fallan: number; detalle: { descripcion: string; estado: string; obtenido?: string; esperado: string; llamada: string }[] };
   actualizada: string;
 }
@@ -260,6 +261,7 @@ export interface ConfigProyecto {
   acompanar?: { nivel?: string; revisar?: boolean; verificar?: boolean; esperaAutoguardado?: number; maxLlamadasHora?: number };
   ia?: { modelos?: { chico?: string; mediano?: string; grande?: string } };
   tests?: { carpeta?: string; crearConIa?: boolean; alGuardar?: boolean };
+  revisar?: { alSalir?: "nunca" | "ligera" | "completa"; minutosFuera?: number };
   [k: string]: unknown;
 }
 
@@ -317,3 +319,28 @@ export function modoEfectivo(cfg: ConfigProyecto, rel: string, funcion?: string)
   if (c) return { modo: c.m as Modo, origen: "carpeta" };
   return { modo: esModo(cfg.modo) ? cfg.modo : "programar", origen: "proyecto" };
 }
+
+// --- Decisiones (.cai/decisiones.json; decidir y retractar pasan por la CLI) --------------------------
+
+export interface Decision {
+  id: string;
+  pregunta: string;
+  opciones: { opcion: string; consecuencia: string }[];
+  recomendada?: string;
+  alcance: { archivo?: string; funcion?: string };
+  estado: "pendiente" | "vigente" | "retractada";
+  eleccion?: string;
+  decidida?: string;
+  anterior?: { eleccion: string; fecha: string }[];
+}
+
+export function leerDecisiones(cwd: string): Decision[] {
+  try {
+    return (JSON.parse(fs.readFileSync(path.join(dataDir(cwd), "decisiones.json"), "utf8")) as { decisiones: Decision[] }).decisiones ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** La última guía rápida que se mostró (para el panel "Nota" y el hover): texto completo. */
+export const guiaActual: { uri?: string; linea?: number; texto?: string } = {};

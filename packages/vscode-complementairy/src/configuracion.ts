@@ -53,6 +53,8 @@ function inicial(c: ConfigProyecto, enLinea: boolean): Record<string, string | b
     rapidas: c.rapidas?.activas !== false,
     rapidasEspera: String((c.rapidas?.esperaMs ?? 1200) / 1000),
     soloConNota: c.rapidas?.soloConNota === true,
+    alSalir: c.revisar?.alSalir ?? "nunca",
+    minutosFuera: String(c.revisar?.minutosFuera ?? 10),
     maxHoraRapidas: String(c.rapidas?.maxHora ?? 240),
     nivel: c.acompanar?.nivel ?? "normal",
     revisar: c.acompanar?.revisar !== false,
@@ -94,6 +96,8 @@ async function guardar(cwd: string, d: Record<string, string | boolean>): Promis
   poner(["rapidas", "activas"], "rapidas", d.rapidas === true);
   poner(["rapidas", "esperaMs"], "rapidasEspera", num("rapidasEspera", 0.6, 30) * 1000);
   poner(["rapidas", "soloConNota"], "soloConNota", d.soloConNota === true);
+  poner(["revisar", "alSalir"], "alSalir", ["ligera", "completa"].includes(texto("alSalir")) ? texto("alSalir") : "nunca");
+  poner(["revisar", "minutosFuera"], "minutosFuera", num("minutosFuera", 1, 240));
   poner(["rapidas", "maxHora"], "maxHoraRapidas", num("maxHoraRapidas", 0, 2000));
   poner(["acompanar", "nivel"], "nivel", texto("nivel") || "normal");
   poner(["acompanar", "revisar"], "revisar", d.revisar === true);
@@ -152,6 +156,8 @@ ${fila("Nivel", sel("nivel", a.nivel ?? "normal", [["silencioso", "Silencioso: s
 ${fila("Comentar lo que terminas", chk("revisar", a.revisar !== false), "Al terminar una función, una revisión corta en su nota.")}
 ${fila("\"¿Quedó lista?\" al guardar", chk("verificar", a.verificar !== false), "Verifica las funciones con nota que cambiaron (primero sin IA, después el modelo chico).")}
 ${fila("Con autoguardado, esperar (s)", numero("espera", a.esperaAutoguardado ?? 45), "Con Ctrl+S actúa enseguida; con autoguardado espera a que dejes de editar este tiempo.")}
+${fila("Revisar al salir de un archivo", sel("alSalir", c.revisar?.alSalir ?? "nunca", [["nunca", "Nunca (a solicitud, con 🔎 Revisar)"], ["ligera", "Ligera: ¿quedó lista? de lo que cambió (modelo chico)"], ["completa", "Completa: revisión + cada función + tests + veredicto"]]), "Si cambiaste un archivo y no vuelves a él en el tiempo de abajo, se revisa una vez en segundo plano.")}
+${fila("Minutos fuera antes de revisar", numero("minutosFuera", c.revisar?.minutosFuera ?? 10), "")}
 ${fila("Máximo de llamadas por hora", numero("maxHora", a.maxLlamadasHora ?? 20), "Límite para el acompañante automático (lo que pides tú no cuenta).")}
 <h2>Modelos (todos a través de tu Claude Code)</h2>
 <datalist id="modelos">${MODELOS.map((x) => `<option value="${x}">`).join("")}</datalist>

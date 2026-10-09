@@ -313,6 +313,16 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 
 **Límite conocido:** en modo comentarios, `guia` y el acompañante siguen escribiendo en disco (solo `revisar` se aplica sobre el buffer desde VSCode). Con autoguardado conviene el modo notas.
 
+## Todo se conoce (v0.9)
+- **Índice vivo** (`indice.ts` → `.cai/indice.json`, sin IA): funciones con firma, `llama`/`llamadaPor`, estado de la nota, última prueba, resumen y huella. Se actualiza por archivo al guardar, solo si cambió la huella.
+- **Contexto común** (`contexto.ts → contextoComun`): proyecto, reglas, memoria, **decisiones vigentes**, estructura, panorama del archivo, funciones del archivo y vecinas (llama / la llaman). Tope de ~9000 caracteres; versión corta para la guía gris. Lo usan responder, verificar, revisar, tests, plano de archivo, acompañante y tutor.
+- **Decisiones** (`decisiones.ts` → `.cai/decisiones.json`): pendiente → vigente → retractada, con historial. Se deduplican por similitud de la pregunta. Decidir y retractar es **solo humano** (el hook revierte si lo intenta el chat de Claude Code).
+- **Impacto** (`impacto.ts`, sin IA): si cambia la huella de una función que otras llaman, sus notas reciben `impacto` (se crea la nota si no existía) y se vuelven a correr sus casos. Verificar la función limpia el aviso.
+- **Revisión completa** (`revisionCompleta.ts`, `cai revisar --completo`): revisión a ciegas + "¿quedó lista?" de cada función (reutiliza el veredicto y el `planIndependiente` de las que no cambiaron) + casos de test → veredicto del archivo (lista / casi / falta) en `.cai/cache/veredictos.json` y en la nota del archivo.
+- **Chat del proyecto** (`chat.ts`, `cai chat`): modelo mediano con herramientas **solo de lectura** y el contexto común completo; responde `{texto, decisiones, tareas}`; historial en `.cai/chat.json`.
+- **Retomar y cerrar** (`resumenSesion.ts`): `hoy` (desde la última visita, por huellas), `deuda` y `sesion` (medido sin IA; resumen y commit sugerido con el modelo chico).
+- **Tests sin export** (`sandbox.ts`): el archivo se carga **tal cual** en `node:vm` en un proceso aparte. tree-sitter detecta declaraciones de primer nivel y globales del entorno; los globales son **dobles** (Proxy) que registran lo usado o devuelven valores propuestos **como datos JSON**. La expresión de prueba se valida (llamada simple sobre algo declarado, argumentos literales). Los tests guardados usan el ayudante `_cai/aislado.mjs`. Nada es específico de una aplicación.
+
 ## Estado
 | Fase | Contenido | Estado |
 |---|---|---|
@@ -327,6 +337,7 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 | 9 (v0.6) | Tres niveles (proyecto, archivo, función), estructura y panorama como tareas, preguntas desde el panel | ✅ |
 | 10 (v0.7) | Una nota por función, panel Nota, "¿quedó lista?", sugerencias rápidas, configuración, autoguardado | ✅ |
 | 11 (v0.8) | Modos programar/aprender por función, proceso abierto (~1 s), sin sesgo (a ciegas + otra mirada), qué hizo la IA, snippets con vista previa | ✅ |
+| 12 (v0.9) | Índice vivo, contexto común, decisiones con botones (retractables), impacto, chat del proyecto, revisión con veredicto y al salir, tests sin export (sandbox), hoy/deuda/sesión | ✅ |
 
 **Honcho:** el perfil y la memoria hoy son archivos locales legibles, que es lo que pide el principio de transparencia. Conectar Honcho, un servicio externo de modelado de usuario, requiere una cuenta y una API key tuyas, y envía datos de tu forma de programar a un tercero. Queda para cuando lo decidas.
 

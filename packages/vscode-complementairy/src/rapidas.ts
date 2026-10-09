@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import * as vscode from "vscode";
-import { cli, correr, leerConfig, output, root, silenciado, vista } from "./comun";
+import { cli, correr, guiaActual, leerConfig, output, root, silenciado, vista } from "./comun";
 import type { NotasView } from "./notasView";
 
 /**
@@ -132,6 +132,11 @@ export class Rapidas implements vscode.Disposable {
         const ed = vscode.window.activeTextEditor;
         if (ed && ed.document === doc) this.programar(ed);
       }),
+      // Hover sobre la línea con guía: el texto completo (en el editor puede verse recortado).
+      vscode.languages.registerHoverProvider({ scheme: "file" }, {
+        provideHover: (doc, pos) =>
+          guiaActual.texto && guiaActual.uri === doc.uri.toString() && guiaActual.linea === pos.line ? new vscode.Hover(new vscode.MarkdownString(`💡 **Guía:** ${guiaActual.texto.replace(/[<>]/g, "")}`)) : undefined,
+      }),
       // A pedido (Ctrl+Alt+Espacio): siempre dice algo, la pista o por qué no hay.
       vscode.commands.registerCommand("cai.sugerenciaAhora", async () => {
         const ed = vscode.window.activeTextEditor;
@@ -140,7 +145,7 @@ export class Rapidas implements vscode.Disposable {
         this.limpiar(ed);
         vscode.window.setStatusBarMessage("$(sync~spin) ComplementAIry: pensando una sugerencia…", 3000);
         const r = await this.consultar(ed, c, true);
-        if (r.texto) this.mostrar(ed, ed.selection.active.line, r.texto);
+        if (r.texto) this.mostrar(ed, ed.selection.active.line, r.texto, false, r.completo);
         else vscode.window.setStatusBarMessage(`ComplementAIry: sin sugerencia aquí${r.motivo ? ` (${r.motivo})` : " (la línea va bien)"}`, 6000);
       }),
     );
@@ -151,7 +156,8 @@ export class Rapidas implements vscode.Disposable {
     this.vista = undefined;
   }
 
-  private mostrar(ed: vscode.TextEditor, linea: number, texto: string, vieja = false): void {
+  private mostrar(ed: vscode.TextEditor, linea: number, texto: string, vieja = false, completo?: string): void {
+    if (!vieja) Object.assign(guiaActual, { uri: ed.document.uri.toString(), linea, texto: completo ?? texto });
     const fin = ed.document.lineAt(linea).range.end;
     // Mientras escribes, la guía anterior queda (más tenue) hasta que llega la nueva.
     ed.setDecorations(this.deco, [{ range: new vscode.Range(fin, fin), renderOptions: { after: { contentText: `💡 ${texto}`, ...(vieja ? { color: new vscode.ThemeColor("disabledForeground") } : {}) } } }]);
@@ -178,7 +184,7 @@ export class Rapidas implements vscode.Disposable {
    * Pide la sugerencia. Con el proceso abierto se manda el TEXTO DEL EDITOR (sirve aunque no esté
    * guardado); la llamada de respaldo lee el disco, así que solo se usa con el archivo guardado.
    */
-  private async consultar(ed: vscode.TextEditor, cwd: string, aPedido: boolean): Promise<{ texto?: string; motivo?: string }> {
+  private async consultar(ed: vscode.TextEditor, cwd: string, aPedido: boolean): Promise<{ texto?: string; completo?: string; motivo?: string }> {
     const doc = ed.document;
     const linea = ed.selection.active.line + 1;
     const respaldo = async () =>
@@ -187,7 +193,7 @@ export class Rapidas implements vscode.Disposable {
         : (JSON.parse(await correr(["rapida", doc.uri.fsPath, "--linea", String(linea), "--json"], cwd, { silencioso: true })) as { texto?: string; motivo?: string });
     const s = this.servidor(cwd);
     if (!s) return respaldo();
-    return s.pedir<{ texto?: string; motivo?: string }>({ tipo: "rapida", archivo: doc.uri.fsPath, linea, texto: doc.getText(), ...(aPedido ? { aPedido: true } : {}) }).catch(respaldo);
+    return s.pedir<{ texto?: string; completo?: string; motivo?: string }>({ tipo: "rapida", archivo: doc.uri.fsPath, linea, texto: doc.getText(), ...(aPedido ? { aPedido: true } : {}) }).catch(respaldo);
   }
 
   private async pedir(ed: vscode.TextEditor, cwd: string, turno: number): Promise<void> {
@@ -199,7 +205,7 @@ export class Rapidas implements vscode.Disposable {
       const r = await this.consultar(ed, cwd, false);
       // Si mientras tanto escribiste o te moviste, la sugerencia ya no corresponde.
       if (turno !== this.turno || doc.version !== version || ed.selection.active.line !== linea || !r.texto) return;
-      this.mostrar(ed, linea, r.texto);
+      this.mostrar(ed, linea, r.texto, false, r.completo);
     } catch {
       /* sin sugerencia: no molesta */
     }

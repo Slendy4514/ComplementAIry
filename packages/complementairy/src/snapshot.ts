@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { dataDir, type Zoner } from "./config.js";
+import { decisionesHonestas } from "./decisiones.js";
 import { listFiles } from "./files.js";
 import { parseMemoria, sinSugerencia, unaLinea } from "./memoria.js";
 import { snippetPolicy } from "./snippets.js";
@@ -53,33 +54,46 @@ export function generadosPor(comando: string): ((rel: string, antes: Buffer | nu
     const movibles = new Set(a.abiertas.filter((x) => x.r).map((x) => `${sinSugerencia(x.p)} → ${unaLinea(x.r)}`));
     return d.respondidas.slice(a.respondidas.length).every((r) => moverR && movibles.has(r));
   };
-  const notasYTareas = (rel: string) => /^\.(cai|aicode)\/(notas\/[^/]+\.json|tareas\.json)$/.test(rel);
+  // Notas, tareas, índice y decisiones PROPUESTAS (decidir o retractar es solo humano: comando aparte).
+  const notasYTareas = (rel: string, antes: Buffer | null, despues: Buffer | null) =>
+    /^\.(cai|aicode)\/(notas\/[^/]+\.json|tareas\.json|indice\.json)$/.test(rel) || (/^\.(cai|aicode)\/decisiones\.json$/.test(rel) && decisionesHonestas(antes, despues));
   switch (m[1]) {
     case "guia":
     case "revisar":
     case "notas":
       // "anotar" escribe mensajes a tu nombre: solo desde la extensión, no desde el chat.
-      return /\bnotas\s+anotar\b/.test(plano) ? null : (rel) => notasYTareas(rel);
+      return /\bnotas\s+anotar\b/.test(plano) ? null : notasYTareas;
     case "responder":
     case "predecir":
     case "check":
     case "verificar":
     case "siguiente":
-      return (rel) => notasYTareas(rel);
+      return notasYTareas;
+    case "hoy":
+    case "deuda":
+    case "sesion":
+      return () => false; // solo leen (el marcador de visita vive en .cai/cache)
+    case "indice":
+      return (rel) => /^\.(cai|aicode)\/indice\.json$/.test(rel);
+    case "chat":
+      return (rel, antes, despues) => (datos(rel) && /\/chat\.json$/.test(rel)) || notasYTareas(rel, antes, despues);
+    case "decisiones":
+      // Consultar sí; decidir y retractar los decide el humano (desde el panel o la terminal).
+      return /\bdecisiones\s+(decidir|retractar)\b/.test(plano) ? null : () => false;
     case "tareas":
       // Descartar una tarea es definitivo (no vuelve a proponerse): eso lo decide el humano.
-      return /\btareas\s+descartar\b/.test(plano) ? null : (rel) => notasYTareas(rel);
+      return /\btareas\s+descartar\b/.test(plano) ? null : notasYTareas;
     case "tests":
-      return (rel) => notasYTareas(rel); // el archivo de tests nuevo/ampliado ya pasa por "solo comentarios"
+      return notasYTareas; // el archivo de tests nuevo/ampliado ya pasa por "solo comentarios"
     case "panorama":
-      return (rel, antes, despues) => (datos(rel) && (/\/panorama\.md$/.test(rel) || memoriaHonesta(rel, antes, despues, true))) || notasYTareas(rel);
+      return (rel, antes, despues) => (datos(rel) && (/\/panorama\.md$/.test(rel) || memoriaHonesta(rel, antes, despues, true))) || notasYTareas(rel, antes, despues);
     case "conocer":
       // proyecto.md / reglas.md solo si estaban vacíos (si no, el comando escribe *.borrador.md).
       return (rel, antes) => datos(rel) && (/\/(conocimiento|proyecto\.borrador|reglas\.borrador)\.md$/.test(rel) || (/\/(proyecto|reglas)\.md$/.test(rel) && plantilla(antes)));
     case "plano":
     case "acompanar": // el acompañante propone la estructura del proyecto si no hay una
       return (rel, antes, despues) =>
-        rel === "docs/ESTRUCTURA.md" || (datos(rel) && (/\/estructura\.json$/.test(rel) || memoriaHonesta(rel, antes, despues, false))) || notasYTareas(rel);
+        rel === "docs/ESTRUCTURA.md" || (datos(rel) && (/\/estructura\.json$/.test(rel) || memoriaHonesta(rel, antes, despues, false))) || notasYTareas(rel, antes, despues);
     case "arquitectura":
     case "adr":
       return (rel) => /^docs\/adr\/[^/]+\.md$/.test(rel);

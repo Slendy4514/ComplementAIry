@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import { contextoComun } from "./contexto.js";
+import { proponerDecisiones, SCHEMA_DECISIONES, type Opcion } from "./decisiones.js";
 import path from "node:path";
 import { biblioteca, paraLenguaje, parseLlamada } from "./biblioteca.js";
 import { parse } from "./comments.js";
@@ -48,7 +50,7 @@ export interface PedidoNota {
 const schema = () => ({
   type: "object",
   additionalProperties: false,
-  required: ["titulo", "que_hacer", "respuestas", "nivel_usado"],
+  required: ["titulo", "que_hacer", "respuestas", "nivel_usado", "decisiones"],
   properties: {
     titulo: { type: "string", description: "Título de la nota, máximo 60 caracteres." },
     que_hacer: { type: "string", description: "El próximo paso concreto para el programador, en una oración." },
@@ -69,6 +71,7 @@ const schema = () => ({
       },
     },
     nivel_usado: { type: "integer", minimum: 1, maximum: 4 },
+    decisiones: SCHEMA_DECISIONES,
   },
 });
 
@@ -146,13 +149,13 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
         const n = (e: string) => r.resultados.filter((x) => x.estado === e).length;
         const filas = r.resultados.map(
           (c) =>
-            `- ${icono[c.estado]} ${c.descripcion}: \`${c.llamada}\` → esperado \`${c.esperado || "error"}\`${c.obtenido ? `, obtuvo \`${c.obtenido.slice(0, 80)}\`` : ""}${c.duda ? `\n  ❓ ${c.duda}` : ""}`,
+            `- ${icono[c.estado]} ${c.descripcion}: \`${c.llamada}\` → esperado \`${c.esperado || "error"}\`${c.obtenido ? `, obtuvo \`${c.obtenido.slice(0, 80)}\`` : ""}${c.dobles?.length ? ` · con dobles del entorno: ${c.dobles.slice(0, 3).map((d) => `\`${d}\``).join(", ")}` : ""}${c.duda ? `\n  ❓ ${c.duda}` : ""}`,
         );
         nota.hilo.push(
           mensaje(
             "ia",
             r.resultados.length
-              ? `**🧪 Tests** · Probé ${r.resultados.length} caso(s) contra tu código: ${n("pasa")} pasan, ${n("falla")} fallan${n("decidir") ? `, ${n("decidir")} esperan que decidas el resultado` : ""}${n("no-ejecutable") ? `, ${n("no-ejecutable")} no se pudieron ejecutar` : ""}.\n${filas.join("\n")}`
+              ? `**🧪 Tests** · Probé ${r.resultados.length} caso(s) contra tu código${r.resultados.some((x) => x.aislado) ? " (cargado aislado, sin export: lo que usa del entorno se reemplazó por dobles, así que no es la app real)" : ""}: ${n("pasa")} pasan, ${n("falla")} fallan${n("decidir") ? `, ${n("decidir")} esperan que decidas el resultado` : ""}${n("no-ejecutable") ? `, ${n("no-ejecutable")} no se pudieron ejecutar` : ""}.\n${filas.join("\n")}`
               : `**🧪 Tests** · No pude proponer casos válidos (${r.descartados.join("; ") || "sin funciones exportadas"}).`,
             { kind: "tests", costo: r.costoUsd },
           ),
@@ -213,7 +216,7 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
         p.pedido === "explica" ? "El programador pidió que le expliques esta parte: qué hace, por qué y qué cuidar. Sin reescribirla." : "",
         entero ? "La pregunta es sobre el ARCHIVO COMPLETO (su organización, qué funciones tiene o le faltan, cómo encaja en el proyecto), no sobre una función puntual." : "",
         fn ? `Esta nota es SOLO de la función \`${fn.nombre}\`. Habla únicamente de ella: no comentes ni sugieras cambios en otras funciones (cada una tiene su propia nota).` : "",
-        contextBlock(projectContext(root, rel)),
+        contextoComun(root, rel, { funcion: nota.ancla.funcion }),
         libTexto && !sinSnippets ? `BIBLIOTECA DE SNIPPETS (${lang.id}):\n${libTexto}` : "",
         sinSnippets ? "MODO APRENDER: todavía no sugieras snippets; primero que lo intente." : "",
         "Formato: listas con cada ítem en su propia línea; nada de muros de texto. Si sugieres un snippet, en \"codigo\" copia la línea después de la cual va.",
@@ -231,7 +234,7 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
       let usado: string | undefined;
       // El texto se ve en el panel mientras se escribe (y el archivo se borra al terminar).
       const enVivo = path.join(dataDir(root), "cache", "en-vivo", `${encodeURIComponent(rel)}#${nota.id}.txt`);
-      type Respuesta = { titulo: string; que_hacer: string; respuestas: (Reply & { codigo: string })[]; nivel_usado: number };
+      type Respuesta = { titulo: string; que_hacer: string; respuestas: (Reply & { codigo: string })[]; nivel_usado: number; decisiones?: { pregunta: string; opciones: Opcion[]; recomendada: string }[] };
       let respuesta: Respuesta | null = null;
       let validas: (Reply & { codigo: string })[] = [];
       try {
@@ -280,6 +283,8 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
       nota.snippets.push(...snippets);
       nota.nivel = Math.max(prev, nivel);
       if (respuesta?.que_hacer) nota.accion = respuesta.que_hacer;
+      // Lo que debe decidir el programador queda como decisión con botones (sin repetir las ya tomadas).
+      if (respuesta?.decisiones?.length) proponerDecisiones(root, respuesta.decisiones, { archivo: rel, ...(nota.ancla.funcion ? { funcion: nota.ancla.funcion } : {}) }, "responder");
       // Las notas de función se llaman como la función; el resto toma el título de la IA.
       if (respuesta?.titulo && !nota.ancla.funcion && nota.alcance !== "archivo" && nota.hilo.filter((m) => m.quien === "ia").length === 1) nota.titulo = respuesta.titulo.slice(0, 60);
     }

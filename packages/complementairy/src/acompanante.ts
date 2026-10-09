@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import { contextoComun } from "./contexto.js";
+import { actualizarConImpacto } from "./impacto.js";
 import picomatch from "picomatch";
 import path from "node:path";
 import { aplicarExpansion, biblioteca, paraLenguaje, parseLlamada, planExpansion } from "./biblioteca.js";
@@ -19,7 +21,7 @@ import { dejarPendiente, ocupar, tomarPendiente } from "./ocupado.js";
 import { planoArchivo } from "./planoArchivo.js";
 import { findThreads, nextThreadId, regionesTop, regionOf } from "./threads.js";
 import { iaOpts, marcadores, runGuia, TIPOS, type Tamano } from "./tutor.js";
-import { hijos, type SyntaxNode } from "./parser.js";
+import { syntaxErrors } from "./sintaxis.js";
 
 /**
  * El acompañante: corre cada vez que guardás. Las decisiones de CUÁNDO intervenir son
@@ -27,7 +29,7 @@ import { hijos, type SyntaxNode } from "./parser.js";
  */
 
 export interface Accion {
-  tipo: "expandido" | "respondido" | "plano-proyecto" | "plano-archivo" | "ayuda" | "resuelto" | "comentario" | "diseno" | "sin-tests" | "verificado";
+  tipo: "expandido" | "respondido" | "plano-proyecto" | "plano-archivo" | "ayuda" | "resuelto" | "comentario" | "diseno" | "sin-tests" | "verificado" | "impacto";
   detalle: string;
 }
 
@@ -97,18 +99,10 @@ const SYSTEM = `Eres el acompañante de ComplementAIry: observas cómo programa 
 ${CRITERIO}`;
 
 /** Errores de sintaxis (nodos ERROR / faltantes) por línea, sin herramientas externas. */
-export function syntaxErrors(root: SyntaxNode | null): { line: number; msg: string }[] {
-  const out: { line: number; msg: string }[] = [];
-  if (!root?.hasError) return out;
-  const walk = (n: SyntaxNode) => {
-    if (n.type === "ERROR" || n.isMissing) out.push({ line: n.startPosition.row + 1, msg: n.isMissing ? `falta ${n.type}` : "error de sintaxis" });
-    else if (n.hasError) for (const c of hijos(n)) walk(c);
-  };
-  walk(root);
-  return out;
-}
 
 const lineOffset = (src: string, line: number) => src.split("\n").slice(0, line - 1).join("\n").length + (line > 1 ? 1 : 0);
+
+export { syntaxErrors };
 
 export async function acompanar(root: string, rel: string, log: (s: string) => void = () => {}): Promise<{ acciones: Accion[]; costoUsd: number; pendiente?: boolean }> {
   // Un pedido a la vez por archivo: si ya hay uno en curso, queda UNO en espera (no se acumulan).
@@ -140,6 +134,8 @@ async function acompanarUnaVez(root: string, rel: string, log: (s: string) => vo
   const origen = origenDe(z.config, rel);
   if (origen === "terceros") return res; // librerías copiadas / código generado: no se acompaña
   const propio = origen === "propio";
+  // Índice vivo (sin IA) y avisos de impacto: si cambió una función que otras usan, se avisa en sus notas.
+  for (const i of await actualizarConImpacto(root, rel).catch(() => [])) res.acciones.push({ tipo: "impacto", detalle: `${i.funcion} cambió: la usan ${i.afectadas.map((a) => a.clave.replace(/#\d+$/, "")).join(", ")}` });
   const base = z.config.acompanar;
   const porCarpeta = Object.entries(base.porCarpeta ?? {}).find(([g]) => picomatch(g, { dot: true })(rel));
   const cfg = { ...base, nivel: porCarpeta ? porCarpeta[1] : !propio && !z.config.autoria.acompanarHeredado ? ("silencioso" as const) : base.nivel };
@@ -194,7 +190,7 @@ async function acompanarUnaVez(root: string, rel: string, log: (s: string) => vo
   const libTexto = libreria.map((s) => `- ${s.nombre}: ${s.descripcion}${marcadores(s).length ? ` (marcadores: ${marcadores(s).join(", ")})` : ""}`).join("\n");
   const nivelProg = nivelDe(puntaje(loadPerfil(), lang.id));
   const critical = z.isCritical(abs);
-  const ctx = [notaOrigen(origen), contextBlock(projectContext(root, rel))].filter(Boolean).join("\n\n");
+  const ctx = [notaOrigen(origen), contextoComun(root, rel)].filter(Boolean).join("\n\n");
   const estructura = fs.existsSync(path.join(root, "docs", "ESTRUCTURA.md")) ? fs.readFileSync(path.join(root, "docs", "ESTRUCTURA.md"), "utf8").slice(0, 6000) : "";
   const userIds = fileIdentifiers(parsed.root, src);
 

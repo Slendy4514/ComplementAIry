@@ -5,6 +5,9 @@ import { Lentes } from "./codelens";
 import { cli, correr, envVista, guardadoPropio, guardar, leerConfig, mostrarError, output, root, silenciado, vista } from "./comun";
 import { registrarConfiguracion } from "./configuracion";
 import { NotaPanel } from "./notaView";
+import { ChatView } from "./chatView";
+import fs from "node:fs";
+import path from "node:path";
 import { Rapidas } from "./rapidas";
 import { BarraModo, Estado } from "./estado";
 import { NotasView } from "./notasView";
@@ -93,6 +96,77 @@ export function activate(ctx: vscode.ExtensionContext): void {
   barra.registrar(ctx);
   ctx.subscriptions.push(panel.onPasos((p) => barra.siguiente(p[0])));
   new NotaPanel(notas).registrar(ctx);
+  new ChatView().registrar(ctx);
+  void avisarInstruccionesViejas();
+
+  /**
+   * Revisión en segundo plano (no bloquea nada): "completa" = revisar --completo; "ligera" = "¿quedó
+   * lista?" de las funciones con nota que cambiaron (modelo chico). La barra de estado muestra la cola.
+   */
+  function revisarEnFondo(doc: vscode.TextDocument, tipo: "completa" | "ligera"): void {
+    const cwd = root(doc);
+    if (!cwd) return;
+    void guardar(doc).then(() => {
+      const nombre = path.basename(doc.uri.fsPath);
+      vscode.window.setStatusBarMessage(`ComplementAIry: revisando ${nombre} en segundo plano (puedes seguir trabajando)`, 4000);
+      const args = tipo === "completa" ? ["revisar", doc.uri.fsPath, "--completo", "--json"] : ["verificar", doc.uri.fsPath, "--chico", "--json"];
+      correr(args, cwd)
+        .then((out) => {
+          if (tipo !== "completa") return void vscode.window.setStatusBarMessage(`ComplementAIry: revisé ${nombre} (ligera)`, 6000);
+          const r = JSON.parse(out) as { veredicto: { estado: string; listas: number; total: number; testsFallan: number } };
+          const v = r.veredicto;
+          const icono = { lista: "🟢", casi: "🟡", falta: "🔴" }[v.estado] ?? "";
+          void vscode.window.showInformationMessage(`${icono} ${nombre}: ${v.listas} de ${v.total} funciones listas${v.testsFallan ? ` · ${v.testsFallan} test(s) fallan` : ""}`, "Ver").then((x) => x && vscode.window.showTextDocument(doc));
+        })
+        .catch(mostrarError);
+    });
+  }
+
+  // Revisión al salir de un archivo (por defecto: nunca, a solicitud). Si cambiaste un archivo y no
+  // vuelves en `revisar.minutosFuera` minutos, se revisa una vez (ligera o completa, según la configuración).
+  const cambiadosSinRevisar = new Set<string>();
+  const temporizadoresSalida = new Map<string, NodeJS.Timeout>();
+  ctx.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((d) => d.uri.scheme === "file" && cambiadosSinRevisar.add(d.uri.toString())),
+    vscode.window.onDidChangeActiveTextEditor((ed) => {
+      if (!ed) return;
+      const actual = ed.document.uri.toString();
+      clearTimeout(temporizadoresSalida.get(actual)); // volviste: ya no hace falta
+      temporizadoresSalida.delete(actual);
+      for (const k of cambiadosSinRevisar) {
+        if (k === actual || temporizadoresSalida.has(k)) continue;
+        const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === k);
+        const cwd = doc && root(doc);
+        const cfg = cwd ? leerConfig(cwd).revisar : undefined;
+        if (!doc || !cfg?.alSalir || cfg.alSalir === "nunca") continue;
+        temporizadoresSalida.set(
+          k,
+          setTimeout(() => {
+            temporizadoresSalida.delete(k);
+            cambiadosSinRevisar.delete(k);
+            if (!doc.isClosed) revisarEnFondo(doc, cfg.alSalir === "completa" ? "completa" : "ligera");
+          }, Math.max(1, cfg.minutosFuera ?? 10) * 60_000),
+        );
+      }
+    }),
+    { dispose: () => temporizadoresSalida.forEach((t) => clearTimeout(t)) },
+  );
+
+  /** Si el CLAUDE.md del proyecto tiene instrucciones de una versión anterior, ofrece actualizarlas. */
+  async function avisarInstruccionesViejas(): Promise<void> {
+    const cwd = root(vscode.window.activeTextEditor?.document);
+    if (!cwd) return;
+    const md = path.join(cwd, "CLAUDE.md");
+    if (!fs.existsSync(md)) return;
+    const txt = fs.readFileSync(md, "utf8");
+    if (!/<!-- (cai|aicode):inicio -->/.test(txt) || /<!-- cai:version 0\.9 -->/.test(txt)) return;
+    const op = await vscode.window.showInformationMessage(
+      "ComplementAIry: las instrucciones de Claude Code de este proyecto (CLAUDE.md) son de una versión anterior; pueden pedirle comentarios @guia que el modo notas bloquea. ¿Actualizarlas? (solo la sección de ComplementAIry)",
+      "Actualizar",
+      "Ahora no",
+    );
+    if (op === "Actualizar") await correr(["init", cwd, "--solo-claude"], cwd).then((o) => vscode.window.setStatusBarMessage(`ComplementAIry: ${o.split("\n").pop()}`, 6000), mostrarError);
+  }
   new Rapidas(notas).registrar(ctx);
   registrarConfiguracion(ctx);
 
@@ -107,8 +181,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const ed = vscode.window.activeTextEditor;
     const cwd = root(ed?.document);
     if (!ed || !cwd) return;
-    // Revisión pedida por ti: con "otra mirada" (un plan pensado sin ver tu código, contra el sesgo de lo ya hecho).
-    if (vista(cwd) === "notas") return onFile("revisar", "revisando", ["--otra-mirada"]);
+    // Revisión pedida por ti, COMPLETA y en segundo plano (puedes irte a otro archivo o revisar otro a la vez):
+    // revisores a ciegas + "¿quedó lista?" de cada función (con otra mirada) + tests + veredicto del archivo.
+    if (vista(cwd) === "notas") return revisarEnFondo(ed.document, "completa");
     // Modo comentarios: los comentarios se aplican sobre el texto del editor (no en disco).
     try {
       const msg = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: revisando…" }, () => revisarConEdiciones(ed, cwd));
@@ -286,10 +361,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
             diseno: "te dejé una sugerencia de diseño",
             "sin-tests": "esta función no tiene tests (botón 🧪 Tests)",
             resuelto: "¡resuelto!",
+            impacto: "⚠ cambió una función que otras usan (mira sus notas)",
           };
           const ESTADOS: Record<string, string> = { lista: "🟢 lista", casi: "🟡 casi lista", falta: "🔴 falta" };
           const txt = r.acciones
-            .map((a) => (a.tipo === "verificado" ? a.detalle.replace(/: (lista|casi|falta)$/, (_, e: string) => ` ${ESTADOS[e]}`) : (msgs[a.tipo] ?? a.tipo)))
+            .map((a) => (a.tipo === "impacto" ? `⚠ ${a.detalle}` : a.tipo === "verificado" ? a.detalle.replace(/: (lista|casi|falta)$/, (_, e: string) => ` ${ESTADOS[e]}`) : (msgs[a.tipo] ?? a.tipo)))
             .join(" · ");
           if (txt) vscode.window.setStatusBarMessage(`ComplementAIry: ${txt}`, 8000);
           if (r.acciones.some((a) => a.tipo === "plano-proyecto"))

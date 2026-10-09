@@ -1,3 +1,4 @@
+import { programaAislado, validarExpresionAislada, type Analisis } from "./sandbox.js";
 import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -8,6 +9,7 @@ import { langFor } from "./lang.js";
 import { ask } from "./llm.js";
 import { registrar } from "./profile.js";
 import { eolOf, renderReply } from "./render.js";
+import { sonLiterales } from "./literales.js";
 import { cargarNotas, guardarNotas, mensaje, nuevaNota } from "./notas.js";
 import { guiaId, nextThreadId } from "./threads.js";
 import { iaOpts } from "./tutor.js";
@@ -36,14 +38,15 @@ const save = (root: string, d: Record<string, Prediccion>) => {
   fs.writeFileSync(file(root), JSON.stringify(d, null, 2));
 };
 
-const FORBIDDEN = /\b(require|import|process|globalThis|global|window|eval|Function|fetch|fs|child_process|exec|spawn|open|__import__|os|sys|subprocess|while|for|lambda|new)\b|=>|;|`|\$\{|\bawait\b/;
-
-/** La expresión debe ser una sola llamada a una función exportada del archivo, con argumentos literales. */
-export function validarExpresion(expr: string, exported: Set<string>): string | null {
+/**
+ * La expresión debe ser una sola llamada a una función exportada del archivo, con argumentos literales
+ * (lista blanca: ver `sonLiterales`; una lista negra de palabras se puede esquivar).
+ */
+export function validarExpresion(expr: string, exported: Set<string>, langId = "typescript"): string | null {
   const m = /^([A-Za-z_$][\w$]*)\((.*)\)$/s.exec(expr.trim());
   if (!m) return "no es una llamada simple a función";
   if (!exported.has(m[1]!)) return `${m[1]} no es una función exportada del archivo`;
-  if (FORBIDDEN.test(m[2]!)) return "los argumentos deben ser valores literales";
+  if (!sonLiterales(m[2]!, { conNombre: langId === "python" })) return "los argumentos deben ser valores literales (números, textos, true/false/null, listas u objetos de esos)";
   return null;
 }
 
@@ -107,7 +110,7 @@ export async function runPredecir(root: string, rel: string): Promise<{ creadas:
   let out = src;
   let creadas = 0;
   for (const q of data.preguntas) {
-    const err = validarExpresion(q.expresion, exported);
+    const err = validarExpresion(q.expresion, exported, lang.id);
     if (err) {
       avisos.push(`pregunta descartada (${q.expresion}): ${err}`);
       continue;
@@ -174,14 +177,37 @@ export interface Ejecucion {
   error?: string;
   /** Falló la ejecución en sí (import, tsx ausente...), no el código del usuario: no se califica. */
   infra?: boolean;
+  /** Se corrió aislado (sin export): qué partes del entorno se reemplazaron por dobles. */
+  dobles?: string[];
+  aislado?: boolean;
 }
 
-export function ejecutar(root: string, rel: string, langId: string, p: Prediccion): Ejecucion {
+/**
+ * Ejecuta una expresión contra el archivo. Con `aislado` (código que no exporta o depende de su entorno)
+ * el archivo se carga tal cual en un contexto aislado y lo del entorno se reemplaza por dobles.
+ */
+let permisosNode: boolean | undefined;
+/** ¿Este Node tiene el modelo de permisos (`--permission`, Node ≥ 22)? */
+function conPermisos(): boolean {
+  permisosNode ??= spawnSync("node", ["--permission", "-e", "0"], { encoding: "utf8", timeout: 10_000 }).status === 0;
+  return permisosNode;
+}
+
+export function ejecutar(root: string, rel: string, langId: string, p: Prediccion, o: { aislado?: Analisis; dobles?: Record<string, unknown> } = {}): Ejecucion {
+  // Un único punto de control: toda expresión (nueva, en caché o predicción) se valida antes de correr.
+  if (!/^[A-Za-z_$][\w$]*$/.test(p.funcion)) return { ok: false, infra: true, error: `nombre de función inválido: ${p.funcion}` };
+  const rechazo = o.aislado ? validarExpresionAislada(p.expresion, new Set(o.aislado.declaraciones)) : validarExpresion(p.expresion, new Set([p.funcion]), langId);
+  if (rechazo) return { ok: false, infra: true, error: `expresión rechazada (${rechazo}): ${p.expresion.slice(0, 80)}` };
   const tmp = path.join(dataDir(root), "cache", `run-${crypto.randomBytes(4).toString("hex")}`);
   fs.mkdirSync(path.dirname(tmp), { recursive: true });
   try {
     let cmd: string;
-    if (langId === "python") {
+    if (o.aislado) {
+      fs.writeFileSync(tmp + ".mjs", programaAislado(path.join(root, rel), o.aislado, p.expresion, o.dobles ?? {}));
+      // Con el modelo de permisos de Node (si está): solo puede leer su programa y tu archivo.
+      const permisos = conPermisos() ? `--permission --allow-fs-read=${JSON.stringify(tmp + ".mjs")} --allow-fs-read=${JSON.stringify(path.join(root, rel))} ` : "";
+      cmd = `node ${permisos}${JSON.stringify(tmp + ".mjs")}`;
+    } else if (langId === "python") {
       // Importar como módulo del proyecto (paquete.modulo) para que funcionen los imports relativos.
       const mod = rel.replace(/\.py$/, "").split("/").join(".");
       fs.writeFileSync(
@@ -212,12 +238,12 @@ export function ejecutar(root: string, rel: string, langId: string, p: Prediccio
     const line = (r.stdout ?? "").split("\n").find((l) => l.startsWith("@@"));
     if (!line) return { ok: false, infra: true, error: `no se pudo ejecutar (${(r.stderr ?? "").trim().split("\n").slice(-1)[0] ?? "sin salida"})` };
     try {
-      return JSON.parse(line.slice(2)) as Ejecucion;
+      return { ...(JSON.parse(line.slice(2)) as Ejecucion), ...(o.aislado ? { aislado: true } : {}) };
     } catch {
       return { ok: false, infra: true, error: "salida ilegible" };
     }
   } finally {
-    for (const ext of [".mts", ".py"]) fs.rmSync(tmp + ext, { force: true });
+    for (const ext of [".mts", ".py", ".mjs"]) fs.rmSync(tmp + ext, { force: true });
   }
 }
 

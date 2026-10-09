@@ -17,7 +17,8 @@ import { runGuia } from "./tutor.js";
 import { crearSnippet } from "./snippets.js";
 import { reglasDiags } from "./gate.js";
 import { runReview } from "./review.js";
-import { coincide, validarExpresion } from "./predict.js";
+import { coincide, ejecutar, validarExpresion } from "./predict.js";
+import { analizarScript, validarExpresionAislada } from "./sandbox.js";
 import { riesgos } from "./terminal.js";
 import { nuevoAdr } from "./arquitectura.js";
 import { checkBash } from "./bash.js";
@@ -31,7 +32,15 @@ import { init } from "./init.js";
 import { actualizarMemoria, agregarPreguntas, leerMemoria, panorama, preguntasAbiertas, responderPregunta } from "./panorama.js";
 import { planoProyecto } from "./plano.js";
 import { cegar, verificar } from "./verificar.js";
-import { recorrerCasos } from "./tests.js";
+import { actualizarIndice } from "./indice.js";
+import { contextoComun } from "./contexto.js";
+import { cargarDecisiones, decidir, proponerDecisiones, retractar } from "./decisiones.js";
+import { actualizarConImpacto } from "./impacto.js";
+import { cargarChat, conversar as conversarProyecto } from "./chat.js";
+import { leerVeredictos, revisarCompleto } from "./revisionCompleta.js";
+import { corta } from "./rapida.js";
+import { hoy, resumenSesion } from "./resumenSesion.js";
+import { generarCasos, recorrerCasos } from "./tests.js";
 import { ubicarSnippet } from "./responder.js";
 import { modoEfectivo } from "./modos.js";
 import { conSesion, Sesion, type Fabrica } from "./sesion.js";
@@ -728,7 +737,7 @@ CASES.push(
       const res = await acompanar(r, "src/inc.ts");
       const revs = calls.filter((c) => c.kind === "acompanar:revisar");
       const out = fs.readFileSync(f, "utf8");
-      return antes === 0 && revs.length === 1 && revs[0]!.prompt.includes("function dos") && !revs[0]!.prompt.includes("function uno") && res.acciones.some((a) => a.tipo === "comentario") && /@guia\[c\d+\.1\] revision: suggestion: El nombre x/.test(out);
+      return antes === 0 && revs.length === 1 && revs[0]!.prompt.split("Partes que acaba de terminar")[1]!.includes("function dos") && !revs[0]!.prompt.split("Partes que acaba de terminar")[1]!.includes("function uno") && res.acciones.some((a) => a.tipo === "comentario") && /@guia\[c\d+\.1\] revision: suggestion: El nombre x/.test(out);
     },
   },
   {
@@ -1765,6 +1774,247 @@ CASES.push(
         !!p1 && (infra || (p1.pasan === 2 && p1.fallan === 0)) && /def test_/.test(creado) && creado.includes("snippet [ ]") && creado.includes("¿redondea?") &&
         rr.funciones.length === 1 && (infra || (p2!.fallan >= 1))
       );
+    },
+  },
+  {
+    name: "[0.9] tests sin export: el archivo se carga aislado (sin tocarlo), lo del entorno con dobles (datos), y los tests creados funcionan",
+    run: async (r) => {
+      conNotas(r);
+      const f = path.join(r, "src/ui.js");
+      fs.writeFileSync(f, 'function titulo(id) {\n  const el = document.getElementById(id);\n  if (!el) return "(sin título)";\n  return el.textContent.trim().toUpperCase();\n}\nclass Contador { sumar(x) { if (typeof x !== "number") throw new Error("x debe ser número"); return x; } }\n');
+      const antes = sha(f);
+      fakeLLM((o) =>
+        o.kind === "tests"
+          ? { casos: [
+              { tipo: "normal", descripcion: "mayúsculas", llamada: 'titulo("t")', esperado: '"HOLA"', duda: "", dobles: [{ ruta: "document.getElementById(…)", valor: '{"textContent":" hola "}' }] },
+              { tipo: "normal", descripcion: "sin elemento", llamada: 'titulo("x")', esperado: '"(sin título)"', duda: "", dobles: [{ ruta: "window.document.getElementById(...)", valor: "null" }] },
+              { tipo: "error", descripcion: "no número", llamada: 'new Contador().sumar("a")', esperado: "x debe ser número", duda: "", dobles: [] },
+              { tipo: "normal", descripcion: "inventa", llamada: "noExiste(1)", esperado: "1", duda: "", dobles: [] },
+            ] }
+          : respNota(),
+      );
+      const { nota } = await responderNota(r, { archivo: "src/ui.js", linea: 2, pedido: "tests" });
+      const u = nota.ultimaPrueba!;
+      const test = path.join(r, "tests/ui.test.js");
+      const creado = fs.existsSync(test) ? fs.readFileSync(test, "utf8") : "";
+      // El ayudante creado funciona por sí solo (sin vitest): carga el archivo aislado con dobles.
+      const { ejecutarAislado } = (await import(path.join(r, "tests/_cai/aislado.mjs"))) as { ejecutarAislado: (a: string, e: object, x: string, d: object) => Promise<unknown> };
+      const v = await ejecutarAislado(f, { declaraciones: ["titulo", "Contador"], globales: ["document"] }, 'titulo("t")', { "document.getElementById(…)": { textContent: " hola " } });
+      // Pedí tests de `titulo`: los casos de otra función (Contador) o inventados (noExiste) se descartan.
+      return sha(f) === antes && u.pasan === 2 && u.fallan === 0 && u.detalle.length === 2 && creado.includes("ejecutarAislado") && !creado.includes("noExiste") && !creado.includes("Contador()") && v === "HOLA";
+    },
+  },
+  {
+    name: "[0.9] índice: cruza quién llama a quién, guarda estado/tests, y el contexto común lo usa (estructura, panorama, decisiones, vecinas)",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/a.ts"), "export function normalizar(x: string) {\n  return x.trim();\n}\nexport function existe(p: string) {\n  const n = normalizar(p);\n  return n.length > 0;\n}\n");
+      fs.writeFileSync(path.join(r, ".cai/estructura.json"), JSON.stringify({ resumen: "Capas simples.", modulos: [{ archivo: "src/a.ts", responsabilidad: "rutas", funciones: [] }], orden: [] }));
+      fs.mkdirSync(path.join(r, ".cai/cache"), { recursive: true });
+      fs.writeFileSync(path.join(r, ".cai/cache/panorama.json"), JSON.stringify({ resumenes: {}, sugerencias: { estado: "Va bien.", sugerencias: [{ titulo: "Validar rutas", porque: "entradas vacías", archivos: ["src/a.ts"] }] } }));
+      const [d] = proponerDecisiones(r, [{ pregunta: "¿Una ruta vacía es error o false?", opciones: [{ opcion: "error", consecuencia: "lanza" }, { opcion: "false", consecuencia: "devuelve false" }], recomendada: "false" }], { archivo: "src/a.ts" }, "test");
+      decidir(r, d!.id, "false");
+      const idx = await actualizarIndice(r);
+      const norm = idx.archivos["src/a.ts"]!.funciones.find((f) => f.nombre === "normalizar")!;
+      const ctx = contextoComun(r, "src/a.ts", { funcion: "existe" });
+      const corto = contextoComun(r, "src/a.ts", { funcion: "existe", corto: true });
+      // Repetir sin cambios: la huella no cambia (no se rehace).
+      const h1 = norm.huella;
+      const idx2 = await actualizarIndice(r, ["src/a.ts"]);
+      return (
+        norm.llamadaPor.includes("src/a.ts:existe") && ctx.includes("Capas simples.") && ctx.includes("Validar rutas") && ctx.includes("→ false") && ctx.includes("normalizar(x: string)") &&
+        corto.includes("normalizar") && !corto.includes("Capas simples.") && idx2.archivos["src/a.ts"]!.funciones[0]!.huella === h1
+      );
+    },
+  },
+  {
+    name: "[0.9] impacto: si cambia una función que otra usa, la nota de la otra avisa (sin IA)",
+    run: async (r) => {
+      conNotas(r);
+      const f = path.join(r, "src/a.ts");
+      fs.writeFileSync(f, "export function normalizar(x: string) {\n  return x.trim();\n}\nexport function existe(p: string) {\n  const n = normalizar(p);\n  return n.length > 0;\n}\n");
+      fakeLLM(() => respNota());
+      await responderNota(r, { archivo: "src/a.ts", linea: 6, texto: "?" }); // existe tiene nota
+      await actualizarIndice(r);
+      fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace("return x.trim();", "return x.trim().toLowerCase();"));
+      const imp = await actualizarConImpacto(r, "src/a.ts");
+      const n = cargarNotas(r, "src/a.ts").find((x) => x.ancla.funcion === "existe")!;
+      return imp.length === 1 && imp[0]!.funcion === "normalizar" && n.impacto?.[0]?.funcion === "normalizar";
+    },
+  },
+  {
+    name: "[0.9] impacto: si la función que la usa no tenía nota, se crea una con el aviso",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/a.ts"), "export function normalizar(x: string) {\n  return x.trim();\n}\n");
+      fs.writeFileSync(path.join(r, "src/b.ts"), "import { normalizar } from './a';\nexport function existe(p: string) {\n  return normalizar(p).length > 0;\n}\n");
+      await actualizarIndice(r);
+      const f = path.join(r, "src/a.ts");
+      fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace("return x.trim();", "return x.trim().toLowerCase();"));
+      await actualizarConImpacto(r, "src/a.ts");
+      const n = cargarNotas(r, "src/b.ts").find((x) => x.ancla.funcion === "existe");
+      return !!n && n.estado === "abierta" && n.impacto?.[0]?.funcion === "normalizar" && n.hilo.length === 1;
+    },
+  },
+  {
+    name: "[0.9][seg] decisiones: decidir las pone en contexto y no se repiten; retractar las saca (historial); desde el chat no se decide",
+    run: async (r) => {
+      const [d] = proponerDecisiones(r, [{ pregunta: "¿Monto negativo es error?", opciones: [{ opcion: "sí", consecuencia: "a" }, { opcion: "no", consecuencia: "b" }], recomendada: "" }], {}, "t");
+      decidir(r, d!.id, "sí");
+      const repetida = proponerDecisiones(r, [{ pregunta: "¿El monto negativo es un error?", opciones: [{ opcion: "sí", consecuencia: "a" }, { opcion: "no", consecuencia: "b" }], recomendada: "" }], {}, "t");
+      const en = contextoComun(r, "src/cuota.ts").includes("Monto negativo es error? → sí");
+      retractar(r, d!.id);
+      const fuera = !contextoComun(r, "src/cuota.ts").includes("→ sí");
+      const hist = cargarDecisiones(r)[0]!;
+      return en && repetida.length === 0 && fuera && hist.estado === "retractada" && hist.anterior?.[0]?.eleccion === "sí" && generadosPor(`cai decisiones decidir ${d!.id} no`) === null && generadosPor("cai decisiones 'retractar' x") === null;
+    },
+  },
+  {
+    name: "[0.9] chat del proyecto: puede leer (no 'sin herramientas'), recibe el índice y deja decisiones y tareas; no escribe código",
+    run: async (r) => {
+      conNotas(r);
+      await actualizarIndice(r);
+      const antes = sha(path.join(r, "src/cuota.ts"));
+      const calls = fakeLLM(() => ({ texto: "Sigue con validar.", decisiones: [{ pregunta: "¿Moneda con decimales?", opciones: [{ opcion: "sí", consecuencia: "" }, { opcion: "no", consecuencia: "" }], recomendada: "no" }], tareas: [{ titulo: "Validar meses", archivo: "src/cuota.ts", detalle: "" }] }));
+      const res = await conversarProyecto(r, "¿por dónde sigo?");
+      const c = calls[0]!;
+      return !c.sinHerramientas && c.prompt.includes("cuota(monto: number") && res.decisiones.length === 1 && res.respuesta.tareas?.length === 1 && cargarChat(r).length === 2 && sha(path.join(r, "src/cuota.ts")) === antes;
+    },
+  },
+  {
+    name: "[0.9] revisar --completo: '¿quedó lista?' de cada función + veredicto del archivo (reutiliza lo que no cambió)",
+    run: async (r) => {
+      conNotas(r, { tests: { avisarSinTests: false } });
+      fs.writeFileSync(path.join(r, "src/d.ts"), DOS);
+      const calls = fakeLLM((o) =>
+        o.kind === "verificar:plan-ciego" ? { pasos: ["p"], casos_borde: ["c"] } : o.kind === "verificar" ? { que_hace: "x", deberia: "y", estado: "lista", resumen: "ok", mejoras: [], que_hacer: "", decisiones: [], otra_mirada: "" } : o.kind === "revisar:consolidar" ? { mantener: [] } : { hallazgos: [] },
+      );
+      const r1 = await revisarCompleto(r, "src/d.ts");
+      const n1 = calls.filter((c) => c.kind === "verificar").length;
+      const r2 = await revisarCompleto(r, "src/d.ts");
+      const n2 = calls.filter((c) => c.kind === "verificar").length;
+      return r1.veredicto.estado === "lista" && r1.veredicto.total === 2 && n1 === 2 && n2 === 2 && r2.veredicto.listas === 2 && leerVeredictos(r)["src/d.ts"]?.estado === "lista";
+    },
+  },
+  {
+    name: "[rev9][seg] expresiones de prueba: solo literales (lista blanca); no se sale del aislamiento ni desde la caché de casos",
+    run: async (r) => {
+      conNotas(r);
+      const f = path.join(r, "src/s.js");
+      fs.writeFileSync(f, "function suma(a, b) { return a + b; }\nclass C { m(x) { return x; } }\n");
+      const D = new Set(["suma", "C"]);
+      const malas = [
+        'suma(1, console.log.constructor("return process")().pid)',
+        "suma(1), process.exit(), suma(2)",
+        'suma(this.constructor.constructor("return process")())',
+        "suma(1, `${process.pid}`)",
+        'suma([1].map(x => x), 2)',
+        "suma(1 + 2, 3)",
+        'new C(").m(1)").m(process)',
+      ];
+      const buenas = ['suma(1, -2.5e3)', 'new C().m([1, {a: "x)"}], null)', "C.m('a\\'b')", "suma()"];
+      const okAisl = malas.every((e) => validarExpresionAislada(e, D) !== null) && buenas.every((e) => validarExpresionAislada(e, D) === null);
+      const okNormal = validarExpresion('suma(1, console.log.constructor("return 1")())', new Set(["suma"])) !== null && validarExpresion("f(1, x=2)", new Set(["f"]), "python") === null && validarExpresion("f(1, x=2)", new Set(["f"])) !== null;
+      // Un caso malicioso escrito directo en la caché: al volver a probar (al guardar) se rechaza sin ejecutarse.
+      const marca = path.join(r, "pwned.txt");
+      fs.mkdirSync(path.join(r, ".cai/cache/casos"), { recursive: true });
+      fs.writeFileSync(path.join(r, ".cai/cache/casos", `${encodeURIComponent("src/s.js")}#suma.json`), JSON.stringify([{ tipo: "normal", descripcion: "x", llamada: `suma(1, console.log.constructor("return process")().mainModule)`, esperado: "1", duda: "" }, { tipo: "normal", descripcion: "y", llamada: "suma(1, 2)", esperado: "3", duda: "" }]));
+      const rc = await recorrerCasos(r, "src/s.js");
+      const det = rc.funciones[0]?.detalle ?? [];
+      return okAisl && okNormal && !fs.existsSync(marca) && det[0]?.estado === "no-ejecutable" && /rechazada/.test(det[0]?.obtenido ?? "") && det[1]?.estado === "pasa";
+    },
+  },
+  {
+    name: "[rev9][seg] el valor esperado que no es un literal no llega al archivo de tests (queda para que decidas)",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/t.ts"), "export function doble(x: number) {\n  return x * 2;\n}\n");
+      fakeLLM((o) =>
+        o.kind === "tests"
+          ? { casos: [
+              { tipo: "normal", descripcion: "inyecta", llamada: "doble(1)", esperado: '"a"); (await import("node:child_process")).execSync("touch pwned"); ("b"', duda: "" },
+              { tipo: "normal", descripcion: "normal", llamada: "doble(2)", esperado: "4", duda: "" },
+            ] }
+          : respNota(),
+      );
+      const g = await generarCasos(r, "src/t.ts", "doble");
+      return g.casos[0]?.esperado === "?" && g.casos[1]?.esperado === "4" && g.descartados.some((d) => /no es un literal/.test(d));
+    },
+  },
+  {
+    name: "[rev9][seg] decisiones.json desde un comando de la IA: solo agregar pendientes (decidir o cambiar una existente se revierte)",
+    run: async () => {
+      const b = (ds: object[]) => Buffer.from(JSON.stringify({ version: 1, decisiones: ds }));
+      const p1 = { id: "d1", pregunta: "¿a o b?", opciones: [], alcance: {}, estado: "pendiente", creada: "x", origen: "t" };
+      const nueva = { ...p1, id: "d2" };
+      const tests = generadosPor("cai tests src/a.ts f")!;
+      const indice = generadosPor("cai indice actualizar")!;
+      return (
+        tests(".cai/decisiones.json", b([p1]), b([p1, nueva])) &&
+        tests(".cai/decisiones.json", null, b([nueva])) &&
+        !tests(".cai/decisiones.json", b([p1]), b([{ ...p1, estado: "vigente", eleccion: "a" }])) &&
+        !tests(".cai/decisiones.json", b([p1]), b([p1, { ...nueva, estado: "vigente", eleccion: "a" }])) &&
+        !tests(".cai/decisiones.json", b([p1]), b([])) &&
+        !indice(".cai/decisiones.json", b([p1]), b([p1, nueva])) && !indice(".cai/tareas.json", null, null) && indice(".cai/indice.json", null, null)
+      );
+    },
+  },
+  {
+    name: "[rev9] aislado: setTimeout, URL y CommonJS existen (no son 'errores' del código) y la consola no es la de Node",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/c.js"), "const util = require('./util');\nfunction espera() { return typeof setTimeout + ' ' + new URL('http://a/b?c=1').searchParams.get('c'); }\nfunction consola() { return console.log === globalThis.console.log && console.log.constructor('return typeof process')(); }\nmodule.exports = { espera };\n");
+      const lang = langFor("src/c.js")!;
+      const a = await analizarScript(fs.readFileSync(path.join(r, "src/c.js"), "utf8"), lang);
+      const e1 = ejecutar(r, "src/c.js", "javascript", { expresion: "espera()", funcion: "espera" }, { aislado: a });
+      const e2 = ejecutar(r, "src/c.js", "javascript", { expresion: "consola()", funcion: "consola" }, { aislado: a });
+      return !a.globales.includes("setTimeout") && !a.globales.includes("module") && e1.ok && e1.valor === "function 1" && e2.ok && e2.valor === "undefined";
+    },
+  },
+  {
+    name: "[rev9] índice: una llamada a una función que aparece DESPUÉS en otro archivo se cruza igual",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/a.ts"), "export function usa(x: string) {\n  return ayuda(x);\n}\n");
+      await actualizarIndice(r);
+      fs.writeFileSync(path.join(r, "src/b.ts"), "export function ayuda(x: string) {\n  return x;\n}\n");
+      const idx = await actualizarIndice(r, ["src/b.ts"]);
+      // Dos actualizaciones a la vez (como dos guardados juntos) no se pisan.
+      fs.writeFileSync(path.join(r, "src/c.ts"), "export function c1() {\n  return 1;\n}\n");
+      fs.writeFileSync(path.join(r, "src/d.ts"), "export function d1() {\n  return 1;\n}\n");
+      const [, i2] = await Promise.all([actualizarIndice(r, ["src/c.ts"]), actualizarIndice(r, ["src/d.ts"])]);
+      return idx.archivos["src/a.ts"]!.funciones[0]!.llama.includes("ayuda") && idx.archivos["src/b.ts"]!.funciones[0]!.llamadaPor.includes("src/a.ts:usa") && !!i2.archivos["src/c.ts"] && !!i2.archivos["src/d.ts"];
+    },
+  },
+  {
+    name: "[rev9] revisar --completo: una función que no se pudo verificar no deja el archivo 🟢; el chat ve las decisiones de cada archivo",
+    run: async (r) => {
+      conNotas(r, { tests: { avisarSinTests: false } });
+      fs.writeFileSync(path.join(r, "src/d.ts"), DOS);
+      let n = 0;
+      fakeLLM((o) => {
+        if (o.kind === "verificar" && ++n === 2) throw new Error("se cayó la IA");
+        return o.kind === "verificar:plan-ciego" ? { pasos: ["p"], casos_borde: ["c"] } : o.kind === "verificar" ? { que_hace: "x", deberia: "y", estado: "lista", resumen: "ok", mejoras: [], que_hacer: "", decisiones: [], otra_mirada: "" } : o.kind === "revisar:consolidar" ? { mantener: [] } : { hallazgos: [] };
+      });
+      const v = (await revisarCompleto(r, "src/d.ts")).veredicto;
+      const [d] = proponerDecisiones(r, [{ pregunta: "¿Vacío es error?", opciones: [{ opcion: "sí", consecuencia: "" }, { opcion: "no", consecuencia: "" }] }], { archivo: "src/d.ts" }, "test");
+      decidir(r, d!.id, "sí");
+      return v.estado !== "lista" && v.total === 2 && v.listas === 1 && v.funciones.some((f) => f.estado === "sin verificar") && contextoComun(r, "").includes("¿Vacío es error? → sí (en src/d.ts)");
+    },
+  },
+  {
+    name: "[0.9] la guía no se corta a mitad de palabra; 'hoy' detecta lo que cambió y 'sesión' mide lo hecho",
+    run: async (r) => {
+      const larga = "valida que el destino no esté vacío y que la carpeta de destino exista antes de mover el archivo a su nuevo lugar";
+      const c = corta(larga);
+      fs.writeFileSync(path.join(r, "src/a.ts"), "export function a(x: number) {\n  return x;\n}\n");
+      await actualizarIndice(r);
+      hoy(r, true);
+      fs.writeFileSync(path.join(r, "src/a.ts"), "export function a(x: number) {\n  return x * 2;\n}\n");
+      await actualizarIndice(r);
+      const h = hoy(r, false);
+      const s = await resumenSesion(r, new Date(Date.now() - 3600_000).toISOString(), true);
+      return c.endsWith("…") && c.length <= 91 && !/\s…$/.test(c) && larga.startsWith(c.slice(0, -1)) && h.cambiadas.includes("src/a.ts:a") && s.medido.includes("Desde");
     },
   },
   {

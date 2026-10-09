@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as vscode from "vscode";
-import { claveDeSimbolo, correr, leerConfig, modoEfectivo, MODOS, mostrarError, notasDe, relDe, root, vista, type Nota } from "./comun";
+import { claveDeSimbolo, correr, guiaActual, leerConfig, leerDecisiones, modoEfectivo, MODOS, mostrarError, notasDe, relDe, root, vista, type Nota } from "./comun";
 import { resaltarDestino } from "./acciones";
 import { BOTONES, ESTADO, ICONO, type NotasView } from "./notasView";
 
@@ -249,6 +249,26 @@ export class NotaPanel implements vscode.WebviewViewProvider {
         case "predecir":
           await vscode.window.showTextDocument(doc, { preview: false });
           return void vscode.commands.executeCommand("cai.predecir");
+        case "decidir": {
+          const cwd = root(doc);
+          if (!cwd || typeof arg !== "string") return;
+          const sep = arg.indexOf("::");
+          const id = arg.slice(0, sep);
+          const opcion = arg.slice(sep + 2);
+          await correr(["decisiones", "decidir", id, opcion], cwd);
+          vscode.window.setStatusBarMessage(`ComplementAIry: decidido "${opcion}" (la IA lo respeta; puedes retractarlo)`, 6000);
+          void vscode.commands.executeCommand("cai.panel.refrescar");
+          return void this.render();
+        }
+        case "decidirOtra": {
+          const cwd = root(doc);
+          if (!cwd || typeof arg !== "string") return;
+          const texto = await vscode.window.showInputBox({ prompt: "¿Qué decides? (con tus palabras)" });
+          if (!texto?.trim()) return;
+          await correr(["decisiones", "decidir", arg, texto.trim()], cwd);
+          void vscode.commands.executeCommand("cai.panel.refrescar");
+          return void this.render();
+        }
         case "modo": {
           const cwd = root(doc);
           if (!cwd || typeof arg !== "string") return;
@@ -426,7 +446,21 @@ texto.addEventListener("keydown", (e) => {
       const heredado = m.funcion ? modoEfectivo(cfg, rel).modo : modoEfectivo({ ...cfg, modos: { ...cfg.modos, porArchivo: {} } }, rel).modo;
       html += `<div class="sub">Modo ${m.funcion ? "de esta función" : "de este archivo"}: <select data-cmd="modo">${opcion("heredar", `heredado (${heredado})`, !propio)}${opcion("programar", "programar", propio === "programar")}${opcion("aprender", "aprender", propio === "aprender")}</select> <span class="quien">· rige: ${ef.modo} (por ${{ funcion: "esta función", archivo: "el archivo", carpeta: "la carpeta", proyecto: "el proyecto" }[ef.origen]})</span></div>`;
       if (ocupado) html += `<div class="pensando">⏳ pensando…${this.vivo ? `<div class="msg">${esc(this.vivo).replace(/\n/g, "<br>")}</div>` : ""}</div>`;
+      // Impacto (sin IA): una función que esta usa cambió.
+      if (nota?.impacto?.length) html += `<div class="accion">⚠ Cambió ${nota.impacto.map((i) => `<code>${esc(i.funcion)}</code>`).join(", ")}, que esta función usa: revisa si sigue bien (✅ ¿Quedó lista? lo limpia).</div>`;
       if (nota?.accion) html += `<div class="accion"><b>▶ Qué hacer:</b> ${esc(nota.accion)}</div>`;
+      // La guía de la línea (texto completo; en el editor puede verse recortada).
+      if (guiaActual.texto && guiaActual.uri === m.uri) html += `<div class="sub">💡 Guía actual (línea ${(guiaActual.linea ?? 0) + 1}): ${esc(guiaActual.texto)}</div>`;
+      // Decisiones de esta función o archivo: pendientes con un botón por opción; vigentes, con quién decidió.
+      if (cwd) {
+        const ds = leerDecisiones(cwd).filter((d) => d.alcance.archivo === rel && (m.funcion ? d.alcance.funcion === m.funcion : !d.alcance.funcion) && d.estado !== "retractada");
+        for (const d of ds.filter((x) => x.estado === "pendiente"))
+          html += `<div class="accion"><b>❓ Decide:</b> ${esc(d.pregunta)}<div class="botones">${d.opciones
+            .map((o) => this.boton("decidir", `${o.opcion === d.recomendada ? "⭐ " : ""}${esc(o.opcion)}`, `${d.id}::${o.opcion}`) + (o.consecuencia ? `<span class="quien"> ${esc(o.consecuencia)}</span>` : ""))
+            .join("<br>")}<br>${this.boton("decidirOtra", "Otra… (escríbela abajo y pulsa)", d.id)}</div></div>`;
+        const vig = ds.filter((x) => x.estado === "vigente");
+        if (vig.length) html += `<div class="sub">Decidido: ${vig.map((d) => `${esc(d.pregunta)} → <b>${esc(d.eleccion ?? "")}</b>`).join(" · ")} <span class="quien">(se cambia o retracta en el panel → Proyecto → Decisiones)</span></div>`;
+      }
       // Tests de esta función: el resultado de la última prueba (al pedirlos o al guardar con Ctrl+S).
       if (nota?.ultimaPrueba) {
         const u = nota.ultimaPrueba;

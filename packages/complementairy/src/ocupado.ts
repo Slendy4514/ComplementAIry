@@ -145,3 +145,40 @@ export class OcupadoError extends Error {
     super(`ya estoy ${por.tarea} en ${por.archivo} (desde hace ${Math.round((Date.now() - Date.parse(por.desde)) / 1000)} s); espera a que termine`);
   }
 }
+
+const colas = new Map<string, Promise<unknown>>();
+
+/**
+ * Candado para un archivo de DATOS compartido (índice, chat): lee-modifica-escribe sin pisarse. En
+ * el mismo proceso, en fila; entre procesos, con un archivo `.lock` exclusivo (si quedó de un proceso
+ * que murió, se descarta a los 30 s). Si no se consigue en `maxMs`, lanza un error explicativo.
+ */
+export function conCandado<T>(ruta: string, fn: () => Promise<T>, maxMs = 15_000): Promise<T> {
+  const previa = colas.get(ruta) ?? Promise.resolve();
+  const p = previa.then(async () => {
+    const lock = `${ruta}.lock`;
+    fs.mkdirSync(path.dirname(lock), { recursive: true });
+    const hasta = Date.now() + maxMs;
+    for (;;) {
+      try {
+        fs.closeSync(fs.openSync(lock, "wx"));
+        break;
+      } catch {
+        try {
+          if (Date.now() - fs.statSync(lock).mtimeMs > 30_000) fs.rmSync(lock, { force: true });
+        } catch {
+          /* ya no existe: se reintenta */
+        }
+        if (Date.now() > hasta) throw new Error(`otro proceso de ComplementAIry está usando ${path.basename(ruta)} hace más de ${Math.round(maxMs / 1000)} s; vuelve a intentarlo (si no hay ninguno corriendo, borra ${lock})`);
+        await new Promise((res) => setTimeout(res, 100));
+      }
+    }
+    try {
+      return await fn();
+    } finally {
+      fs.rmSync(lock, { force: true });
+    }
+  });
+  colas.set(ruta, p.catch(() => undefined));
+  return p;
+}

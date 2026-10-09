@@ -305,3 +305,44 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - Prueba real: 8 casos (7 ✅, 1 ❓), el archivo creado pasa en vitest (7/7), y al meter un bug se detectó al guardar (6 ✅ · 1 ❌).
   - Un resultado con decimales usa `toBeCloseTo`, para que no falle por la imprecisión de los decimales.
 - Selftest: 164/164.
+
+## v0.9.0: todo se conoce, decisiones con botones y chat del proyecto (2026-10-09)
+- **Pedido del usuario:**
+  - que las funciones se conozcan entre ellas (y su estado) y que la IA conozca el plan general sin pensar de cero ni repagar;
+  - un chat fuera de los archivos, y que Claude Code funcione con el plugin (pedía comentarios `@guia` en modo notas);
+  - que la guía gris no se corte; botones para decidir;
+  - varias revisiones a la vez, revisar al salir de un archivo y que "Revisar archivo" diga si quedó listo, función por función;
+  - tests para código que no puede exportar.
+- **Decisiones del usuario:**
+  - chat: los dos (vista propia y Claude Code integrado);
+  - revisión al salir: apagada por defecto; ligera al activarla, configurable a completa;
+  - el registro de decisiones tiene que poder **retractarse**;
+  - **nada específico de una aplicación** (Obsidian fue solo un ejemplo): los tests sin export son un mecanismo genérico.
+- **Hecho:**
+  - índice vivo (`cai indice`), contexto común para toda la IA, avisos de impacto;
+  - decisiones con botones (pendiente → vigente → retractada, con historial; solo las toma el humano);
+  - chat "Proyecto" (`cai chat`, solo lectura);
+  - revisión completa con veredicto del archivo (`cai revisar --completo`) y revisión al salir (`revisar.alSalir`);
+  - guía gris ≤ 70 caracteres, cortada en una palabra, con hover y "Guía actual" en el panel;
+  - tests sin export: el archivo se carga tal cual en `node:vm`, con dobles del entorno propuestos como datos;
+  - `cai hoy`, `cai deuda`, `cai sesion` (resumen y commit sugerido);
+  - `CLAUDE.md` con instrucciones v0.9 (`cai init --solo-claude`); la extensión avisa si están viejas.
+- **Prueba real** (copia de demo-ts):
+  - el chat respondió con el índice y propuso 2 decisiones y 3 tareas;
+  - decidir "lanzar error con negativos/NaN" hizo que la revisión completa lo exigiera (🔴 0/1 listas, US$0,16); retractarla la sacó del contexto;
+  - cambiar `calcularCuota` avisó en `resumenPrestamo` (que no tenía nota: ahora se crea);
+  - el resumen de sesión ahora cuenta los archivos nuevos sin commit.
+- **Revisión independiente:** encontró 10 problemas, todos corregidos con tests `[rev9]`. Los principales:
+  - **una expresión de prueba de la IA podía salir del aislamiento** (`console.log.constructor(...)` llegaba al `Function` de Node). Ahora los argumentos se validan con un parser de **lista blanca** de literales (`literales.ts`) en un único punto (`ejecutar`), también para los casos en caché. El contexto no recibe objetos de Node, y el proceso corre con `node --permission` (solo lee su programa y tu archivo). El mismo agujero existía desde antes en `predecir`;
+  - el valor esperado se pegaba tal cual en el archivo de tests: si no es literal, queda "?";
+  - el snapshot aceptaba cualquier cambio en `decisiones.json`: ahora un comando de la IA solo puede agregar pendientes;
+  - en el sandbox, `setTimeout`, `URL` y CommonJS fallaban como si fuera un bug del código;
+  - el índice perdía llamadas a funciones creadas después, y dos guardados juntos se pisaban (candado `conCandado`);
+  - una función sin verificar podía dejar el archivo 🟢; la guía revisaba código solo en el texto recortado; el chat no veía las decisiones de cada archivo.
+- **Pendiente (opcional):**
+  - decisiones también desde el plano de archivo, el plano y el panorama;
+  - preguntas de la memoria con opciones → decisiones;
+  - completar el "?" de un test al decidir;
+  - cobertura de casos por función en la guía;
+  - cola de revisiones visible en el panel.
+- Selftest: 178/178.

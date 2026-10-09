@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as vscode from "vscode";
-import { correr, dataDir, mostrarError, root, todasLasNotas, type Ocupacion } from "./comun";
+import { correr, dataDir, leerDecisiones, mostrarError, root, todasLasNotas, type Decision, type Ocupacion } from "./comun";
 import type { Estado } from "./estado";
 
 /**
@@ -35,6 +35,36 @@ interface Paso {
   archivo?: string;
   linea?: number;
   ref?: string;
+}
+
+interface FuncionIdx {
+  archivo: string;
+  clave: string;
+  nombre: string;
+  firma: string;
+  linea: number;
+  estado: string;
+  tests?: { pasan: number; fallan: number; casos: number };
+  resumen: string;
+  llamadaPor: string[];
+  llama: string[];
+}
+
+interface Deuda {
+  notasAbiertas: number;
+  bloqueantes: number;
+  testsApagados: number;
+  sinTests: string[];
+  decisionesPendientes: number;
+}
+
+interface Hoy {
+  desde?: string;
+  cambiadas: string[];
+  nuevas: string[];
+  empezaronAFallar: string[];
+  decisionesPendientes: number;
+  conviene: string[];
 }
 
 interface Actividad {
@@ -74,7 +104,10 @@ interface Tarea {
 }
 
 type Nodo =
-  | { k: "grupo"; id: "pendientes" | "hechas" | "proyecto" | "estructura" | "preguntas" | "ia" | "actividad"; label: string }
+  | { k: "grupo"; id: "pendientes" | "hechas" | "proyecto" | "estructura" | "preguntas" | "ia" | "actividad" | "decisiones" | "funciones" | "deuda" | "visita"; label: string }
+  | { k: "decision"; d: Decision }
+  | { k: "archivoFn"; rel: string; fns: FuncionIdx[] }
+  | { k: "funcion"; f: FuncionIdx }
   | { k: "actividad"; a: Actividad }
   | { k: "accion"; label: string; icono: string; comando: vscode.Command; tooltip?: string; descripcion?: string }
   | { k: "modulo"; archivo: string; resp: string; funciones: string[]; existe: boolean }
@@ -130,6 +163,8 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
   readonly onDidChangeTreeData = this.cambio.event;
   private pasos: Paso[] = [];
   private actividad: Actividad[] = [];
+  private deuda: Record<string, Deuda> = {};
+  private hoy?: Hoy;
   private readonly pasosEm = new vscode.EventEmitter<Paso[]>();
   /** Cuando se recalculan los pendientes (la barra de estado muestra el siguiente). */
   readonly onPasos = this.pasosEm.event;
@@ -163,6 +198,9 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
     }
     try {
       this.actividad = JSON.parse(await correr(["actividad", "--json", "--n", "15"], cwd, { silencioso: true })) as Actividad[];
+      this.deuda = JSON.parse(await correr(["deuda", "--json"], cwd, { silencioso: true })) as Record<string, Deuda>;
+      // "Desde tu última visita": se calcula una vez por sesión de VSCode y esa visita pasa a ser la referencia.
+      if (!this.hoy) this.hoy = JSON.parse(await correr(["hoy", "--json", "--marcar"], cwd, { silencioso: true })) as Hoy;
     } catch {
       this.actividad = [];
     }
@@ -216,9 +254,9 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
     const cwd = root(vscode.window.activeTextEditor?.document) ?? "";
     switch (n.k) {
       case "grupo": {
-        const abierto = ["pendientes", "proyecto", "preguntas", "ia"].includes(n.id);
+        const abierto = ["pendientes", "proyecto", "preguntas", "ia", "visita"].includes(n.id) || (n.id === "decisiones" && n.label.includes("por decidir"));
         const t = new vscode.TreeItem(n.label, abierto ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
-        t.iconPath = new vscode.ThemeIcon({ pendientes: "list-ordered", hechas: "pass", proyecto: "project", estructura: "type-hierarchy", preguntas: "question", ia: "sparkle", actividad: "history" }[n.id]);
+        t.iconPath = new vscode.ThemeIcon({ pendientes: "list-ordered", hechas: "pass", proyecto: "project", estructura: "type-hierarchy", preguntas: "question", ia: "sparkle", actividad: "history", decisiones: "law", funciones: "symbol-method", deuda: "checklist", visita: "bell" }[n.id]);
         if (n.id === "estructura" && this.estructura) {
           t.description = this.estructura.resumen;
           t.tooltip = new vscode.MarkdownString(`**Estructura propuesta**\n\n${this.estructura.resumen}\n\n**Por dónde empezar:**\n${this.estructura.orden.map((o, i) => `${i + 1}. ${o}`).join("\n")}`);
@@ -309,6 +347,37 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
         if (a.archivo) t.command = { command: "cai.irA", title: "Ir", arguments: [cwd, a.archivo] };
         return t;
       }
+      case "decision": {
+        const d = n.d;
+        const t = new vscode.TreeItem(d.pregunta);
+        t.id = `decision:${d.id}`;
+        t.description = d.estado === "pendiente" ? `por decidir: ${d.opciones.map((o) => o.opcion).join(" / ")}` : d.estado === "vigente" ? `→ ${d.eleccion}` : "retractada";
+        t.iconPath = new vscode.ThemeIcon(d.estado === "pendiente" ? "question" : d.estado === "vigente" ? "pass" : "discard");
+        t.tooltip = new vscode.MarkdownString(
+          `**${d.pregunta}**\n\n${d.opciones.map((o) => `- ${o.opcion}${o.opcion === d.recomendada ? " ⭐" : ""}: ${o.consecuencia}`).join("\n")}${d.anterior?.length ? `\n\nAntes: ${d.anterior.map((a) => a.eleccion).join(" → ")}` : ""}`,
+        );
+        t.contextValue = `cai-decision-${d.estado}`;
+        t.command = { command: "cai.decision.elegir", title: "Decidir", arguments: [d] };
+        return t;
+      }
+      case "archivoFn": {
+        const t = new vscode.TreeItem(n.rel, vscode.TreeItemCollapsibleState.Collapsed);
+        t.id = `mapa:${n.rel}`;
+        const c = (e: string) => n.fns.filter((f) => f.estado === e).length;
+        t.description = `${n.fns.length} funciones · 🟢${c("lista")} 🟡${c("casi")} 🔴${c("falta")}`;
+        t.iconPath = vscode.ThemeIcon.File;
+        return t;
+      }
+      case "funcion": {
+        const f = n.f;
+        const icono: Record<string, string> = { lista: "🟢", casi: "🟡", falta: "🔴", abierta: "📝", "sin nota": "·" };
+        const t = new vscode.TreeItem(`${icono[f.estado] ?? "·"} ${f.nombre}`);
+        t.id = `mapa:${f.archivo}:${f.clave}`;
+        t.description = [f.tests ? `tests ${f.tests.pasan}✅ ${f.tests.fallan}❌` : "", f.llamadaPor.length ? `la usan: ${f.llamadaPor.map((x) => x.split(":").pop()).join(", ")}` : "", f.llama.length ? `usa: ${f.llama.join(", ")}` : ""].filter(Boolean).join(" · ");
+        t.tooltip = new vscode.MarkdownString(`\`${f.firma}\`${f.resumen ? `\n\n${f.resumen}` : ""}`);
+        t.command = { command: "cai.irA", title: "Ir", arguments: [cwd, f.archivo, f.linea] };
+        return t;
+      }
       case "vacio":
         return new vscode.TreeItem(n.label);
     }
@@ -360,6 +429,14 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
         if (this.estructura) out.push({ k: "grupo", id: "estructura", label: "Estructura" });
         else out.push({ k: "accion", label: "Proponer la estructura del proyecto", icono: "type-hierarchy", descripcion: "carpetas, archivos y por dónde empezar", comando: { command: "cai.estructura", title: "Estructura" } });
         out.push({ k: "grupo", id: "preguntas", label: `Preguntas para ti${this.preguntas.length ? ` (${this.preguntas.length})` : ""}` });
+        const ds = leerDecisiones(cwd);
+        const pend = ds.filter((d) => d.estado === "pendiente").length;
+        out.push({ k: "grupo", id: "decisiones", label: `Decisiones${pend ? ` (${pend} por decidir)` : ""}` });
+        out.push({ k: "grupo", id: "funciones", label: "Funciones (mapa)" });
+        const nDeuda = Object.keys(this.deuda).length;
+        if (nDeuda) out.push({ k: "grupo", id: "deuda", label: `Pendiente por archivo (${nDeuda})` });
+        const h = this.hoy;
+        if (h && (h.cambiadas.length || h.nuevas.length || h.empezaronAFallar.length || h.decisionesPendientes || h.conviene.length)) out.unshift({ k: "grupo", id: "visita", label: "Desde tu última visita" });
         return out;
       }
       if (n.id === "estructura" && this.estructura) {
@@ -371,9 +448,43 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
       }
       if (n.id === "preguntas")
         return this.preguntas.length ? this.preguntas.map((q) => ({ k: "pregunta", q })) : [{ k: "vacio", label: "Ninguna por ahora" }];
+      if (n.id === "visita" && this.hoy) {
+        const h = this.hoy;
+        const x = (label: string, icono: string): Nodo => ({ k: "accion", label, icono, comando: { command: "cai.siguiente", title: "Ver" } });
+        return [
+          ...(h.empezaronAFallar.length ? [x(`❌ Empezaron a fallar: ${h.empezaronAFallar.map((s) => s.split(":").pop()).join(", ")}`, "error")] : []),
+          ...(h.cambiadas.length ? [x(`Cambiaron: ${h.cambiadas.map((s) => s.split(":").pop()).join(", ")}`, "diff")] : []),
+          ...(h.nuevas.length ? [x(`Nuevas: ${h.nuevas.map((s) => s.split(":").pop()).join(", ")}`, "add")] : []),
+          ...(h.decisionesPendientes ? [x(`❓ ${h.decisionesPendientes} decisión(es) por decidir`, "question")] : []),
+          ...h.conviene.map((c) => x(c, "git-commit")),
+        ];
+      }
+      if (n.id === "decisiones") {
+        const ds = leerDecisiones(cwd).sort((a, b) => ({ pendiente: 0, vigente: 1, retractada: 2 })[a.estado] - ({ pendiente: 0, vigente: 1, retractada: 2 })[b.estado]);
+        return ds.length ? ds.map((d) => ({ k: "decision", d })) : [{ k: "vacio", label: "Ninguna todavía (aparecen cuando algo depende de ti)" }];
+      }
+      if (n.id === "funciones") {
+        let idx: { archivos: Record<string, { funciones: FuncionIdx[] }> } = { archivos: {} };
+        try {
+          idx = JSON.parse(fs.readFileSync(path.join(dataDir(cwd), "indice.json"), "utf8")) as typeof idx;
+        } catch {
+          /* todavía sin índice */
+        }
+        const archivos = Object.entries(idx.archivos).filter(([, a]) => a.funciones.length);
+        return archivos.length ? archivos.map(([rel, a]) => ({ k: "archivoFn", rel, fns: a.funciones })) : [{ k: "vacio", label: "Se arma solo al guardar (o: cai indice actualizar)" }];
+      }
+      if (n.id === "deuda")
+        return Object.entries(this.deuda).map(([rel, d]): Nodo => ({
+          k: "accion",
+          label: rel,
+          icono: d.bloqueantes ? "warning" : "checklist",
+          descripcion: [d.notasAbiertas ? `${d.notasAbiertas} nota(s)` : "", d.testsApagados ? `${d.testsApagados} test(s) por decidir` : "", d.sinTests.length ? `sin tests: ${d.sinTests.join(", ")}` : "", d.decisionesPendientes ? `${d.decisionesPendientes} decisión(es)` : ""].filter(Boolean).join(" · "),
+          comando: { command: "cai.irA", title: "Ir", arguments: [cwd, rel] },
+        }));
       if (n.id === "actividad") return this.actividad.length ? this.actividad.map((a) => ({ k: "actividad", a })) : [{ k: "vacio", label: "Nada todavía" }];
       if (n.id === "ia") return this.estado.actual.length ? this.estado.actual.map((o) => ({ k: "ia", o })) : [{ k: "ia" }];
     }
+    if (n.k === "archivoFn") return n.fns.map((f) => ({ k: "funcion", f }));
     if (n.k === "archivo")
       return todasLasNotas(cwd)
         .filter((x) => x.archivo === n.rel)
@@ -384,7 +495,7 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
 
   registrar(ctx: vscode.ExtensionContext): void {
     this.vista = vscode.window.createTreeView("cai.panel", { treeDataProvider: this, showCollapseAll: true });
-    const w = vscode.workspace.createFileSystemWatcher("**/{.cai,.aicode}/{notas/*.json,tareas.json,conocimiento.md,estructura.json,cache/diagnosticos.json,cache/panorama.json}");
+    const w = vscode.workspace.createFileSystemWatcher("**/{.cai,.aicode}/{notas/*.json,tareas.json,conocimiento.md,estructura.json,indice.json,decisiones.json,cache/diagnosticos.json,cache/panorama.json}");
     const r = () => this.refrescar();
     w.onDidChange(r);
     w.onDidCreate(r);
@@ -411,6 +522,33 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
       }),
       vscode.commands.registerCommand("cai.irA", (cwd: string, archivo?: string, linea?: number, notaId?: string, ofrecerCrear?: boolean) => irA(cwd, archivo, linea, notaId, !!ofrecerCrear)),
       vscode.commands.registerCommand("cai.panel.refrescar", () => this.refrescar(0)),
+      vscode.commands.registerCommand("cai.decision.elegir", async (d?: Decision | Nodo) => {
+        const dec = d && "k" in d ? (d.k === "decision" ? d.d : undefined) : d;
+        const cwd = root(vscode.window.activeTextEditor?.document);
+        if (!dec || !cwd) return;
+        const op = await vscode.window.showQuickPick(
+          [...dec.opciones.map((o) => ({ label: `${o.opcion === dec.recomendada ? "⭐ " : ""}${o.opcion}`, description: o.consecuencia, v: o.opcion })), { label: "$(edit) Otra…", description: "con tus palabras", v: "" }, ...(dec.estado === "vigente" ? [{ label: "$(discard) Retractar", description: "deja de regir (queda en el historial)", v: "\u0001" }] : [])],
+          { title: dec.pregunta, placeHolder: dec.estado === "vigente" ? `Vigente: ${dec.eleccion}. ¿Cambiarla?` : "Elige (la IA lo respeta desde ahora; puedes cambiarla después)" },
+        );
+        if (!op) return;
+        try {
+          if (op.v === "\u0001") await correr(["decisiones", "retractar", dec.id], cwd);
+          else {
+            const v = op.v || (await vscode.window.showInputBox({ prompt: dec.pregunta }))?.trim();
+            if (!v) return;
+            await correr(["decisiones", "decidir", dec.id, v], cwd);
+          }
+          this.refrescar(0);
+        } catch (e) {
+          mostrarError(e);
+        }
+      }),
+      vscode.commands.registerCommand("cai.decision.retractar", async (n?: Nodo) => {
+        const cwd = root(vscode.window.activeTextEditor?.document);
+        if (!cwd || n?.k !== "decision") return;
+        await correr(["decisiones", "retractar", n.d.id], cwd).catch(mostrarError);
+        this.refrescar(0);
+      }),
       vscode.commands.registerCommand("cai.crearArchivo", (n?: Nodo) => {
         const cwd = root(vscode.window.activeTextEditor?.document);
         if (cwd && n?.k === "modulo") return crearArchivo(cwd, n.archivo);

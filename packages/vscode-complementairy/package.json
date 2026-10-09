@@ -2,7 +2,7 @@
   "name": "complementairy",
   "displayName": "ComplementAIry — tú programas, la IA te acompaña",
   "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "publisher": "complementairy",
   "license": "MIT",
   "engines": {
@@ -217,6 +217,15 @@
       {
         "command": "cai.sugerenciaAhora",
         "title": "ComplementAIry: sugerencia rápida aquí (ahora)"
+      },
+      {
+        "command": "cai.decision.elegir",
+        "title": "Decidir"
+      },
+      {
+        "command": "cai.decision.retractar",
+        "title": "Retractar decisión",
+        "icon": "$(discard)"
       }
     ],
     "keybindings": [
@@ -363,6 +372,11 @@
           "name": "Nota"
         },
         {
+          "type": "webview",
+          "id": "cai.chat",
+          "name": "Proyecto (chat)"
+        },
+        {
           "id": "cai.panel",
           "name": "Siguiente paso",
           "icon": "media/cai.svg"
@@ -445,6 +459,14 @@
         },
         {
           "command": "cai.notaPanel.pregunta",
+          "when": "false"
+        },
+        {
+          "command": "cai.decision.elegir",
+          "when": "false"
+        },
+        {
+          "command": "cai.decision.retractar",
           "when": "false"
         }
       ],
@@ -542,6 +564,11 @@
         {
           "command": "cai.crearArchivo",
           "when": "view == cai.panel && viewItem == cai-modulo-faltante",
+          "group": "inline"
+        },
+        {
+          "command": "cai.decision.retractar",
+          "when": "view == cai.panel && viewItem == cai-decision-vigente",
           "group": "inline"
         }
       ]
