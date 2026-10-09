@@ -321,7 +321,7 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
   }
 
   /** "¿Quedó lista?" de una función (cai verificar). */
-  async verificar(doc: vscode.TextDocument, funcion: string, id?: string): Promise<void> {
+  async verificar(doc: vscode.TextDocument, funcion: string, id?: string, o: { independiente?: boolean; explicacion?: string } = {}): Promise<void> {
     const cwd = root(doc);
     if (!cwd) return;
     const uri = doc.uri.toString();
@@ -331,7 +331,9 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
     this.pensandoEm.fire({ uri, ...(id ? { id } : {}), activo: true });
     try {
       await guardar(doc);
-      const r = JSON.parse(await correr(["verificar", doc.uri.fsPath, "--funcion", funcion, "--json"], cwd)) as { veredictos: { estado: string; resumen: string; nota?: string; omitida?: boolean }[] };
+      const r = JSON.parse(
+        await correr(["verificar", doc.uri.fsPath, "--funcion", funcion, ...(o.independiente ? ["--independiente"] : []), ...(o.explicacion ? ["--explicacion", o.explicacion] : []), "--json"], cwd),
+      ) as { veredictos: { estado: string; resumen: string; nota?: string; omitida?: boolean }[] };
       const v = r.veredictos[0];
       if (v) vscode.window.setStatusBarMessage(`ComplementAIry: ${ESTADO[v.estado] ?? v.estado} · ${funcion.replace(/#\d+$/, "")}${v.omitida ? " (sin cambios desde la última vez)" : ""}`, 8000);
       // El veredicto (también "lista", con la nota ya cerrada) se ve en el panel, sin quitarte el foco.
@@ -403,7 +405,8 @@ export class NotasView implements vscode.Disposable, vscode.HoverProvider {
       }
       const nota = this.notas(doc).find((n) => n.ancla.funcion === nombre);
       if (!enLinea() && nota) void vscode.commands.executeCommand("cai.notaPanel.mostrar", doc.uri.toString(), nota.id);
-      await this.verificar(doc, nombre, nota?.id);
+      // Pedido explícito (botón o atajo): con "otra mirada" (un plan pensado sin ver tu código).
+      await this.verificar(doc, nombre, nota?.id, { independiente: true });
     });
     reg("cai.notasArchivo", async (...args) => {
       const u = typeof args[0] === "string" ? vscode.Uri.parse(args[0]) : vscode.window.activeTextEditor?.document.uri;

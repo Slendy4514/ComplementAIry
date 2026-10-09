@@ -98,6 +98,7 @@ export interface Mensaje {
   quien: "tu" | "ia";
   texto: string;
   fecha: string;
+  meta?: { kind?: string; modelo?: string; costo?: number };
 }
 
 export interface Nota {
@@ -108,14 +109,17 @@ export interface Nota {
   titulo: string;
   accion: string;
   hilo: Mensaje[];
-  snippets: { llamada: string; despues: string }[];
+  snippets: { llamada: string; despues: string; linea?: number; lugar?: "ubicado" | "sin ubicar" }[];
   bloqueante: boolean;
   estado: "abierta" | "resuelta";
   origen: string;
   prediccion?: { expresion: string; funcion: string };
   desanclada?: boolean;
   alcance?: "archivo";
-  verificacion?: { estado: "lista" | "casi" | "falta"; resumen: string; fecha: string; hash: string };
+  verificacion?: { estado: "lista" | "casi" | "falta"; resumen: string; fecha: string; hash: string; lineas?: string[] };
+  modo?: string;
+  dados?: string[];
+  explicacion?: { texto: string; coincide: boolean; comentario: string };
   actualizada: string;
 }
 
@@ -247,8 +251,10 @@ export function mostrarError(e: unknown): void {
 
 export interface ConfigProyecto {
   vista?: "notas" | "comentarios";
+  modo?: string;
+  modos?: { porCarpeta?: Record<string, string>; porArchivo?: Record<string, string>; porFuncion?: Record<string, string> };
   ayuda?: { porDefecto?: string };
-  rapidas?: { activas?: boolean; esperaMs?: number };
+  rapidas?: { activas?: boolean; esperaMs?: number; procesoAbierto?: boolean };
   acompanar?: { nivel?: string; revisar?: boolean; verificar?: boolean; esperaAutoguardado?: number; maxLlamadasHora?: number };
   ia?: { modelos?: { chico?: string; mediano?: string; grande?: string } };
   tests?: { carpeta?: string };
@@ -265,4 +271,47 @@ export function leerConfig(cwd: string, estricto = false): ConfigProyecto {
     if (estricto) throw new Error(`${path.relative(cwd, f)} no es un JSON válido (${(e as Error).message}); arréglalo antes de guardar la configuración para no perder lo que tiene`);
     return {};
   }
+}
+
+// --- Modos (igual que la CLI, modos.ts): función > archivo > carpeta > proyecto -------------------
+
+export type Modo = "programar" | "aprender";
+export const MODOS: Record<Modo, { etiqueta: string; icono: string; explicar: boolean; predecir: boolean; rapidas: boolean }> = {
+  programar: { etiqueta: "programar", icono: "rocket", explicar: false, predecir: false, rapidas: true },
+  aprender: { etiqueta: "aprender", icono: "mortar-board", explicar: true, predecir: true, rapidas: false },
+};
+const esModo = (m: unknown): m is Modo => typeof m === "string" && m in MODOS;
+
+// Glob a RegExp: "**" + "/" = cero o más carpetas (como picomatch); "*" = dentro de una carpeta.
+function glob(g: string): RegExp {
+  const re = g
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*\//g, "\u0001")
+    .replace(/\*\*/g, "\u0000")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\?/g, "[^/]")
+    .replace(/\u0001/g, "(?:.*/)?")
+    .replace(/\u0000/g, ".*");
+  return new RegExp(`^${re}$`);
+}
+
+/** ¿La carpeta (prefijo "src/legacy/" o glob) incluye la ruta? y cuán específica es (igual que la CLI). */
+function carpetaIncluye(clave: string, rel: string): number {
+  if (/[*?]/.test(clave)) return glob(clave).test(rel) ? clave.replace(/[*?].*$/, "").length : -1;
+  const pref = clave.endsWith("/") ? clave : `${clave}/`;
+  return rel.startsWith(pref) ? pref.length : -1;
+}
+
+/** Función ("nombre" o "nombre#k") > archivo > carpeta (la más específica) > proyecto. Igual que la CLI (modos.ts). */
+export function modoEfectivo(cfg: ConfigProyecto, rel: string, funcion?: string): { modo: Modo; origen: "funcion" | "archivo" | "carpeta" | "proyecto" } {
+  const f = funcion ? cfg.modos?.porFuncion?.[`${rel}:${funcion}`] : undefined;
+  if (esModo(f)) return { modo: f, origen: "funcion" };
+  const a = cfg.modos?.porArchivo?.[rel];
+  if (esModo(a)) return { modo: a, origen: "archivo" };
+  const c = Object.entries(cfg.modos?.porCarpeta ?? {})
+    .map(([g, m]) => ({ m, n: esModo(m) ? carpetaIncluye(g, rel) : -1 }))
+    .filter((x) => x.n >= 0)
+    .sort((x, y) => y.n - x.n)[0];
+  if (c) return { modo: c.m as Modo, origen: "carpeta" };
+  return { modo: esModo(cfg.modo) ? cfg.modo : "programar", origen: "proyecto" };
 }

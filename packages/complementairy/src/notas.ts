@@ -12,6 +12,8 @@ export interface Mensaje {
   quien: "tu" | "ia";
   texto: string;
   fecha: string;
+  /** De dónde salió (para saber qué pasó): tipo de pedido, modelo y costo. */
+  meta?: { kind?: string; modelo?: string; costo?: number };
 }
 
 export interface Snippet {
@@ -19,6 +21,9 @@ export interface Snippet {
   llamada: string;
   /** Texto de la línea DESPUÉS de la cual va el snippet (dentro de la función). Vacío = después del ancla. */
   despues: string;
+  /** Número de esa línea (1-based) cuando se validó; "sin ubicar" si no se encontró dentro de la función. */
+  linea?: number;
+  lugar?: "ubicado" | "sin ubicar";
 }
 
 export interface Nota {
@@ -46,8 +51,16 @@ export interface Nota {
   turnos?: number;
   /** Varios @ia? pueden caer en la misma nota (una por función): turnos respondidos por cada uno. */
   fuentes?: Record<string, number>;
+  /** Modo de ESTA función ("programar" / "aprender"); si no está, hereda del archivo, carpeta o proyecto. */
+  modo?: string;
+  /** Escalones de ayuda que ya se dieron en esta nota (para no volver a ofrecerlos). */
+  dados?: string[];
+  /** Huella del código de la función cuando se creó la nota (para saber si ya lo intentaste). */
+  huellaInicial?: string;
+  /** Tu explicación de la función con tus palabras (modo aprender) y cómo se compara con el código. */
+  explicacion?: { texto: string; coincide: boolean; comentario: string; fecha: string };
   /** Resultado de "¿quedó lista?" (cai verificar). */
-  verificacion?: { estado: "lista" | "casi" | "falta"; resumen: string; fecha: string; hash: string };
+  verificacion?: { estado: "lista" | "casi" | "falta"; resumen: string; fecha: string; hash: string; lineas?: string[] };
   creada: string;
   actualizada: string;
 }
@@ -128,8 +141,8 @@ export function nuevaNota(notas: Nota[], parcial: Omit<Nota, "id" | "creada" | "
   return n;
 }
 
-export function mensaje(quien: Mensaje["quien"], texto: string): Mensaje {
-  return { quien, texto, fecha: new Date().toISOString() };
+export function mensaje(quien: Mensaje["quien"], texto: string, meta?: Mensaje["meta"]): Mensaje {
+  return { quien, texto, fecha: new Date().toISOString(), ...(meta ? { meta } : {}) };
 }
 
 /** Todas las notas del proyecto (para el panel y `cai siguiente`). */

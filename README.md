@@ -53,6 +53,28 @@ Después escribe con tus palabras `.cai/proyecto.md` (qué buscas) y `.cai/regla
 
 ## Uso diario
 
+### Modos: programar o aprender
+| | 🚀 programar (por defecto) | 🎓 aprender |
+|---|---|---|
+| ayuda | directa (plano, piezas, snippets) | gradual (pista → piezas → pseudo → ejemplo) |
+| snippets | sí | después de que lo intentes |
+| sugerencias rápidas | sí | no (primero piensas tú) |
+| "¿quedó lista?" | verificación | + explícala con tus palabras (se compara con el código) y 🎯 predecir |
+
+Se elige por **proyecto, carpeta, archivo o función** (gana el más específico): clic en el modo de la barra de estado, el selector del panel Nota o `cai modo aprender --funcion src/x.ts:miFuncion`. **Cambiar de modo no toca lo ya hecho**: notas, tareas, estructura y panorama quedan igual. En ningún modo la IA escribe tu código.
+
+### Sin sesgo hacia lo ya hecho
+- **Revisión a ciegas:** el revisor ve el código, el objetivo y tus reglas, pero no la conversación ni comentarios tipo "esto está bien / no tocar". Primero describe qué hace (citando líneas), después opina; un hallazgo sin una línea real se descarta.
+- **🔀 Otra mirada** (con el botón "¿quedó lista?" y al pedir "Revisar"): la IA piensa cómo lo haría **sin ver tu código** y luego compara; solo deja las diferencias que importan (p. ej. un caso borde que no cubres).
+
+### Saber qué pasa sin frenarte
+- **Qué hizo la IA** (panel): hora, qué hizo, sobre qué función, modelo, costo y tiempo (`cai actividad`).
+- Cada respuesta de una nota dice de qué tipo es, con qué modelo y cuánto costó; la respuesta se ve **mientras se escribe**.
+- **Lo ya dado no se vuelve a ofrecer** (si ya tienes el pseudocódigo, no aparece el botón); **➕ Más ayuda** pide el escalón que falta.
+- **Snippets donde van:** la línea se valida dentro de la función; al insertar ves **dónde iría** (vista previa) y eliges "Aquí", "En el cursor" o "Cancelar". Queda registrado en la nota qué insertaste.
+- **Pasos chicos:** sobre la función, "✅ ¿Lista? (40 líneas sin revisar)" cuando cambiaste mucho sin verificar.
+- La barra de estado muestra el **modo** donde estás y el **▶ siguiente paso**.
+
 ### En VSCode
 **Una nota por función, en el panel "Nota".** Lo que dice la IA de una función va a **su** nota, que se va ampliando (revisión, plano, respuestas, verificación): sin duplicados. El panel **Nota** (barra lateral ComplementAIry) **sigue al cursor**: muestra la nota de la función donde estás, con:
 - su estado (🟢 lista · 🟡 casi · 🔴 falta · sin verificar) y el **▶ Qué hacer**;
@@ -63,7 +85,7 @@ En el código **no se abre nada entre las líneas** ni te quita el foco: solo un
 
 **✅ ¿Quedó lista?** (`Ctrl+Alt+L` o el botón): revisa la función con lo que ya escribiste. Primero sin IA (sintaxis, tipos, lint, reglas); si eso pasa, la IA dice 🟢 lista (cierra la nota), 🟡 casi o 🔴 falta, con qué mejorar. También corre solo al guardar las funciones con nota que cambiaron. **Con autoguardado:** Ctrl+S actúa enseguida; un autoguardado espera a que dejes de editar (45 s por defecto) y corre una sola vez.
 
-**Sugerencias rápidas:** tras una pausa escribiendo en una función con nota, aparece en gris al final de la línea una pista de una línea (no se inserta nada). Tardan ~20 s y cuestan ~US$0,016 cada una (máximo 30 por hora); se apagan en la configuración.
+**Sugerencias rápidas:** tras una pausa escribiendo en una función con nota, aparece en gris al final de la línea una pista de una línea (no se inserta nada). Con el **proceso de Claude Code abierto** (`cai servir`, lo arranca la extensión) tardan **~1 s y cuestan ~US$0,002**; si ese proceso falla, se usa la llamada normal (~20 s). Se apagan en la configuración; en modo aprender no aparecen.
 
 **Panel lateral:**
 | Sección | Qué tiene |

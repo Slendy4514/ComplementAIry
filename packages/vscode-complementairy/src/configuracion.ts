@@ -47,6 +47,8 @@ export function registrarConfiguracion(ctx: vscode.ExtensionContext): void {
 function inicial(c: ConfigProyecto, enLinea: boolean): Record<string, string | boolean> {
   const s = vscode.workspace.getConfiguration("cai").get<string>("vista", "proyecto");
   return {
+    modo: c.modo ?? "programar",
+    procesoAbierto: c.rapidas?.procesoAbierto !== false,
     ayuda: c.ayuda?.porDefecto ?? "auto",
     rapidas: c.rapidas?.activas !== false,
     rapidasEspera: String((c.rapidas?.esperaMs ?? 2000) / 1000),
@@ -84,6 +86,8 @@ async function guardar(cwd: string, d: Record<string, string | boolean>): Promis
   };
   const texto = (k: string) => String(d[k] ?? "").trim();
   poner(["vista"], "vista", texto("vista") === "comentarios" ? "comentarios" : "notas");
+  poner(["modo"], "modo", texto("modo") === "aprender" ? "aprender" : "programar");
+  poner(["rapidas", "procesoAbierto"], "procesoAbierto", d.procesoAbierto === true);
   poner(["ayuda", "porDefecto"], "ayuda", texto("ayuda") || "auto");
   poner(["rapidas", "activas"], "rapidas", d.rapidas === true);
   poner(["rapidas", "esperaMs"], "rapidasEspera", num("rapidasEspera", 0.8, 30) * 1000);
@@ -130,9 +134,12 @@ button{font:inherit;background:var(--vscode-button-background);color:var(--vscod
 </style></head><body>
 <h1>ComplementAIry: configuración</h1>
 <div class="ayuda">Se guarda en <code>.cai/config.json</code> de este proyecto (lo demás de ese archivo se conserva).</div>
+<h2>Modo</h2>
+${fila("Modo del proyecto", sel("modo", c.modo ?? "programar", [["programar", "🚀 Programar: ayuda directa, snippets, sugerencias rápidas"], ["aprender", "🎓 Aprender: ayuda gradual, predecir, explicar con tus palabras"]]), "Se puede cambiar por carpeta, archivo o función desde la barra de estado o el panel Nota (gana el más específico). Cambiar de modo no toca lo ya hecho: notas, tareas, estructura y panorama quedan igual.")}
 <h2>Ayuda</h2>
 ${fila("Al preguntar, dame", sel("ayuda", c.ayuda?.porDefecto ?? "auto", [["auto", "Según mi nivel (automático)"], ["pista", "💡 Una pista"], ["piezas", "🧩 Las piezas (funciones/APIs)"], ["pseudo", "📝 Pseudocódigo"], ["ejemplo", "🔁 Un ejemplo análogo"]]), "Lo que responde cuando preguntas sin pedir un escalón. Siempre puedes pedir otro con los botones o \"no entiendo\" para subir uno.")}
 ${fila("Sugerencias rápidas", chk("rapidas", c.rapidas?.activas !== false), "Texto gris al final de la línea tras una pausa, en funciones con nota. No se inserta nada.")}
+${fila("Proceso de Claude Code abierto", chk("procesoAbierto", c.rapidas?.procesoAbierto !== false), "Mantiene Claude Code arrancado para las sugerencias rápidas: ~1 s y ~US$0,002 cada una (sin él, ~20 s). Si falla, se usa la llamada normal.")}
 ${fila("Pausa antes de sugerir (s)", numero("rapidasEspera", (c.rapidas?.esperaMs ?? 2000) / 1000, 0.5), "Cuántos segundos sin escribir antes de pedir la sugerencia.")}
 <h2>Acompañante (al guardar)</h2>
 ${fila("Nivel", sel("nivel", a.nivel ?? "normal", [["silencioso", "Silencioso: solo responde lo que preguntas"], ["normal", "Normal: planos, ayuda si te trabas, comentarios"], ["activo", "Activo: ayuda antes"]]), "")}

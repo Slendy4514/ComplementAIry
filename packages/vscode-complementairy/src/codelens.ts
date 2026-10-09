@@ -53,7 +53,9 @@ export class Lentes implements vscode.CodeLensProvider {
         out.push(new vscode.CodeLens(r, { title: `💬 nota${nota.bloqueante ? " ⚠" : ""}${v}`, tooltip: nota.accion ? `▶ ${nota.accion}` : "Ver la nota", command: "cai.nota.abrir", arguments: [doc.uri.toString(), nota.id] }));
       }
       out.push(new vscode.CodeLens(r, { title: "💡 Ayuda", tooltip: "Pista, piezas, pseudocódigo, ejemplo o explicación para esta función", command: "cai.pedirAqui", arguments: [doc.uri.toString(), f.selectionRange.start.line + 1] }));
-      out.push(new vscode.CodeLens(r, { title: "✅ ¿Lista?", tooltip: "¿Quedó lista? Revisa la función con lo que ya hiciste (primero sin IA); si está lista, cierra su nota", command: "cai.verificarFuncion", arguments: [doc.uri.toString(), nombre] }));
+      // Pasos chicos (medido sin IA): cuántas líneas cambiaron desde la última verificación.
+      const sinRevisar = nota?.verificacion?.lineas ? cambiadas(nota.verificacion.lineas, doc.getText(f.range).split(/\r?\n/)) : 0;
+      out.push(new vscode.CodeLens(r, { title: sinRevisar >= 10 ? `✅ ¿Lista? (${sinRevisar} líneas sin revisar)` : "✅ ¿Lista?", tooltip: "¿Quedó lista? Revisa la función con lo que ya hiciste (primero sin IA); si está lista, cierra su nota", command: "cai.verificarFuncion", arguments: [doc.uri.toString(), nombre] }));
       out.push(new vscode.CodeLens(r, { title: "🧪 Tests", tooltip: "Proponer casos de prueba para esta función", command: "cai.pedirAqui", arguments: [doc.uri.toString(), f.selectionRange.start.line + 1, "tests"] }));
     }
     return out;
@@ -66,4 +68,19 @@ export class Lentes implements vscode.CodeLensProvider {
       this.cambio,
     );
   }
+}
+
+/** Líneas de `ahora` que no estaban (como multiconjunto) en `antes`: cuánto cambió sin revisar. */
+function cambiadas(antes: string[], ahora: string[]): number {
+  const quedan = new Map<string, number>();
+  for (const l of antes) quedan.set(l.trim(), (quedan.get(l.trim()) ?? 0) + 1);
+  let n = 0;
+  for (const l of ahora) {
+    const k = l.trim();
+    if (!k) continue;
+    const c = quedan.get(k) ?? 0;
+    if (c) quedan.set(k, c - 1);
+    else n++;
+  }
+  return n;
 }

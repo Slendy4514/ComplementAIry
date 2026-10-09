@@ -37,6 +37,32 @@ interface Paso {
   ref?: string;
 }
 
+interface Actividad {
+  fecha?: string;
+  kind: string;
+  archivo?: string;
+  funcion?: string;
+  modelos?: string[];
+  costo?: number;
+  ms?: number;
+}
+
+const QUE: Record<string, string> = {
+  responder: "respondí",
+  verificar: "verifiqué",
+  "verificar:plan-ciego": "pensé otra mirada (sin ver tu código)",
+  rapida: "sugerencia rápida",
+  "rapida:abierto": "sugerencia rápida",
+  "acompanar:revisar": "comenté lo que terminaste",
+  panorama: "miré el proyecto",
+  "panorama:resumen": "resumí un módulo",
+  plano: "propuse la estructura",
+  "plano-archivo": "propuse el plano del archivo",
+  "memoria:conversar": "conversé sobre una pregunta",
+  "revisar:otra-mirada": "comparé con otra mirada",
+  "revisar:plan-ciego": "pensé otra mirada del archivo",
+};
+
 interface Tarea {
   id: string;
   titulo: string;
@@ -48,7 +74,8 @@ interface Tarea {
 }
 
 type Nodo =
-  | { k: "grupo"; id: "pendientes" | "hechas" | "proyecto" | "estructura" | "preguntas" | "ia"; label: string }
+  | { k: "grupo"; id: "pendientes" | "hechas" | "proyecto" | "estructura" | "preguntas" | "ia" | "actividad"; label: string }
+  | { k: "actividad"; a: Actividad }
   | { k: "accion"; label: string; icono: string; comando: vscode.Command; tooltip?: string; descripcion?: string }
   | { k: "modulo"; archivo: string; resp: string; funciones: string[]; existe: boolean }
   | { k: "pregunta"; q: Pregunta }
@@ -102,6 +129,10 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
   private readonly cambio = new vscode.EventEmitter<Nodo | undefined>();
   readonly onDidChangeTreeData = this.cambio.event;
   private pasos: Paso[] = [];
+  private actividad: Actividad[] = [];
+  private readonly pasosEm = new vscode.EventEmitter<Paso[]>();
+  /** Cuando se recalculan los pendientes (la barra de estado muestra el siguiente). */
+  readonly onPasos = this.pasosEm.event;
   private tareas: Tarea[] = [];
   private preguntas: Pregunta[] = [];
   private estructura?: Estructura;
@@ -129,6 +160,11 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
       this.tareas = JSON.parse(await correr(["tareas", "--json"], cwd, { silencioso: true })) as Tarea[];
     } catch {
       this.pasos = [];
+    }
+    try {
+      this.actividad = JSON.parse(await correr(["actividad", "--json", "--n", "15"], cwd, { silencioso: true })) as Actividad[];
+    } catch {
+      this.actividad = [];
     }
     try {
       this.preguntas = (JSON.parse(await correr(["memoria", "--json"], cwd, { silencioso: true })) as { abiertas: Pregunta[] }).abiertas;
@@ -173,6 +209,7 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
     if (this.vista) this.vista.badge = this.pasos.length ? { value: this.pasos.length, tooltip: `${this.pasos.length} cosa(s) por hacer` } : undefined;
     if (this.vista) this.vista.message = p ? undefined : "✓ Nada pendiente. Sigue con tu plan o pide un panorama (Ctrl+Alt+P).";
     this.cambio.fire(undefined);
+    this.pasosEm.fire(this.pasos);
   }
 
   getTreeItem(n: Nodo): vscode.TreeItem {
@@ -181,7 +218,7 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
       case "grupo": {
         const abierto = ["pendientes", "proyecto", "preguntas", "ia"].includes(n.id);
         const t = new vscode.TreeItem(n.label, abierto ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
-        t.iconPath = new vscode.ThemeIcon({ pendientes: "list-ordered", hechas: "pass", proyecto: "project", estructura: "type-hierarchy", preguntas: "question", ia: "sparkle" }[n.id]);
+        t.iconPath = new vscode.ThemeIcon({ pendientes: "list-ordered", hechas: "pass", proyecto: "project", estructura: "type-hierarchy", preguntas: "question", ia: "sparkle", actividad: "history" }[n.id]);
         if (n.id === "estructura" && this.estructura) {
           t.description = this.estructura.resumen;
           t.tooltip = new vscode.MarkdownString(`**Estructura propuesta**\n\n${this.estructura.resumen}\n\n**Por dónde empezar:**\n${this.estructura.orden.map((o, i) => `${i + 1}. ${o}`).join("\n")}`);
@@ -263,6 +300,15 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
         t.command = { command: "cai.notaPanel.pregunta", title: "Responder", arguments: [n.q] };
         return t;
       }
+      case "actividad": {
+        const a = n.a;
+        const que = QUE[a.kind] ?? (a.kind.startsWith("revisar:") ? `revisé (${a.kind.slice(8)})` : a.kind);
+        const t = new vscode.TreeItem(`${a.fecha ? new Date(a.fecha).toLocaleTimeString().slice(0, 5) : ""} ${que}${a.funcion ? ` · ${a.funcion.replace(/#\d+$/, "")}` : ""}`);
+        t.description = `${a.archivo ?? ""} · ${a.modelos?.[0]?.replace(/^claude-/, "") ?? ""} · US$${(a.costo ?? 0).toFixed(3)}${a.ms ? ` · ${(a.ms / 1000).toFixed(1)} s` : ""}`;
+        t.iconPath = new vscode.ThemeIcon(a.kind.startsWith("rapida") ? "lightbulb" : a.kind.startsWith("verificar") ? "pass" : a.kind.startsWith("revisar") || a.kind.startsWith("acompanar") ? "eye" : "sparkle");
+        if (a.archivo) t.command = { command: "cai.irA", title: "Ir", arguments: [cwd, a.archivo] };
+        return t;
+      }
       case "vacio":
         return new vscode.TreeItem(n.label);
     }
@@ -288,6 +334,7 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
       raiz.push({ k: "grupo", id: "proyecto", label: "Proyecto" });
       if (this.tareas.some((t) => t.hecha)) raiz.push({ k: "grupo", id: "hechas", label: "Hechas recientes" });
       raiz.push({ k: "grupo", id: "ia", label: "IA" });
+      raiz.push({ k: "grupo", id: "actividad", label: "Qué hizo la IA" });
       return raiz;
     }
     if (n.k === "grupo") {
@@ -324,6 +371,7 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
       }
       if (n.id === "preguntas")
         return this.preguntas.length ? this.preguntas.map((q) => ({ k: "pregunta", q })) : [{ k: "vacio", label: "Ninguna por ahora" }];
+      if (n.id === "actividad") return this.actividad.length ? this.actividad.map((a) => ({ k: "actividad", a })) : [{ k: "vacio", label: "Nada todavía" }];
       if (n.id === "ia") return this.estado.actual.length ? this.estado.actual.map((o) => ({ k: "ia", o })) : [{ k: "ia" }];
     }
     if (n.k === "archivo")

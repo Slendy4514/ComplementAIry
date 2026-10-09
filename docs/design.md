@@ -305,6 +305,12 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 - **Preguntas:** se descartan sin IA las que preguntan por algo que se ve en el código ("¿X ya hace…?"); se puede conversar sobre una antes de responderla (`cai memoria conversar`).
 - **Chat de Claude Code en vista notas:** el hook rechaza que la IA agregue `@guia` y le indica `cai responder`.
 
+**v0.8: rápido, sin sesgo y con modos.**
+- **Modos** (`modos.ts`): una tabla de comportamientos (escalera, snippets antes de intentar, sugerencias rápidas, explicar, predecir) por modo; se elige por función (en su nota) > archivo > carpeta > proyecto. Solo cambia la ayuda nueva.
+- **Proceso abierto** (`sesion.ts`, `cai servir`): un `query()` del Agent SDK con entrada continua, sin herramientas ni razonamiento extendido; se reinicia cada 20 usos o 10 min sin uso; si tarda o falla, la llamada normal. Medido: ~1 s y ~US$0,002 por sugerencia (antes ~20 s y ~US$0,016).
+- **Sin sesgo:** revisión a ciegas (sin conversación ni comentarios que aprueban; evidencia antes del veredicto) y "otra mirada" (plan sin ver el código + comparación). Base: Cross-Context Review (arXiv 2603.12123), framing en revisión con LLM (arXiv 2603.18740), anclaje en LLMs (arXiv 2412.06593).
+- **Control:** línea de tiempo desde `~/.cai/uso.jsonl`, metadatos por mensaje, texto en vivo, escalones ya dados, ubicación validada de snippets con vista previa y procedencia, líneas sin revisar.
+
 **Límite conocido:** en modo comentarios, `guia` y el acompañante siguen escribiendo en disco (solo `revisar` se aplica sobre el buffer desde VSCode). Con autoguardado conviene el modo notas.
 
 ## Estado
@@ -320,6 +326,7 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 | 8 (v0.5) | Notas fuera del archivo, botones, panel "Siguiente paso", bloqueo por archivo, "pensando…", modelos por tamaño | ✅ |
 | 9 (v0.6) | Tres niveles (proyecto, archivo, función), estructura y panorama como tareas, preguntas desde el panel | ✅ |
 | 10 (v0.7) | Una nota por función, panel Nota, "¿quedó lista?", sugerencias rápidas, configuración, autoguardado | ✅ |
+| 11 (v0.8) | Modos programar/aprender por función, proceso abierto (~1 s), sin sesgo (a ciegas + otra mirada), qué hizo la IA, snippets con vista previa | ✅ |
 
 **Honcho:** el perfil y la memoria hoy son archivos locales legibles, que es lo que pide el principio de transparencia. Conectar Honcho, un servicio externo de modelado de usuario, requiere una cuenta y una API key tuyas, y envía datos de tu forma de programar a un tercero. Queda para cuando lo decidas.
 

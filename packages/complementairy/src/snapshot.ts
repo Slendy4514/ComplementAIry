@@ -39,6 +39,8 @@ const CMD = "\u0000comando";
 export function generadosPor(comando: string): ((rel: string, antes: Buffer | null, despues: Buffer | null) => boolean) | null {
   const m = /^\s*(?:cai|complementairy|aicode)\s+([\w-]+)(?:\s+[^;&|<>`$()\n]*)?$/.exec(comando);
   if (!m) return null;
+  // Comillas y barras no esconden un subcomando ("notas 'anotar'", "anot\\ar"): se comparan sin ellas.
+  const plano = comando.replace(/['"\\]/g, "");
   const datos = (rel: string) => /^\.(cai|aicode)\//.test(rel);
   const plantilla = (b: Buffer | null) => !b || b.toString("utf8").replace(/<!--[\s\S]*?-->/g, "").replace(/^#.*$/gm, "").trim() === "";
   // conocimiento.md: el comando puede agregar preguntas, pero no tocar lo que TÚ respondiste ni tus notas.
@@ -55,8 +57,10 @@ export function generadosPor(comando: string): ((rel: string, antes: Buffer | nu
   switch (m[1]) {
     case "guia":
     case "revisar":
-    case "responder":
     case "notas":
+      // "anotar" escribe mensajes a tu nombre: solo desde la extensión, no desde el chat.
+      return /\bnotas\s+anotar\b/.test(plano) ? null : (rel) => notasYTareas(rel);
+    case "responder":
     case "predecir":
     case "check":
     case "verificar":
@@ -64,7 +68,7 @@ export function generadosPor(comando: string): ((rel: string, antes: Buffer | nu
       return (rel) => notasYTareas(rel);
     case "tareas":
       // Descartar una tarea es definitivo (no vuelve a proponerse): eso lo decide el humano.
-      return /\btareas\s+descartar\b/.test(comando) ? null : (rel) => notasYTareas(rel);
+      return /\btareas\s+descartar\b/.test(plano) ? null : (rel) => notasYTareas(rel);
     case "tests":
       return (rel) => notasYTareas(rel); // el archivo de tests nuevo/ampliado ya pasa por "solo comentarios"
     case "panorama":

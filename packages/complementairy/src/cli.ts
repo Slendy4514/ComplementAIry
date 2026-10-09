@@ -19,11 +19,14 @@ import { watch } from "./watch.js";
 import { acompanar } from "./acompanante.js";
 import { planoProyecto } from "./plano.js";
 import { verificar } from "./verificar.js";
+import { servir } from "./servir.js";
+import { esModo, MODOS, modoEfectivo } from "./modos.js";
+import { funcionesDe, funcionPorClave } from "./notasFuncion.js";
 import { rapida } from "./rapida.js";
 import { cargarDialogos, conversar, olvidarDialogo } from "./dialogo.js";
 import { proponerTests } from "./tests.js";
 import { estadoPanorama, leerMemoria, panorama, preguntasAbiertas, responderPregunta } from "./panorama.js";
-import { enCurso, OcupadoError, ocuparEsperando } from "./ocupado.js";
+import { conBloqueo, enCurso, OcupadoError, ocuparEsperando } from "./ocupado.js";
 import { responderNota } from "./responder.js";
 import { cargarNotas, guardarNotas, nuevaNota, mensaje, todasLasNotas } from "./notas.js";
 import { cargarTareas, guardarTareas, siguiente, actualizarTareas } from "./siguiente.js";
@@ -47,6 +50,10 @@ const HELP = `ComplementAIry (cai) — tú programas, la IA te acompaña
   cai siguiente                  qué hacer ahora (una sola cosa, elegida sin IA) y qué viene después
   cai responder <archivo> (--linea N | --nota <id> | --archivo-entero) [--texto "..."] [--pedido pista|piezas|pseudo|ejemplo|tests|explica]
                                     pregunta en una nota (en modo notas el archivo no se toca)
+  cai servir                      proceso abierto para la extensión (sugerencias rápidas sin esperar el arranque)
+  cai actividad [--n 20]          qué hizo la IA (hora, qué, archivo, modelo, costo, tiempo)
+  cai modo [programar|aprender|heredar] [--archivo f | --funcion f:nombre | --carpeta glob]
+                                    modo de trabajo (gana función > archivo > carpeta > proyecto); no toca lo ya hecho
   cai rapida <archivo> --linea N  pista de una línea donde estás (VSCode la muestra en gris)
   cai verificar <archivo> [--funcion X]  "¿quedó lista?": sin IA primero; lista → cierra la nota, si no deja mejoras
   cai notas [<archivo>|--todas]  notas abiertas · cai notas resolver <archivo> <id> · cai notas importar <archivo>
@@ -279,6 +286,7 @@ async function ejecutar(argv: string[]): Promise<number> {
         sinIa: rest.includes("--sin-ia"),
         todo: rest.includes("--todo"),
         ediciones: rest.includes("--ediciones"),
+        otraMirada: rest.includes("--otra-mirada"),
         ...(soloI >= 0 && rest[soloI + 1] ? { solo: rest[soloI + 1]!.split(",") } : {}),
         log: rest.includes("--json") ? () => {} : (l) => console.log(l),
       });
@@ -414,6 +422,24 @@ async function ejecutar(argv: string[]): Promise<number> {
         console.log(`✓ ${id} resuelta`);
         return 0;
       }
+      if (sub === "anotar") {
+        // cai notas anotar <archivo> <id> --texto "..."   (lo usa la extensión: "insertaste el snippet X en la línea N")
+        const [archivo, id] = rest;
+        const t = rest.includes("--texto") ? rest[rest.indexOf("--texto") + 1] : undefined;
+        if (!archivo || !id || !t) throw new Error('uso: cai notas anotar <archivo> <id> --texto "..."');
+        const rel = path.relative(root, path.resolve(archivo));
+        // Con el archivo tomado: no pisa una respuesta que se esté guardando a la vez.
+        await conBloqueo(root, rel, "anotando", async () => {
+          const notas = cargarNotas(root, rel);
+          const n = notas.find((x) => x.id === id);
+          if (!n) throw new Error(`no existe la nota ${id} en ${rel}`);
+          n.hilo.push(mensaje("tu", t, { kind: "registro" }));
+          n.actualizada = new Date().toISOString();
+          guardarNotas(root, rel, notas);
+        });
+        console.log(`✓ anotado en ${id}`);
+        return 0;
+      }
       if (sub === "importar") {
         if (!rest[0]) throw new Error("uso: cai notas importar <archivo>");
         const rel = path.relative(root, path.resolve(rest[0]));
@@ -450,6 +476,90 @@ async function ejecutar(argv: string[]): Promise<number> {
       if (!abiertas.length) console.log("(sin notas abiertas)");
       return 0;
     }
+    case "servir": {
+      // Proceso de larga vida para la extensión (pedidos JSON por línea). Ver servir.ts.
+      await servir(root);
+      return 0;
+    }
+    case "actividad": {
+      // cai actividad [--json] [--n 20]: qué hizo la IA en este proyecto (sin IA: el registro de uso)
+      const n = argv.includes("--n") ? Number(argv[argv.indexOf("--n") + 1]) || 20 : 20;
+      const proyecto = path.basename(root);
+      const items = leerUso(7)
+        .filter((u) => u.tipo === "llamada" && (!u.proyecto || u.proyecto === proyecto))
+        .slice(-n)
+        .reverse();
+      if (argv.includes("--json")) {
+        process.stdout.write(JSON.stringify(items));
+        return 0;
+      }
+      for (const u of items)
+        console.log(`${(u as { fecha?: string }).fecha?.slice(11, 16) ?? ""}  ${u.kind}${u.archivo ? ` · ${u.archivo}${u.funcion ? `:${u.funcion}` : ""}` : ""}  ${u.modelos?.[0] ?? ""}  US$${(u.costo ?? 0).toFixed(3)}  ${u.ms ? `${(u.ms / 1000).toFixed(1)} s` : ""}`);
+      if (!items.length) console.log("(sin actividad de la IA en los últimos 7 días)");
+      return 0;
+    }
+    case "modo": {
+      // cai modo [programar|aprender|heredar] [--archivo f | --funcion f:nombre | --carpeta ruta/] [--json]
+      const args = argv.slice(1);
+      const opt = (k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
+      const cfgFile = path.join(dataDir(root), "config.json");
+      let raw: Record<string, unknown> = {};
+      if (fs.existsSync(cfgFile))
+        try {
+          raw = JSON.parse(fs.readFileSync(cfgFile, "utf8")) as Record<string, unknown>;
+        } catch (e) {
+          throw new Error(`${path.relative(root, cfgFile)} no es un JSON válido (${(e as Error).message}); arréglalo antes de cambiar el modo`);
+        }
+      const fnArg = opt("--funcion");
+      const [fnArchivo, fnNombre] = fnArg ? [fnArg.slice(0, fnArg.lastIndexOf(":")), fnArg.slice(fnArg.lastIndexOf(":") + 1)] : [];
+      if (!sub || sub.startsWith("--")) {
+        // Consultar: el modo que rige (y de dónde viene).
+        const archivo = opt("--archivo") ?? fnArchivo;
+        const rel = archivo ? path.relative(root, path.resolve(archivo)) : undefined;
+        const cfg = loadConfig(root);
+        const ef = rel ? modoEfectivo(cfg, rel, fnNombre) : { modo: cfg.modo, origen: "proyecto" };
+        if (args.includes("--json")) process.stdout.write(JSON.stringify({ modo: ef.modo, origen: ef.origen, proyecto: cfg.modo, ...cfg.modos }));
+        else console.log(`modo: ${ef.modo} (por ${ef.origen})`);
+        return 0;
+      }
+      const heredar = sub === "heredar";
+      if (!heredar && !esModo(sub)) throw new Error(`modo desconocido "${sub}": usa ${Object.keys(MODOS).join(" | ")} (o "heredar" para quitarlo)`);
+      // Se guarda en la configuración (no en las notas): cambiar de modo no toca lo ya hecho.
+      const modos = (raw.modos ??= {}) as Record<string, Record<string, string>>;
+      const poner = (grupo: string, clave: string) => {
+        modos[grupo] ??= {};
+        if (heredar) delete modos[grupo]![clave];
+        else modos[grupo]![clave] = sub;
+      };
+      let donde: string;
+      if (fnArg) {
+        if (!fnArchivo || !fnNombre) throw new Error("uso: cai modo <modo> --funcion <archivo>:<función>");
+        const rel = path.relative(root, path.resolve(fnArchivo));
+        const funciones = await funcionesDe(fs.readFileSync(path.join(root, rel), "utf8"), langFor(rel));
+        if (!funcionPorClave(funciones, fnNombre)) throw new Error(`no encuentro la función "${fnNombre}" en ${rel}`);
+        poner("porFuncion", `${rel}:${fnNombre}`);
+        donde = `${fnNombre.replace(/#\d+$/, "")} (${rel})`;
+      } else if (opt("--archivo")) {
+        const rel = path.relative(root, path.resolve(opt("--archivo")!));
+        poner("porArchivo", rel);
+        donde = rel;
+      } else if (opt("--carpeta")) {
+        // Una carpeta como prefijo literal ("src/legacy/"); también se aceptan globs ("src/**/viejo/**").
+        const c = opt("--carpeta")!;
+        poner("porCarpeta", /[*?]/.test(c) ? c : `${path.relative(root, path.resolve(c)).split(path.sep).join("/")}/`);
+        donde = c;
+      } else if (heredar) throw new Error("el proyecto no hereda de nadie: elige programar o aprender");
+      else {
+        raw.modo = sub;
+        donde = "el proyecto";
+      }
+      fs.mkdirSync(path.dirname(cfgFile), { recursive: true });
+      const tmp = `${cfgFile}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(raw, null, 2) + "\n");
+      fs.renameSync(tmp, cfgFile);
+      console.log(`✓ ${donde}: ${heredar ? "hereda el modo" : `modo ${sub}`} (lo ya hecho no cambia)`);
+      return 0;
+    }
     case "rapida": {
       // cai rapida <archivo> --linea N [--json]: pista de una línea donde estás escribiendo
       const n = rest.includes("--linea") ? Number(rest[rest.indexOf("--linea") + 1]) : NaN;
@@ -468,6 +578,8 @@ async function ejecutar(argv: string[]): Promise<number> {
         const r = await verificar(root, path.relative(root, path.resolve(sub)), {
           ...(opt("--funcion") ? { funcion: opt("--funcion")! } : {}),
           ...(rest.includes("--forzar") ? { forzar: true } : {}),
+          ...(rest.includes("--independiente") ? { independiente: true } : {}),
+          ...(opt("--explicacion") ? { explicacion: opt("--explicacion")! } : {}),
           tamano: rest.includes("--chico") ? "chico" : "mediano",
           log: json ? () => {} : (l) => console.log(l),
         });

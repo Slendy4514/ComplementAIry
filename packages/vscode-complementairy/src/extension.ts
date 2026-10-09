@@ -6,7 +6,7 @@ import { cli, correr, envVista, guardadoPropio, guardar, leerConfig, mostrarErro
 import { registrarConfiguracion } from "./configuracion";
 import { NotaPanel } from "./notaView";
 import { Rapidas } from "./rapidas";
-import { Estado } from "./estado";
+import { BarraModo, Estado } from "./estado";
 import { NotasView } from "./notasView";
 import { Panel } from "./panel";
 
@@ -87,7 +87,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
   notas.registrar(ctx);
   new Acciones(notas).registrar(ctx);
   new Lentes(notas).registrar(ctx);
-  new Panel(estado).registrar(ctx);
+  const panel = new Panel(estado);
+  panel.registrar(ctx);
+  const barra = new BarraModo((doc) => notas.notas(doc));
+  barra.registrar(ctx);
+  ctx.subscriptions.push(panel.onPasos((p) => barra.siguiente(p[0])));
   new NotaPanel(notas).registrar(ctx);
   new Rapidas(notas).registrar(ctx);
   registrarConfiguracion(ctx);
@@ -103,7 +107,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const ed = vscode.window.activeTextEditor;
     const cwd = root(ed?.document);
     if (!ed || !cwd) return;
-    if (vista(cwd) === "notas") return onFile("revisar", "revisando");
+    // Revisión pedida por ti: con "otra mirada" (un plan pensado sin ver tu código, contra el sesgo de lo ya hecho).
+    if (vista(cwd) === "notas") return onFile("revisar", "revisando", ["--otra-mirada"]);
     // Modo comentarios: los comentarios se aplican sobre el texto del editor (no en disco).
     try {
       const msg = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: revisando…" }, () => revisarConEdiciones(ed, cwd));

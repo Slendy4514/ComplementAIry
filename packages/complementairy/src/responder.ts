@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { biblioteca, paraLenguaje, parseLlamada } from "./biblioteca.js";
 import { parse } from "./comments.js";
-import { makeZoner, notaOrigen, origenDe } from "./config.js";
+import { dataDir, makeZoner, notaOrigen, origenDe } from "./config.js";
 import { contextBlock, projectContext } from "./context.js";
 import { fileIdentifiers, guardReplies } from "./guard.js";
 import { langFor } from "./lang.js";
@@ -10,6 +10,9 @@ import { ask } from "./llm.js";
 import { medir } from "./metricas.js";
 import { cargarNotas, guardarNotas, mensaje, type Nota } from "./notas.js";
 import { consolidar, funcionEn as funcionEnF, funcionPorClave, notaPara } from "./notasFuncion.js";
+import { modoEfectivo } from "./modos.js";
+import { huella } from "./verificar.js";
+import type { Funcion } from "./metricas.js";
 import { conBloqueo } from "./ocupado.js";
 import { coincide, ejecutar } from "./predict.js";
 import { loadPerfil, nivelDe, puntaje, registrar } from "./profile.js";
@@ -69,6 +72,9 @@ const schema = () => ({
   },
 });
 
+/** El orden de la escalera (para "➕ Más ayuda"). */
+export const ESCALONES = ["pista", "piezas", "pseudo", "ejemplo"];
+
 const PIDE_MAS = /!mas\b|m[aá]s ayuda|dame m[aá]s|qu[eé] m[aá]s|no entiendo|otra pista|sigo sin|no me sale|m[aá]s detalle/i;
 
 const pedidoDe = (p?: string) => (p ? PEDIDOS.find((x) => x.re.test(`!${p}`)) : undefined);
@@ -93,13 +99,22 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
     if (p.notaId && !nota) throw new Error(`no existe la nota ${p.notaId} en ${rel}`);
     // El pedido puede venir de un botón (p.pedido) o escrito en el texto ("!pseudo", "!tests"...).
     if (!p.pedido && p.texto && /!tests?\b/i.test(p.texto)) p = { ...p, pedido: "tests" };
-    // Sin escalón pedido: el que elegiste en la configuración (ayuda.porDefecto), salvo que pidas "más".
-    const porDefecto = z.config.ayuda.porDefecto !== "auto" && !PIDE_MAS.test(p.texto ?? "") ? pedidoDe(z.config.ayuda.porDefecto) : undefined;
-    const ped = pedidoDe(p.pedido) ?? (p.texto ? PEDIDOS.find((x) => x.re.test(p.texto!)) : undefined) ?? porDefecto;
     if (!nota) {
       const l = p.archivoEntero ? 1 : Math.min(Math.max(1, p.linea ?? 1), lineas.length);
       nota = notaPara(notas, rel, funciones, src, { linea: l, ...(p.archivoEntero ? { alcance: "archivo" as const } : {}), tipo: "pregunta", origen: p.origen ?? "pregunta" });
     }
+    const fnNota = nota.ancla.funcion ? funcionPorClave(funciones, nota.ancla.funcion) : undefined;
+    const codigoFn = fnNota ? lineas.slice(fnNota.linea - 1, fnNota.linea - 1 + fnNota.lineas).join("\n") : "";
+    if (fnNota && !nota.huellaInicial) nota.huellaInicial = huella(codigoFn);
+    // "➕ Más ayuda": el siguiente escalón que esta nota todavía no dio.
+    if (p.pedido === "mas") {
+      // El escalón siguiente al más alto ya dado (nunca uno más bajo).
+      const alto = Math.max(-1, ...(nota.dados ?? []).map((d) => ESCALONES.indexOf(d)));
+      p = { ...p, pedido: ESCALONES[alto + 1] ?? "explica" };
+    }
+    // Sin escalón pedido: el que elegiste en la configuración (ayuda.porDefecto), salvo que pidas "más".
+    const porDefecto = z.config.ayuda.porDefecto !== "auto" && !PIDE_MAS.test(p.texto ?? "") ? pedidoDe(z.config.ayuda.porDefecto) : undefined;
+    const ped = pedidoDe(p.pedido) ?? (p.texto ? PEDIDOS.find((x) => x.re.test(p.texto!)) : undefined) ?? porDefecto;
     const humano = [p.texto?.trim(), ped && !p.texto ? `Pido: ${ped.que}.` : "", p.seleccion ? `Sobre esta parte:\n\`\`\`\n${p.seleccion.slice(0, 2000)}\n\`\`\`` : ""].filter(Boolean).join("\n\n");
     if (humano) nota.hilo.push(mensaje("tu", humano));
     nota.estado = "abierta";
@@ -137,7 +152,13 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
     else {
       const critical = z.isCritical(abs);
       const nivelProg = nivelDe(puntaje(loadPerfil(), lang.id));
-      const modo = critical || p.pedido === "aprender" ? "escalera" : "directo";
+      // El modo (programar / aprender) de esta función, archivo, carpeta o proyecto; lo crítico siempre en escalera.
+      const ef = modoEfectivo(z.config, rel, nota.ancla.funcion);
+      const modo = critical || p.pedido === "aprender" || ef.c.escalera ? "escalera" : "directo";
+      // En modo aprender, los snippets llegan después de que lo intentes (una respuesta tuya o un cambio en la función).
+      // Intento = cambiaste el código de la función desde que se creó la nota (preguntar dos veces no cuenta).
+      const intentado = !!fnNota && !!nota.huellaInicial && huella(codigoFn) !== nota.huellaInicial;
+      const sinSnippets = !ef.c.snippetsSinIntento && !intentado;
       const base = modo === "directo" ? 2 : NIVEL_BASE[nivelProg];
       const prev = nota.nivel ?? 0;
       let nivel = ped ? ped.nivel : prev && PIDE_MAS.test(p.texto ?? "") ? Math.min(4, prev + 1) : prev || base;
@@ -165,7 +186,8 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
         entero ? "La pregunta es sobre el ARCHIVO COMPLETO (su organización, qué funciones tiene o le faltan, cómo encaja en el proyecto), no sobre una función puntual." : "",
         fn ? `Esta nota es SOLO de la función \`${fn.nombre}\`. Habla únicamente de ella: no comentes ni sugieras cambios en otras funciones (cada una tiene su propia nota).` : "",
         contextBlock(projectContext(root, rel)),
-        libTexto ? `BIBLIOTECA DE SNIPPETS (${lang.id}):\n${libTexto}` : "",
+        libTexto && !sinSnippets ? `BIBLIOTECA DE SNIPPETS (${lang.id}):\n${libTexto}` : "",
+        sinSnippets ? "MODO APRENDER: todavía no sugieras snippets; primero que lo intente." : "",
         "Formato: listas con cada ítem en su propia línea; nada de muros de texto. Si sugieres un snippet, en \"codigo\" copia la línea después de la cual va.",
         "Conversación de la nota (lo más reciente al final):",
         nota.hilo.slice(-12).map((m) => `${m.quien === "ia" ? "TUTOR" : "PROGRAMADOR"}: ${m.texto.slice(0, 1500)}`).join("\n"),
@@ -178,26 +200,55 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
       log(`cai: respondiendo en ${rel}:${nota.ancla.linea} (nivel ${nivel})`);
       const ids = fileIdentifiers((await parse(src, lang)).root, src);
       let intento = prompt;
+      let usado: string | undefined;
+      // El texto se ve en el panel mientras se escribe (y el archivo se borra al terminar).
+      const enVivo = path.join(dataDir(root), "cache", "en-vivo", `${encodeURIComponent(rel)}#${nota.id}.txt`);
       type Respuesta = { titulo: string; que_hacer: string; respuestas: (Reply & { codigo: string })[]; nivel_usado: number };
       let respuesta: Respuesta | null = null;
       let validas: (Reply & { codigo: string })[] = [];
-      for (let k = 0; k < 2; k++) {
-        const { data, costUsd } = await ask<Respuesta>({ kind: "responder", system: SYSTEM, prompt: intento, schema: schema(), cwd: root, ...iaOpts(z.config, "mediano") });
-        costo += costUsd;
-        respuesta = data;
-        const g = guardReplies(Array.isArray(data?.respuestas) ? data.respuestas : [], nivel, ids);
-        validas = (g.ok as (Reply & { codigo: string })[]).filter((r) => r.tipo !== "snippet" || libreria.some((s) => s.nombre === parseLlamada(r.texto)?.nombre));
-        if (validas.length || k === 1) break;
-        intento = `${prompt}\n\nTu respuesta anterior no cumplió las reglas: ${g.rejected.map((r) => r.why).join("; ")}. Corrígela.`;
+      try {
+        for (let k = 0; k < 2; k++) {
+          const { data, costUsd, modelo } = await ask<Respuesta>({ kind: "responder", system: SYSTEM, prompt: intento, schema: schema(), cwd: root, ...iaOpts(z.config, "mediano"), enVivo, ref: { archivo: rel, funcion: nota.ancla.funcion } });
+          costo += costUsd;
+          if (modelo) usado = modelo;
+          respuesta = data;
+          const g = guardReplies(Array.isArray(data?.respuestas) ? data.respuestas : [], nivel, ids);
+          validas = (g.ok as (Reply & { codigo: string })[]).filter((r) => r.tipo !== "snippet" || (!sinSnippets && libreria.some((s) => s.nombre === parseLlamada(r.texto)?.nombre)));
+          if (validas.length || k === 1) break;
+          intento = `${prompt}\n\nTu respuesta anterior no cumplió las reglas: ${g.rejected.map((r) => r.why).join("; ")}. Corrígela.`;
+        }
+      } finally {
+        fs.rmSync(enVivo, { force: true }); // también si la IA falla: no queda texto viejo "en vivo"
       }
+      // Dónde va cada snippet: la línea que dijo la IA, SOLO si está dentro de la función (sin IA).
       const snippets = validas
         .filter((r) => r.tipo === "snippet")
-        .map((r) => ({ llamada: r.texto.split(/\s+—\s+|\s+--\s+/)[0]!.trim(), despues: (r.codigo ?? "").trim() }));
+        .map((r) => ({ llamada: r.texto.split(/\s+—\s+|\s+--\s+/)[0]!.trim(), ...ubicarSnippet(lineas, fnNota, (r.codigo ?? "").trim()) }));
+      const donde = snippets.map((s) => {
+        const nombre = s.llamada.split(/\s/)[0];
+        return s.lugar === "ubicado"
+          ? `⤵ \`${nombre}\` irá después de la línea ${s.linea}: \`${s.despues.slice(0, 60)}\``
+          : `⤵ \`${nombre}\` no tiene un lugar claro: al insertarlo eliges dónde (por defecto, en el cursor)`;
+      });
       const cuerpo = validas
         .filter((r) => r.tipo !== "snippet")
         .map((r) => markdown({ tipo: r.tipo, texto: r.texto, links: r.links ?? [] }))
         .concat(snippets.length ? [markdown({ tipo: "snippet", texto: validas.filter((r) => r.tipo === "snippet").map((r) => separarListas(r.texto)).join("\n"), snippets })] : []);
-      nota.hilo.push(mensaje("ia", cuerpo.join("\n\n---\n\n") || "(La respuesta daba más de lo que corresponde a este nivel y se descartó. Contame qué intentaste y seguimos.)"));
+      nota.hilo.push(
+        mensaje(
+          "ia",
+          [cuerpo.join("\n\n---\n\n") || "(La respuesta daba más de lo que corresponde a este nivel y se descartó. Contame qué intentaste y seguimos.)", ...donde].join("\n\n"),
+          { kind: p.pedido ?? "responder", ...(usado ? { modelo: usado } : {}), costo },
+        ),
+      );
+      // Qué escalones ya se dieron (para no volver a ofrecerlos).
+      const dados = new Set(nota.dados ?? []);
+      if (p.pedido && p.pedido !== "mas") dados.add(p.pedido);
+      for (const r of validas) {
+        const k = { pista: respuesta?.nivel_usado === 3 ? "pseudo" : "pista", pieza: "piezas", ejemplo: "ejemplo", plano: "plano" }[r.tipo as "pista"];
+        if (k) dados.add(k);
+      }
+      nota.dados = [...dados];
       nota.snippets.push(...snippets);
       nota.nivel = Math.max(prev, nivel);
       if (respuesta?.que_hacer) nota.accion = respuesta.que_hacer;
@@ -208,4 +259,27 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
     guardarNotas(root, rel, notas);
     return { nota, costoUsd: costo };
   }, p.linea);
+}
+
+/**
+ * Dónde va un snippet: la línea que indicó la IA, pero SOLO si está dentro de la función de la nota
+ * (exacta o, si no, la más parecida por palabras). Si no hay, queda "sin ubicar" y al insertarlo eliges.
+ */
+export function ubicarSnippet(lineas: string[], fn: Funcion | undefined, despues: string): { despues: string; linea?: number; lugar: "ubicado" | "sin ubicar" } {
+  if (!fn || !despues) return { despues, lugar: "sin ubicar" };
+  const desde = fn.linea - 1;
+  const hasta = fn.linea - 1 + fn.lineas;
+  for (let i = desde; i < hasta; i++) if (lineas[i]!.trim() === despues) return { despues, linea: i + 1, lugar: "ubicado" };
+  const palabras = (t: string) => new Set(t.toLowerCase().match(/[\p{L}\d_$]+/gu) ?? []);
+  const objetivo = palabras(despues);
+  let mejor = -1;
+  let puntaje = 0;
+  for (let i = desde; i < hasta; i++) {
+    const p = palabras(lineas[i]!);
+    if (!p.size || !objetivo.size) continue;
+    const comunes = [...p].filter((x) => objetivo.has(x)).length;
+    const j = comunes / (p.size + objetivo.size - comunes);
+    if (j > puntaje) [mejor, puntaje] = [i, j];
+  }
+  return mejor >= 0 && puntaje >= 0.5 ? { despues: lineas[mejor]!.trim(), linea: mejor + 1, lugar: "ubicado" } : { despues, lugar: "sin ubicar" };
 }

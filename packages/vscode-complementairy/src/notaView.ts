@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as vscode from "vscode";
-import { claveDeSimbolo, correr, mostrarError, notasDe, relDe, root, vista, type Nota } from "./comun";
+import { claveDeSimbolo, correr, leerConfig, modoEfectivo, MODOS, mostrarError, notasDe, relDe, root, vista, type Nota } from "./comun";
+import { resaltarDestino } from "./acciones";
 import { BOTONES, ESTADO, ICONO, type NotasView } from "./notasView";
 
 /**
@@ -84,6 +85,8 @@ export class NotaPanel implements vscode.WebviewViewProvider {
   private fijo = false;
   private timer?: NodeJS.Timeout;
   private pensando = new Set<string>();
+  /** Lo que la IA va escribiendo (en vivo) para la nota que se ve. */
+  private vivo = "";
 
   constructor(private readonly notas: NotasView) {}
 
@@ -102,10 +105,14 @@ export class NotaPanel implements vscode.WebviewViewProvider {
       vscode.window.onDidChangeTextEditorSelection((e) => e.textEditor.document.uri.scheme === "file" && this.programar()),
       vscode.window.onDidChangeActiveTextEditor(() => this.programar()),
       this.notas.onCambio(() => void this.render()),
+      ...this.vigilarEnVivo(),
       this.notas.onPensando((p) => {
         const k = `${p.uri}#${p.id ?? "nueva"}`;
         if (p.activo) this.pensando.add(k);
-        else this.pensando.delete(k);
+        else {
+          this.pensando.delete(k);
+          this.vivo = "";
+        }
         void this.render();
       }),
       vscode.commands.registerCommand("cai.notaPanel.mostrar", async (uri: string, id: string, o?: { silencioso?: boolean }) => {
@@ -136,6 +143,33 @@ export class NotaPanel implements vscode.WebviewViewProvider {
   }
 
   /** Muestra el panel SIN quitarle el foco al editor (si ya existe); la primera vez hay que abrirlo. */
+  /** La respuesta se ve MIENTRAS se escribe: la CLI deja el texto parcial en .cai/cache/en-vivo/. */
+  private vigilarEnVivo(): vscode.Disposable[] {
+    const w = vscode.workspace.createFileSystemWatcher("**/{.cai,.aicode}/cache/en-vivo/*.txt");
+    let ultimo = 0;
+    const leer = (u: vscode.Uri, borrado = false) => {
+      const { doc, nota } = this.notaActual();
+      const cwd = doc && root(doc);
+      if (!doc || !cwd || !nota) return;
+      if (path.basename(u.fsPath) !== `${encodeURIComponent(relDe(cwd, doc.uri.fsPath))}#${nota.id}.txt`) return;
+      this.vivo = borrado ? "" : (() => {
+        try {
+          return fs.readFileSync(u.fsPath, "utf8");
+        } catch {
+          return "";
+        }
+      })();
+      if (Date.now() - ultimo > 200 || borrado) {
+        ultimo = Date.now();
+        void this.render();
+      }
+    };
+    w.onDidCreate((u) => leer(u));
+    w.onDidChange((u) => leer(u));
+    w.onDidDelete((u) => leer(u, true));
+    return [w];
+  }
+
   private async enfocar(): Promise<void> {
     if (this.view) this.view.show(true);
     else await vscode.commands.executeCommand("cai.nota.focus");
@@ -203,8 +237,29 @@ export class NotaPanel implements vscode.WebviewViewProvider {
           if (typeof arg === "string" && arg.trim()) return this.notas.pedir(doc, { ...base, texto: arg.trim() });
           return;
         case "verificar":
-          if (modo.funcion) return this.notas.verificar(doc, modo.funcion, nota?.id);
+          // Botón: con "otra mirada" (plan pensado sin ver tu código), contra el sesgo de lo ya hecho.
+          if (modo.funcion) return this.notas.verificar(doc, modo.funcion, nota?.id, { independiente: true });
           return void vscode.commands.executeCommand("cai.revisar");
+        case "verificarExplicando":
+          // Modo aprender: tu explicación con tus palabras se compara con lo que el código hace.
+          if (modo.funcion && typeof arg === "string" && arg.trim()) return this.notas.verificar(doc, modo.funcion, nota?.id, { independiente: true, explicacion: arg.trim() });
+          return;
+        case "resaltar":
+          return resaltarDestino(doc, nota, arg === "" || arg === undefined ? null : Number(arg));
+        case "predecir":
+          await vscode.window.showTextDocument(doc, { preview: false });
+          return void vscode.commands.executeCommand("cai.predecir");
+        case "modo": {
+          const cwd = root(doc);
+          if (!cwd || typeof arg !== "string") return;
+          const rel = relDe(cwd, doc.uri.fsPath);
+          const objetivo = modo.funcion ? ["--funcion", `${rel}:${modo.funcion}`] : ["--archivo", rel];
+          await correr(["modo", arg, ...objetivo], cwd);
+          vscode.window.setStatusBarMessage(`ComplementAIry: ${modo.funcion ? modo.funcion.replace(/#\d+$/, "") : "este archivo"} → ${arg === "heredar" ? "modo heredado" : `modo ${arg}`} (lo ya hecho no cambia)`, 6000);
+          this.notas.dibujar(doc);
+          void vscode.commands.executeCommand("cai.estado.actualizarModo");
+          return void this.render();
+        }
         case "insertar":
           if (nota) return void vscode.commands.executeCommand("cai.nota.insertar", doc.uri.toString(), nota.id, Number(arg));
           return;
@@ -285,6 +340,7 @@ button:hover{filter:brightness(1.15)}button:disabled{opacity:.5;cursor:default}
 .vacio{color:var(--vscode-descriptionForeground);margin-top:12px}
 details summary{cursor:pointer;color:var(--vscode-descriptionForeground);margin:6px 0}
 #caja{position:sticky;bottom:0;background:var(--vscode-sideBar-background);padding-top:6px}
+select{font:inherit;color:var(--vscode-dropdown-foreground);background:var(--vscode-dropdown-background);border:1px solid var(--vscode-dropdown-border,transparent)}
 textarea{width:100%;box-sizing:border-box;min-height:52px;resize:vertical;font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);padding:4px}
 .fila{display:flex;gap:4px;justify-content:flex-end;margin-top:4px}
 code{font-family:var(--vscode-editor-font-family)}
@@ -314,6 +370,17 @@ document.addEventListener("click", (e) => {
   if (env && !env.disabled && texto.value.trim()) { vscode.postMessage({ cmd: env.dataset.envio, arg: texto.value }); texto.value = ""; return; }
   const a = e.target.closest("a[href]");
   if (a) { e.preventDefault(); vscode.postMessage({ cmd: "link", arg: a.getAttribute("href") }); }
+});
+document.addEventListener("mouseover", (e) => {
+  const b = e.target.closest("[data-cmd=insertar]");
+  if (b) vscode.postMessage({ cmd: "resaltar", arg: b.dataset.arg });
+});
+document.addEventListener("mouseout", (e) => {
+  if (e.target.closest("[data-cmd=insertar]")) vscode.postMessage({ cmd: "resaltar", arg: "" });
+});
+document.addEventListener("change", (e) => {
+  const s = e.target.closest("select[data-cmd]");
+  if (s) vscode.postMessage({ cmd: s.dataset.cmd, arg: s.value });
 });
 texto.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && principal && texto.value.trim()) { e.preventDefault(); vscode.postMessage({ cmd: principal, arg: texto.value }); texto.value = ""; }
@@ -350,10 +417,22 @@ texto.addEventListener("keydown", (e) => {
       const v = nota?.verificacion;
       html += `<h2>${m.funcion ? `<code>${esc(m.funcion.replace(/#\d+$/, ""))}</code>` : "📄 Este archivo"}${v ? `<span class="estado">${ESTADO[v.estado]}</span>` : nota ? '<span class="estado">sin verificar</span>' : ""}</h2>`;
       html += `<div class="sub">${esc(rel)}${nota ? ` · línea ${nota.ancla.linea}` : ""}${nota?.estado === "resuelta" ? " · nota cerrada (si pides algo, se reabre)" : ""} ${this.boton("ir", "Ir")}</div>`;
-      if (ocupado) html += '<div class="pensando">⏳ pensando…</div>';
+      // El modo que rige aquí (y de dónde viene); cambiarlo no toca lo ya hecho.
+      const cfg = cwd ? leerConfig(cwd) : {};
+      const ef = modoEfectivo(cfg, rel, m.funcion);
+      const opcion = (v: string, t: string, sel: boolean) => `<option value="${v}"${sel ? " selected" : ""}>${t}</option>`;
+      const propio = m.funcion ? cfg.modos?.porFuncion?.[`${rel}:${m.funcion}`] : cfg.modos?.porArchivo?.[rel];
+      // Lo que regiría sin un modo propio aquí (para mostrar "heredado (…)").
+      const heredado = m.funcion ? modoEfectivo(cfg, rel).modo : modoEfectivo({ ...cfg, modos: { ...cfg.modos, porArchivo: {} } }, rel).modo;
+      html += `<div class="sub">Modo ${m.funcion ? "de esta función" : "de este archivo"}: <select data-cmd="modo">${opcion("heredar", `heredado (${heredado})`, !propio)}${opcion("programar", "programar", propio === "programar")}${opcion("aprender", "aprender", propio === "aprender")}</select> <span class="quien">· rige: ${ef.modo} (por ${{ funcion: "esta función", archivo: "el archivo", carpeta: "la carpeta", proyecto: "el proyecto" }[ef.origen]})</span></div>`;
+      if (ocupado) html += `<div class="pensando">⏳ pensando…${this.vivo ? `<div class="msg">${esc(this.vivo).replace(/\n/g, "<br>")}</div>` : ""}</div>`;
       if (nota?.accion) html += `<div class="accion"><b>▶ Qué hacer:</b> ${esc(nota.accion)}</div>`;
-      const botones = BOTONES.filter((b) => (m.funcion ? b.pedido !== "plano" : b.pedido !== "tests")).map((b) => this.boton("pedir", b.etiqueta, b.pedido, { off: ocupado }));
+      // Lo que ya se dio no se vuelve a ofrecer (queda en el historial); "Más ayuda" pide el escalón que falta.
+      const dados = new Set(nota?.dados ?? []);
+      const botones = BOTONES.filter((b) => (m.funcion ? b.pedido !== "plano" : b.pedido !== "tests") && !dados.has(b.pedido)).map((b) => this.boton("pedir", b.etiqueta, b.pedido, { off: ocupado }));
+      if (["pista", "piezas", "pseudo", "ejemplo"].some((e) => dados.has(e))) botones.unshift(this.boton("pedir", "➕ Más ayuda", "mas", { off: ocupado }));
       botones.push(this.boton("verificar", m.funcion ? "✅ ¿Quedó lista?" : "🔎 Revisar archivo", undefined, { prim: true, off: ocupado }));
+      if (m.funcion && MODOS[ef.modo].predecir) botones.push(this.boton("predecir", "🎯 Predecir", undefined, { off: ocupado }));
       if (nota) nota.snippets.forEach((s, i) => botones.push(this.boton("insertar", `⤵ Insertar <code>${esc(s.llamada.split(/\s/)[0]!)}</code>`, i, { off: ocupado })));
       if (nota && nota.estado === "abierta") botones.push(this.boton("resolver", "✓ Resuelta", undefined, { off: ocupado }));
       html += `<div class="botones">${botones.join("")}</div>`;
@@ -361,7 +440,10 @@ texto.addEventListener("keydown", (e) => {
       else {
         // Lo más nuevo arriba; lo viejo, plegado.
         const msgs = [...nota.hilo].reverse();
-        const render = async (x: Nota["hilo"][number]) => `<div class="msg"><div class="quien">${x.quien === "ia" ? `${ICONO[nota.tipo] ?? "📝"} ComplementAIry` : "Tú"} · ${new Date(x.fecha).toLocaleString()}</div>${await this.md(x.texto)}</div>`;
+        // De dónde salió cada respuesta: tipo, modelo y costo (para saber qué pasó).
+        const meta = (x: Nota["hilo"][number]) => (x.meta ? ` · ${esc(x.meta.kind ?? "")}${x.meta.modelo ? ` · ${esc(x.meta.modelo.replace(/^claude-/, ""))}` : ""}${x.meta.costo !== undefined ? ` · US$${x.meta.costo.toFixed(3)}` : ""}` : "");
+        const render = async (x: Nota["hilo"][number]) => `<div class="msg"><div class="quien">${x.quien === "ia" ? `${ICONO[nota.tipo] ?? "📝"} ComplementAIry` : "Tú"} · ${new Date(x.fecha).toLocaleString()}${meta(x)}</div>${await this.md(x.texto)}</div>`;
+        if (nota.explicacion) html += `<div class="accion"><b>Tu explicación</b> ${nota.explicacion.coincide ? "✓ coincide con el código" : "✗ no coincide del todo"}: “${esc(nota.explicacion.texto)}”${nota.explicacion.comentario ? `<div class="quien">${esc(nota.explicacion.comentario)}</div>` : ""}</div>`;
         for (const x of msgs.slice(0, 3)) html += await render(x);
         if (msgs.length > 3) {
           html += `<details><summary>${msgs.length - 3} mensaje(s) anteriores</summary>`;
@@ -369,7 +451,10 @@ texto.addEventListener("keydown", (e) => {
           html += "</details>";
         }
       }
-      caja = { placeholder: m.funcion ? `Escríbele sobre ${m.funcion} (Enter envía; también !pista, !pseudo…)` : "Pregunta sobre el archivo (Enter envía)", botones: [{ cmd: "texto", texto: "Enviar" }], ocupado };
+      const nombre = m.funcion?.replace(/#\d+$/, "");
+      caja = MODOS[ef.modo].explicar && m.funcion
+        ? { placeholder: `Escríbele sobre ${nombre}, o explica con tus palabras qué hace y verifica`, botones: [{ cmd: "texto", texto: "Enviar" }, { cmd: "verificarExplicando", texto: "✅ Verificar con mi explicación" }], ocupado }
+        : { placeholder: m.funcion ? `Escríbele sobre ${nombre} (Enter envía; también !pista, !pseudo…)` : "Pregunta sobre el archivo (Enter envía)", botones: [{ cmd: "texto", texto: "Enviar" }], ocupado };
     } else if (m.tipo === "tarea") {
       const t = m.tarea;
       const origen = { estructura: "de la estructura del proyecto", panorama: "del panorama", plano: "del plano del archivo", manual: "" }[t.origen ?? "manual"] ?? "";

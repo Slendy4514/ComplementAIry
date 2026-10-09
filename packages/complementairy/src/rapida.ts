@@ -7,11 +7,12 @@ import { cargarNotas } from "./notas.js";
 import { claveFuncion, funcionEn, funcionesDe } from "./notasFuncion.js";
 import { iaOpts } from "./tutor.js";
 import { huella } from "./verificar.js";
+import { modoEfectivo } from "./modos.js";
 
 /**
  * Sugerencia rápida: una pista de UNA línea donde estás escribiendo (la extensión la muestra en gris
  * al final de la línea; no se inserta nada). Solo dentro de una función con nota abierta.
- * Límites sin IA: caché por código + línea, una cada 20 s por función y 30 por hora.
+ * Límites sin IA: caché por código + línea, una cada 6 s por función y 60 por hora.
  */
 
 interface Cache {
@@ -20,8 +21,9 @@ interface Cache {
   llamadas: number[];
 }
 
-const MAX_HORA = 30;
-const ENTRE_MS = 20_000;
+// Con el proceso abierto (cai servir) cada una tarda ~1 s y cuesta ~US$0,002.
+const MAX_HORA = 60;
+const ENTRE_MS = 6_000;
 const archivo = (root: string) => path.join(dataDir(root), "cache", "rapidas.json");
 
 function cargar(root: string): Cache {
@@ -44,6 +46,8 @@ export async function rapida(root: string, rel: string, linea: number): Promise<
   if (!f) return { texto: "", motivo: "fuera de una función", costoUsd: 0 };
   const nota = cargarNotas(root, rel, src).find((n) => n.estado === "abierta" && n.ancla.funcion === claveFuncion(funciones, f));
   if (!nota) return { texto: "", motivo: "la función no tiene nota", costoUsd: 0 };
+  // En modo aprender no hay sugerencias rápidas: primero lo piensas tú.
+  if (!modoEfectivo(z.config, rel, claveFuncion(funciones, f)).c.rapidas) return { texto: "", motivo: "modo aprender", costoUsd: 0 };
 
   const lineas = src.split(/\r?\n/);
   const codigo = lineas.slice(f.linea - 1, f.linea - 1 + f.lineas);
@@ -58,14 +62,21 @@ export async function rapida(root: string, rel: string, linea: number): Promise<
   if (ahora - (c.ultima[`${rel}:${f.nombre}`] ?? 0) < ENTRE_MS) return { texto: "", motivo: "espera (una cada 20 s por función)", costoUsd: 0 };
   if (c.llamadas.length >= MAX_HORA) return { texto: "", motivo: "límite por hora", costoUsd: 0 };
 
+  // Se registra ANTES de llamar: un segundo pedido mientras este está en curso respeta la espera.
+  c.ultima[`${rel}:${f.nombre}`] = ahora;
+  c.llamadas.push(ahora);
+  fs.mkdirSync(path.dirname(archivo(root)), { recursive: true });
+  fs.writeFileSync(archivo(root), JSON.stringify(c));
   const { data, costUsd } = await ask<{ texto: string }>({
     kind: "rapida",
+    ref: { archivo: rel, funcion: f.nombre },
     system: SYSTEM,
     cwd: root,
     sinHerramientas: true,
     schema: { type: "object", additionalProperties: false, required: ["texto"], properties: { texto: { type: "string" } } },
     ...iaOpts(z.config, "chico"),
-    effort: "low", // una línea: sin razonamiento largo (más rápido y barato)
+    effort: "low",
+    sinRazonar: true, // una línea: sin razonamiento largo (más rápido y barato)
     prompt: [
       nota.accion ? `Lo que su nota dice que haga: ${nota.accion}` : "",
       `Función ${f.nombre} (◀ = línea del cursor):`,
@@ -76,8 +87,6 @@ export async function rapida(root: string, rel: string, linea: number): Promise<
   });
   const texto = (data.texto ?? "").replace(/\s+/g, " ").trim().slice(0, 100);
   c.respuestas[clave] = texto;
-  c.ultima[`${rel}:${f.nombre}`] = ahora;
-  c.llamadas.push(ahora);
   // La caché no crece sin fin: se quedan las últimas 300.
   const claves = Object.keys(c.respuestas);
   for (const k of claves.slice(0, Math.max(0, claves.length - 300))) delete c.respuestas[k];

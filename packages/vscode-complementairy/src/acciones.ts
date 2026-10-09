@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { correr, guardar, mostrarError, root, vista, type Nota } from "./comun";
 import { BOTONES, type NotasView } from "./notasView";
+import { funcionesDe } from "./notaView";
 
 /**
  * Lo que se hace con un clic sobre el código: insertar el snippet de una nota DONDE VA (dentro de
@@ -8,16 +9,45 @@ import { BOTONES, type NotasView } from "./notasView";
  * función. La IA nunca inserta: el snippet entra solo por tu clic, con huecos para completar con Tab.
  */
 
-/** Línea después de la cual va el snippet: la de `despues` más cercana al ancla (hacia abajo), o el ancla. */
-function lineaDestino(doc: vscode.TextDocument, n: Nota, despues: string): number {
+const vistaPrevia = vscode.window.createTextEditorDecorationType({
+  after: { color: new vscode.ThemeColor("editorCodeLens.foreground"), fontStyle: "italic", margin: "0 0 0 1em" },
+  backgroundColor: new vscode.ThemeColor("editor.wordHighlightBackground"),
+  isWholeLine: true,
+});
+
+/**
+ * Línea (0-based) después de la cual va el snippet: la validada por la CLI dentro de la función
+ * (`linea`, si su texto sigue igual), o la de `despues` más cercana al ancla; `undefined` si no tiene lugar.
+ */
+async function lineaDestino(doc: vscode.TextDocument, n: Nota, s: Nota["snippets"][number]): Promise<number | undefined> {
+  if (s.lugar === "sin ubicar") return undefined;
+  const t = s.despues.trim();
+  if (s.linea && s.linea <= doc.lineCount && doc.lineAt(s.linea - 1).text.trim() === t) return s.linea - 1;
+  // Si el código se movió: se busca esa línea, pero SOLO dentro de la función de la nota.
   const ancla = Math.min(Math.max(0, n.ancla.linea - 1), doc.lineCount - 1);
-  const t = despues.trim();
+  const fn = (await funcionesDe(doc)).filter((f) => f.range.start.line <= ancla && ancla <= f.range.end.line).sort((a, b) => a.range.end.line - a.range.start.line - (b.range.end.line - b.range.start.line))[0];
+  const hasta = fn ? fn.range.end.line : ancla;
   if (t)
-    for (let k = ancla; k < Math.min(doc.lineCount, ancla + 120); k++)
+    for (let k = ancla; k <= Math.min(hasta, doc.lineCount - 1); k++)
       if (doc.lineAt(k).text.trim() === t) return k;
-  return ancla;
+  return undefined;
 }
 
+/** Resalta (o limpia, con i = null) la línea donde iría un snippet: al pasar el mouse por su botón. */
+export async function resaltarDestino(doc: vscode.TextDocument, n: Nota | undefined, i: number | null): Promise<void> {
+  const ed = vscode.window.visibleTextEditors.find((e) => e.document === doc);
+  if (!ed) return;
+  const s = n && i !== null ? n.snippets[i] : undefined;
+  const d = n && s ? await lineaDestino(doc, n, s) : undefined;
+  ed.setDecorations(vistaPrevia, d === undefined ? [] : [{ range: new vscode.Range(d, 0, d, 0), renderOptions: { after: { contentText: `⤵ aquí iría ${s!.llamada.split(/\s/)[0]}` } } }]);
+  if (d !== undefined) ed.revealRange(new vscode.Range(d, 0, d, 0), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+}
+
+/**
+ * Insertar un snippet de una nota, en dos pasos: primero se ve DÓNDE iría (vista previa en gris) y
+ * eliges "Aquí", "En el cursor" o "Cancelar". La IA nunca inserta: solo tu clic. Queda registrado en
+ * la nota qué insertaste y dónde (para saber qué vino de un snippet).
+ */
 export async function insertarSnippet(doc: vscode.TextDocument, n: Nota, i: number): Promise<void> {
   const cwd = root(doc);
   const s = n.snippets[i];
@@ -25,8 +55,22 @@ export async function insertarSnippet(doc: vscode.TextDocument, n: Nota, i: numb
   try {
     const { cuerpo } = JSON.parse(await correr(["snippet", "cuerpo", doc.uri.fsPath, s.llamada], cwd)) as { cuerpo: string };
     const ed = await vscode.window.showTextDocument(doc, { preview: false });
-    const k = lineaDestino(doc, n, s.despues);
-    const linea = doc.lineAt(k);
+    const cursor = ed.selection.active.line;
+    const destino = await lineaDestino(doc, n, s);
+    const nombre = s.llamada.split(/\s/)[0]!;
+    type Op = vscode.QuickPickItem & { linea?: number };
+    const ops: Op[] = [];
+    if (destino !== undefined) {
+      ed.setDecorations(vistaPrevia, [{ range: new vscode.Range(destino, 0, destino, 0), renderOptions: { after: { contentText: `⤵ aquí iría ${nombre}: ${cuerpo.split("\n")[0]!.replace(/\$\{\d+:([^}]*)\}/g, "$1").replace(/\$\d/g, "").slice(0, 60)}…` } } }]);
+      ed.revealRange(new vscode.Range(destino, 0, destino, 0), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+      ops.push({ label: `$(arrow-down) Aquí (después de la línea ${destino + 1})`, description: doc.lineAt(destino).text.trim().slice(0, 60), linea: destino });
+    }
+    ops.push({ label: `$(location) En el cursor (después de la línea ${cursor + 1})`, description: destino === undefined ? "no tiene un lugar claro dentro de la función" : "", linea: cursor });
+    ops.push({ label: "$(close) Cancelar" });
+    const op = await vscode.window.showQuickPick(ops, { placeHolder: `¿Dónde insertar ${nombre}?` });
+    ed.setDecorations(vistaPrevia, []);
+    if (op?.linea === undefined) return;
+    const linea = doc.lineAt(op.linea);
     // Si la línea abre un bloque (`{`, `:`, `=>`), el snippet va un nivel más adentro.
     const abre = /(\{|:|=>|\()\s*$/.test(linea.text.replace(/\/\/.*$|#.*$/, "").trimEnd());
     const unidad = ed.options.insertSpaces ? " ".repeat(Number(ed.options.tabSize) || 2) : "\t";
@@ -34,7 +78,9 @@ export async function insertarSnippet(doc: vscode.TextDocument, n: Nota, i: numb
     const texto = "\n" + cuerpo.split("\n").map((l) => extra + l).join("\n");
     // VSCode agrega a cada línea la sangría de la línea de destino: queda alineado con el código.
     await ed.insertSnippet(new vscode.SnippetString(texto), linea.range.end);
-    vscode.window.setStatusBarMessage(`ComplementAIry: snippet ${s.llamada.split(/\s/)[0]} insertado (Tab para pasar de un hueco al otro)`, 6000);
+    vscode.window.setStatusBarMessage(`ComplementAIry: snippet ${nombre} insertado (Tab para pasar de un hueco al otro)`, 6000);
+    // Procedencia: queda en la nota qué insertaste y dónde.
+    void correr(["notas", "anotar", doc.uri.fsPath, n.id, "--texto", `⤵ Inserté el snippet \`${s.llamada}\` después de la línea ${op.linea + 1}.`], cwd, { silencioso: true }).catch(() => undefined);
   } catch (e) {
     mostrarError(e);
   }

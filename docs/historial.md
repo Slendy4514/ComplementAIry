@@ -253,3 +253,31 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - la configuración podía borrar claves del usuario.
 - **Prueba real:** nota → 🔴 falta (validación) → el usuario la agrega → 🟡 casi (falta validar monto y tasa). La conversación sobre una pregunta explicó por qué importaba, con un ejemplo.
 - Selftest: 151/151.
+
+## v0.8: rápido, sin sesgo y con modos (2026-10-09)
+- **Pedidos del usuario:**
+  - no volver a ofrecer lo que ya se dio;
+  - que los snippets vayan donde corresponde y se vea dónde antes de insertarlos;
+  - más dinamismo y respuestas rápidas;
+  - quitar el sesgo hacia lo ya hecho;
+  - control con velocidad: avanzar rápido sin perder de vista qué pasa.
+- **Decisiones del usuario:**
+  - revisión a ciegas siempre, y "otra mirada" en "Revisar" y en "¿quedó lista?" con el botón;
+  - **modos** programar/aprender que se eligen por proyecto, carpeta, archivo o función, sin romper lo ya hecho (la explicación con tus palabras vive en el modo aprender);
+  - proceso de Claude Code abierto, activado por defecto, con respaldo.
+- **Investigación:** Agent SDK en modo de entrada continua; Cross-Context Review (arXiv 2603.12123); encuadre en la revisión de código (arXiv 2603.18740); anclaje en LLMs (arXiv 2412.06593); Kazemitabaar (IUI'25); Anthropic (2026) sobre la formación de habilidades; Bastani (PNAS 2025); METR (2025).
+- **Hecho:**
+  - modos con precedencia función > archivo > carpeta (la más específica) > proyecto, guardados en la configuración;
+  - escalones ya dados y "➕ Más ayuda";
+  - snippets ubicados dentro de la función, con vista previa, elección del lugar y registro en la nota;
+  - **proceso abierto** (`cai servir`): medido en **~1 s y ~US$0,002** por sugerencia (antes ~20 s y ~US$0,016). La clave fue desactivar el razonamiento extendido: con él, el modelo chico "pensaba" más de 15 s;
+  - texto en vivo (solo el título y el "qué hacer", hasta pasar el filtro);
+  - revisión a ciegas y "otra mirada". En la prueba real, la otra mirada encontró que con una tasa diminuta `factor − 1 = 0` daba NaN;
+  - "Qué hizo la IA", metadatos por respuesta, líneas sin revisar, comprensión medida en el panorama, modo y siguiente paso en la barra de estado.
+- **Revisión independiente:** encontró 20 problemas, todos corregidos con tests `[rev8]`. Los principales:
+  - tras un tiempo agotado, el proceso abierto podía cruzar respuestas entre pedidos;
+  - una sugerencia podía cobrarse hasta tres veces;
+  - con comillas se podía esquivar el bloqueo del chat;
+  - el texto en vivo mostraba respuestas que el filtro iba a descartar;
+  - cambiar el modo de una función tocaba notas.
+- Selftest: 161/161.

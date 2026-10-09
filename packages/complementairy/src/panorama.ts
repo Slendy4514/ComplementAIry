@@ -12,6 +12,7 @@ import { loadPerfil, nivelDe } from "./profile.js";
 import { findThreads } from "./threads.js";
 import { agregarPreguntas, parseMemoria, sinSugerencia, sobreElCodigo, sugerenciaDe, unaLinea, type Memoria } from "./memoria.js";
 import { agregarTareas, cargarTareas, guardarTareas, rutasDe } from "./siguiente.js";
+import type { Nota } from "./notas.js";
 import { iaOpts } from "./tutor.js";
 
 /**
@@ -338,6 +339,12 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
   const sinAct = archivos.filter((a) => a.sinActivar);
   if (sinAct.length) lineas.push(`- Snippets sugeridos sin activar: ${sinAct.map((a) => `${a.rel} (${a.sinActivar})`).join(", ")}.`);
   if (pat.length) lineas.push(`- Tus errores más frecuentes: ${pat.map(([k, v]) => `${k} (${v.veces})`).join(", ")}.`);
+  // Comprensión medida (sin IA): funciones que explicaste con tus palabras o cuyo resultado predijiste bien.
+  const notasProy = todasLasNotasConResueltas(root);
+  const explicadas = new Set(notasProy.filter((n) => n.explicacion?.coincide).map((n) => `${n.archivo}:${n.ancla.funcion}`));
+  const predichas = new Set(notasProy.filter((n) => n.prediccion && n.estado === "resuelta").map((n) => `${n.archivo}:${n.prediccion!.funcion}`));
+  const totalFn = archivos.reduce((n, a) => n + a.funciones, 0);
+  if (explicadas.size || predichas.size) lineas.push(`- Comprensión: ${new Set([...explicadas, ...predichas]).size} de ${totalFn} funciones explicadas con tus palabras o predichas (modo aprender).`);
   if (uso.length) lineas.push(`- IA en los últimos 7 días: ${uso.length} llamadas, US$${uso.reduce((n, u) => n + (u.costo ?? 0), 0).toFixed(2)} (detalle: \`cai uso\`).`);
   lineas.push("");
   const out = path.join(dir, "panorama.md");
@@ -407,4 +414,18 @@ export function estadoPanorama(root: string): { existe: boolean; fecha?: string;
     }
   });
   return { existe: true, fecha: new Date(t).toISOString(), cambiados };
+}
+
+/** Todas las notas del proyecto, abiertas y cerradas (para medir comprensión). */
+function todasLasNotasConResueltas(root: string): Nota[] {
+  const d = path.join(dataDir(root), "notas");
+  if (!fs.existsSync(d)) return [];
+  const out: Nota[] = [];
+  for (const f of fs.readdirSync(d).filter((x) => x.endsWith(".json")))
+    try {
+      out.push(...((JSON.parse(fs.readFileSync(path.join(d, f), "utf8")) as { notas: Nota[] }).notas ?? []));
+    } catch {
+      /* dañado: se ignora */
+    }
+  return out;
 }

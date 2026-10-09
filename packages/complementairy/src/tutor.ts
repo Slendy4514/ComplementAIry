@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parse } from "./comments.js";
 import { contextBlock, projectContext, CRITERIO } from "./context.js";
+import { modoEfectivo } from "./modos.js";
 import { cargarNotas } from "./notas.js";
 import { responderNota } from "./responder.js";
 import { medir } from "./metricas.js";
@@ -146,6 +147,8 @@ interface Task {
   subIndex: number;
   subTotal: number;
   prompt: string;
+  /** Modo aprender sin un intento todavía: no se aceptan snippets. */
+  sinSnippets?: boolean;
 }
 
 export interface GuiaResult {
@@ -209,7 +212,10 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
     // Solo se sube de nivel si se pide más ayuda explícitamente. Una pregunta nueva vuelve al inicio;
     // un @yo: (intento) se evalúa al mismo nivel.
     const pideMas = /!mas\b|m[aá]s ayuda|dame m[aá]s|qu[eé] m[aá]s|no entiendo|otra pista|sigo sin|no me sale|m[aá]s detalle/i.test(lastHuman);
-    const modo: "directo" | "escalera" = critical || /!aprender\b/.test(lastHuman) ? "escalera" : "directo";
+    const ef = modoEfectivo(z.config, rel);
+    const modo: "directo" | "escalera" = critical || /!aprender\b/.test(lastHuman) || ef.c.escalera ? "escalera" : "directo";
+    // Modo aprender: snippets recién después de un intento tuyo (un @yo:).
+    const sinSnippets = !ef.c.snippetsSinIntento && !t.turns.some((x) => x.quien === "humano" && x.intento);
     const base = modo === "directo" ? 2 : NIVEL_BASE[nivelProg];
     let level = prev === 0 ? base : pideMas ? Math.min(4, Math.max(prev, base) + 1) : t.lastHuman?.kind === "ia" ? base : Math.max(prev, base);
     let sinIntento = false;
@@ -248,6 +254,7 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
     }
     subs.forEach((sub, i) => {
       tasks.push({
+        sinSnippets,
         thread: t,
         id,
         turn: t.aiTurns + 1,
@@ -267,7 +274,8 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
                 .map((sn) => `${sn.nombre}:\n${sn.body.join("\n")}`)
                 .join("\n\n")}`
             : "",
-          bibliotecaTexto ? `BIBLIOTECA DE SNIPPETS (${lang.id}):\n${bibliotecaTexto}` : "",
+          bibliotecaTexto && !sinSnippets ? `BIBLIOTECA DE SNIPPETS (${lang.id}):\n${bibliotecaTexto}` : "",
+          sinSnippets ? "MODO APRENDER: todavía no sugieras snippets; primero que lo intente (con un @yo:)." : "",
           sinIntento ? "En zona crítica el programador pidió más ayuda sin intentar nada: no avances, pedile un intento." : "",
           ctx ? `\n${ctx}\n` : "",
           "Conversación del hilo:",
@@ -313,6 +321,10 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
         // Sugerencias de snippet: solo de la biblioteca (determinista).
         g.ok = g.ok.filter((r) => {
           if (r.tipo !== "snippet") return true;
+          if (task.sinSnippets) {
+            g.rejected.push({ reply: r, why: "modo aprender: snippets recién después de un intento" });
+            return false;
+          }
           const ll = parseLlamada(r.texto);
           if (ll && libreria.some((sn) => sn.nombre === ll.nombre)) return true;
           g.rejected.push({ reply: r, why: `sugirió un snippet que no existe en la biblioteca (${ll?.nombre ?? "?"})` });

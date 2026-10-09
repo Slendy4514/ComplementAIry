@@ -30,7 +30,11 @@ import { acompanar } from "./acompanante.js";
 import { init } from "./init.js";
 import { actualizarMemoria, agregarPreguntas, leerMemoria, panorama, preguntasAbiertas, responderPregunta } from "./panorama.js";
 import { planoProyecto } from "./plano.js";
-import { verificar } from "./verificar.js";
+import { cegar, verificar } from "./verificar.js";
+import { ubicarSnippet } from "./responder.js";
+import { modoEfectivo } from "./modos.js";
+import { conSesion, Sesion, type Fabrica } from "./sesion.js";
+import { atender } from "./servir.js";
 import { rapida } from "./rapida.js";
 import { cargarDialogos, conversar, olvidarDialogo } from "./dialogo.js";
 import { sobreElCodigo } from "./memoria.js";
@@ -1555,6 +1559,153 @@ CASES.push(
       fs.writeFileSync(path.join(r, "src/cuota.ts"), TS.replace("  return monto / meses;", "  // @guia[c1.1] pista: x\n  return monto / meses;"));
       const reescribe = await edit(r, "src/cuota.ts", "// @guia[c1.1] pista: x", "// @guia[c1.1] pista: otra cosa");
       return denied(reescribe) && generadosPor("cai tareas descartar t1") === null && generadosPor("cai tareas hecha t1") !== null;
+    },
+  },
+  {
+    name: "[v0.8] lo ya dado no se ofrece: 'Más ayuda' pide el escalón que falta",
+    run: async (r) => {
+      conNotas(r);
+      const calls = fakeLLM(() => respNota());
+      const a = await responderNota(r, { archivo: "src/cuota.ts", linea: 3, pedido: "pista" });
+      const b = await responderNota(r, { archivo: "src/cuota.ts", notaId: a.nota.id, pedido: "mas" });
+      return levelIn(calls[1]!) === 2 && b.nota.dados!.includes("pista") && b.nota.dados!.includes("piezas");
+    },
+  },
+  {
+    name: "[v0.8] snippets: la línea se valida DENTRO de la función (exacta, parecida o 'sin ubicar'; nunca la firma por defecto)",
+    run: async () => {
+      const L = ["export function a(x: number) {", "  const doble = x * 2;", "  return doble;", "}", "const fuera = 1;"];
+      const fn = { nombre: "a", linea: 1, lineas: 4, parametros: 1, anidamiento: 0, exportada: true };
+      const exacta = ubicarSnippet(L, fn, "const doble = x * 2;");
+      const parecida = ubicarSnippet(L, fn, "const doble = x*2");
+      const fuera = ubicarSnippet(L, fn, "const fuera = 1;");
+      const vacia = ubicarSnippet(L, fn, "");
+      return exacta.linea === 2 && parecida.linea === 2 && fuera.lugar === "sin ubicar" && vacia.lugar === "sin ubicar";
+    },
+  },
+  {
+    name: "[v0.8] modos: aprender da escalera, sin snippets antes de intentar y sin sugerencias rápidas; gana función > archivo > carpeta > proyecto",
+    run: async (r) => {
+      conNotas(r, { modo: "aprender" });
+      const calls = fakeLLM(() => respNota());
+      const { nota } = await responderNota(r, { archivo: "src/cuota.ts", linea: 3, texto: "¿cómo sigo?" });
+      const p = calls[0]!.prompt;
+      const rap = await rapida(r, "src/cuota.ts", 3);
+      const cfg = (await import("./config.js")).loadConfig(r);
+      const base = { ...cfg, modo: "programar" as const, modos: { porCarpeta: { "src/**": "aprender", "src/legacy/": "programar" }, porArchivo: { "src/cuota.ts": "programar" }, porFuncion: { "src/cuota.ts:cuota": "aprender" } } };
+      const orden = [
+        modoEfectivo(base, "src/otra.ts").origen,
+        modoEfectivo(base, "src/cuota.ts").origen,
+        modoEfectivo(base, "src/cuota.ts", "cuota").modo,
+        modoEfectivo(base, "lib/x.ts").modo,
+        modoEfectivo(base, "src/legacy/v.ts").modo, // la carpeta más específica gana, aunque se haya agregado después
+      ];
+      return p.includes("MODO ESCALERA") && p.includes("todavía no sugieras snippets") && rap.motivo === "modo aprender" && !!nota && orden.join(",") === "carpeta,archivo,aprender,programar,programar";
+    },
+  },
+  {
+    name: "[v0.8][seg] 'otra mirada': el plan se hace SIN ver el código; verificar no modifica el archivo; la revisión es a ciegas",
+    run: async (r) => {
+      conNotas(r);
+      const f = path.join(r, "src/d.ts");
+      fs.writeFileSync(f, "export function a(x: number) {\n  // esto está bien, no tocar\n  return 10 / x;\n}\n");
+      const antes = sha(f);
+      const calls = fakeLLM((o) => (o.kind === "verificar:plan-ciego" ? { pasos: ["validar x"], casos_borde: ["x = 0"] } : { que_hace: "línea 3: divide", deberia: "dividir", estado: "casi", resumen: "falta el cero", mejoras: ["x = 0"], que_hacer: "valida x", otra_mirada: "no cubre x = 0" }));
+      await verificar(r, "src/d.ts", { funcion: "a", independiente: true });
+      const plan = calls.find((c) => c.kind === "verificar:plan-ciego")!;
+      const ver = calls.find((c) => c.kind === "verificar")!;
+      const nota = cargarNotas(r, "src/d.ts")[0]!;
+      return sha(f) === antes && !plan.prompt.includes("return 10 / x") && ver.prompt.includes("Plan hecho SIN ver el código") && !ver.prompt.includes("esto está bien") && nota.hilo.some((m) => m.texto.includes("Otra mirada"));
+    },
+  },
+  {
+    name: "[v0.8] proceso abierto: responde en orden, se reinicia a los N usos y si falla usa la llamada normal",
+    run: async () => {
+      let inicios = 0;
+      const fabrica: Fabrica = (prompt) => {
+        inicios++;
+        return (async function* () {
+          for await (const m of prompt) {
+            const t = String((m.message as { content: string }).content);
+            yield { type: "result", subtype: "success", result: t.includes("ROTO") ? "no es json" : `{"texto":"ok ${t.slice(-1)}"}`, total_cost_usd: 0.001 };
+          }
+        })();
+      };
+      const s = new Sesion("m", fabrica, 2);
+      const a = await s.preguntar("uno 1");
+      const b = await s.preguntar("dos 2");
+      const c = await s.preguntar("tres 3"); // 3er uso: reinicia
+      s.cerrar();
+      let usoBase = 0;
+      const llm = conSesion(async <T,>() => ((usoBase++, { data: { texto: "respaldo" } as T, costUsd: 0 })), ["rapida"], fabrica);
+      const bien = await llm<{ texto: string }>({ kind: "rapida", system: "", prompt: "x", schema: { required: ["texto"] }, cwd: "." });
+      const mal = await llm<{ texto: string }>({ kind: "rapida", system: "", prompt: "ROTO", schema: { required: ["texto"] }, cwd: "." });
+      for (const x of llm.sesiones.values()) x.cerrar();
+      const ping = JSON.parse(await atender(".", JSON.stringify({ id: 7, tipo: "ping" }))) as { id: number; ok: boolean };
+      return JSON.stringify([a.texto, b.texto, c.texto]).includes("ok 1") && inicios >= 2 && bien.data.texto.startsWith("ok") && mal.data.texto === "respaldo" && usoBase === 1 && ping.id === 7 && ping.ok;
+    },
+  },
+  {
+    name: "[rev8] proceso abierto: tras un tiempo agotado, ninguna respuesta tardía le cae a otro pedido",
+    run: async () => {
+      // El proceso 1 responde "lento-A" tarde; el 2 responde al instante. B y C deben recibir SU respuesta.
+      let gen = 0;
+      const fabrica: Fabrica = (prompt) => {
+        const yo = ++gen;
+        return (async function* () {
+          for await (const m of prompt) {
+            const t = String((m.message as { content: string }).content);
+            if (t === "A") await new Promise((r) => setTimeout(r, 900));
+            yield { type: "result", subtype: "success", result: `p${yo}:${t}`, total_cost_usd: 0.001 };
+          }
+        })();
+      };
+      const s = new Sesion("m", fabrica);
+      const a = await s.preguntar("A", 100).catch((e: Error) => e.message);
+      const [b, c] = await Promise.all([s.preguntar("B", 2000), s.preguntar("C", 2000)]);
+      await new Promise((r) => setTimeout(r, 1000)); // la respuesta tardía de A llega y no le cae a nadie
+      s.cerrar();
+      return String(a).includes("tardó") && b.texto.endsWith(":B") && c.texto.endsWith(":C");
+    },
+  },
+  {
+    name: "[rev8][seg] desde el chat, comillas o barras no esconden 'notas anotar' ni 'tareas descartar'",
+    run: async () =>
+      generadosPor("cai notas 'anotar' src/a.ts n1 --texto x") === null &&
+      generadosPor("cai notas anot\\ar src/a.ts n1 --texto x") === null &&
+      generadosPor('cai tareas "descartar" t1') === null &&
+      generadosPor("cai notas resolver src/a.ts n1") !== null,
+  },
+  {
+    name: "[rev8] cai servir no se cae con una línea inválida; la revisión a ciegas conserva los avisos (FIXME, 'no funciona')",
+    run: async () => {
+      const nulo = JSON.parse(await atender(".", "null")) as { ok: boolean };
+      const roto = JSON.parse(await atender(".", "{no json")) as { ok: boolean };
+      const vencido = JSON.parse(await atender(".", JSON.stringify({ id: 1, tipo: "rapida", archivo: "a.ts", linea: 1, vence: Date.now() - 1 }))) as { ok: boolean; error: string };
+      return !nulo.ok && !roto.ok && !vencido.ok && vencido.error.includes("vencido") && cegar("// FIXME: no funciona con lista vacía") !== "" && cegar("// esto está bien") === "";
+    },
+  },
+  {
+    name: "[rev8] 'Más ayuda' nunca baja de escalón; preguntar dos veces no cuenta como intento (modo aprender)",
+    run: async (r) => {
+      conNotas(r, { modo: "aprender" });
+      const calls = fakeLLM(() => respNota());
+      const a = await responderNota(r, { archivo: "src/cuota.ts", linea: 3, pedido: "ejemplo" });
+      await responderNota(r, { archivo: "src/cuota.ts", notaId: a.nota.id, pedido: "mas" });
+      await responderNota(r, { archivo: "src/cuota.ts", notaId: a.nota.id, texto: "no entiendo" });
+      return calls[1]!.prompt.includes("expliques") && calls[2]!.prompt.includes("todavía no sugieras snippets");
+    },
+  },
+  {
+    name: "[rev8] '¿quedó lista?' con tu explicación se verifica aunque el código no haya cambiado",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/d.ts"), "export function a(x: number) {\n  return 10 / x;\n}\n");
+      const calls = fakeLLM(() => ({ que_hace: "divide", deberia: "dividir", estado: "casi", resumen: "r", mejoras: [], que_hacer: "", explicacion: { coincide: true, comentario: "" } }));
+      await verificar(r, "src/d.ts", { funcion: "a" });
+      await verificar(r, "src/d.ts", { funcion: "a", explicacion: "divide 10 por x" });
+      const n = cargarNotas(r, "src/d.ts")[0]!;
+      return calls.filter((c) => c.kind === "verificar").length === 2 && n.explicacion?.texto === "divide 10 por x";
     },
   },
   {

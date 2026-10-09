@@ -10,7 +10,7 @@ import { fileIdentifiers, guardReplies } from "./guard.js";
 import { langFor } from "./lang.js";
 import { ask, evitada } from "./llm.js";
 import { planoProyecto } from "./plano.js";
-import { verificar } from "./verificar.js";
+import { cegar, verificar } from "./verificar.js";
 import { funcionesSinTests, medir, rutaTest, violaciones } from "./metricas.js";
 import { loadPerfil, nivelDe, puntaje, registrar } from "./profile.js";
 import { insertAboveLine, renderReply, type Reply } from "./render.js";
@@ -414,6 +414,7 @@ async function acompanarUnaVez(root: string, rel: string, log: (s: string) => vo
     for (const r of partes) revisados[r.key] = r.hash;
     const { data, costUsd } = await ask<{ hallazgos: { codigo: string; etiqueta: string; bloqueante: boolean; categoria: string; texto: string; links: string[] }[] }>({
       kind: "acompanar:revisar",
+      ref: { archivo: rel },
       system: REVISION_SYSTEM,
       cwd: root,
       schema: REVISION_SCHEMA,
@@ -421,7 +422,8 @@ async function acompanarUnaVez(root: string, rel: string, log: (s: string) => vo
       prompt: [
         `${rel} (${lang.id})${critical ? " — ZONA CRÍTICA" : ""}. Programador: ${nivelProg}.`,
         ctx,
-        `Partes que acaba de terminar:\n${partes.map((r) => r.text).join("\n\n")}`,
+        // A ciegas: sin los comentarios que "aprueban" lo hecho.
+        `Partes que acaba de terminar:\n${partes.map((r) => r.text.split("\n").map(cegar).join("\n")).join("\n\n")}`,
       ]
         .filter(Boolean)
         .join("\n\n"),

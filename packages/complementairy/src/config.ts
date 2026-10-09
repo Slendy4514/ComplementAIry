@@ -45,10 +45,14 @@ export interface Config {
     /** Con autoguardado: segundos sin editar antes de que el acompañante actúe (en VSCode). */
     esperaAutoguardado: number;
   };
+  /** Modo de trabajo del proyecto ("programar" o "aprender"); se puede cambiar por carpeta, archivo o función. */
+  modo: "programar" | "aprender";
+  /** porFuncion: "archivo:función" → modo (se guarda aquí, no en la nota: cambiar de modo no toca notas). */
+  modos: { porCarpeta: Record<string, string>; porArchivo: Record<string, string>; porFuncion: Record<string, string> };
   /** Qué ayuda dar cuando preguntas sin pedir un escalón: "auto" (según tu nivel) o uno fijo. */
   ayuda: { porDefecto: "auto" | "pista" | "piezas" | "pseudo" | "ejemplo" };
   /** Sugerencias rápidas (texto gris al final de la línea, en VSCode). */
-  rapidas: { activas: boolean; esperaMs: number };
+  rapidas: { activas: boolean; esperaMs: number; procesoAbierto: boolean };
   /**
    * Dónde se muestra lo que dice la IA: "notas" (hilos de VSCode al costado del código; el archivo no
    * se toca) o "comentarios" (comentarios @guia dentro del archivo, para terminal y otros editores).
@@ -143,8 +147,10 @@ export const DEFAULT_CONFIG: Config = {
   snapshot: { ignorar: [], maxBytes: 1024 * 1024 },
   snippets: { modo: "ganado", lenguajes: [] },
   acompanar: { nivel: "normal", intentos: 3, maxLlamadasHora: 20, revisar: true, porCarpeta: {}, verificar: true, esperaAutoguardado: 45 },
+  modo: "programar",
+  modos: { porCarpeta: {}, porArchivo: {}, porFuncion: {} },
   ayuda: { porDefecto: "auto" },
-  rapidas: { activas: true, esperaMs: 2000 },
+  rapidas: { activas: true, esperaMs: 2000, procesoAbierto: true },
   practicas: { maxFuncionesArchivo: 12, maxLineasArchivo: 300, maxLineasFuncion: 40, maxAnidamiento: 3, maxParametros: 4 },
   autoria: { heredado: [], terceros: [], acompanarHeredado: false },
   tests: { carpeta: "tests", avisarSinTests: true },
@@ -172,6 +178,8 @@ export function loadConfig(root: string): Config {
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...raw.snapshot },
     snippets: { ...DEFAULT_CONFIG.snippets, ...raw.snippets },
     acompanar: { ...DEFAULT_CONFIG.acompanar, ...raw.acompanar },
+    modo: raw.modo === "aprender" ? "aprender" : "programar",
+    modos: { porCarpeta: { ...raw.modos?.porCarpeta }, porArchivo: { ...raw.modos?.porArchivo }, porFuncion: { ...raw.modos?.porFuncion } },
     ayuda: { ...DEFAULT_CONFIG.ayuda, ...raw.ayuda },
     rapidas: { ...DEFAULT_CONFIG.rapidas, ...raw.rapidas },
     ia: { ...DEFAULT_CONFIG.ia, ...raw.ia, modelos: { ...DEFAULT_CONFIG.ia.modelos, ...raw.ia?.modelos } },

@@ -1,3 +1,4 @@
+import { cegar } from "./verificar.js";
 import fs from "node:fs";
 import path from "node:path";
 import { parse } from "./comments.js";
@@ -158,6 +159,8 @@ export interface ReviewOptions {
   ediciones?: boolean;
   solo?: string[];
   log?: (s: string) => void;
+  /** "Otra mirada": plan SIN ver el código y comparación (con el botón; no al guardar). */
+  otraMirada?: boolean;
 }
 
 export async function runReview(root: string, rel: string, o: ReviewOptions = {}): Promise<ReviewResult> {
@@ -197,7 +200,7 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
       return {};
     }
   })();
-  const previas = o.todo ? undefined : cache[rel];
+  const previas = o.todo || o.otraMirada ? undefined : cache[rel];
   const cambiadas = previas ? regiones.filter((r) => previas[r.key] !== r.hash) : regiones;
   let sinIa = o.sinIa;
   if (!sinIa && previas && !cambiadas.length) {
@@ -209,7 +212,8 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
     const ctx = projectContext(root, rel);
     const nivel = nivelDe(puntaje(loadPerfil(), lang.id));
     const reviewers = REVIEWERS.filter((r) => (!o.solo || o.solo.includes(r.id)) && (!r.aplica || r.aplica(root, ctx.reglas)));
-    const lineasArchivo = src0.split("\n");
+    // A ciegas: los comentarios que "aprueban" ("esto está bien", "no tocar") no llegan al revisor.
+    const lineasArchivo = src0.split("\n").map(cegar);
     const numerar = (a: number, b: number) =>
       lineasArchivo
         .slice(a - 1, b)
@@ -230,6 +234,7 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
         try {
           const { data, costUsd } = await ask<{ hallazgos: { codigo: string; etiqueta: string; bloqueante: boolean; categoria: string; texto: string; links: string[] }[] }>({
             kind: `revisar:${r.id}`,
+            ref: { archivo: rel },
             system: SYSTEM,
             cwd: root,
             schema: SCHEMA,
@@ -264,6 +269,46 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
       }
     }
     findings.push(...(await consolidar(root, ai, (n) => (res.costoUsd += n))));
+
+    // "Otra mirada" (contra el sesgo de lo ya hecho): la IA piensa el archivo SIN ver el código y después
+    // compara; solo quedan las diferencias que importan, ancladas a una línea real.
+    if (o.otraMirada) {
+      try {
+        const firmas = regiones.map((r) => `- ${r.key}`).join("\n");
+        const plan = await ask<{ plan: string }>({
+          kind: "revisar:plan-ciego",
+          system: `Sin ver el código, propones cómo organizarías un archivo: responsabilidades, funciones y casos borde que cuidar. Sin código. Español neutro.\n\n${CRITERIO}`,
+          cwd: root,
+          sinHerramientas: true,
+          schema: { type: "object", additionalProperties: false, required: ["plan"], properties: { plan: { type: "string" } } },
+          ...iaOpts(z.config, "chico"),
+          effort: "low",
+          prompt: [`Archivo: ${rel} (${lang.id}). Solo ves sus firmas:\n${firmas}`, contextBlock(ctx)].join("\n\n"),
+        });
+        res.costoUsd += plan.costUsd;
+        const comp = await ask<{ diferencias: { codigo: string; texto: string }[] }>({
+          kind: "revisar:otra-mirada",
+          system: `Comparas un plan hecho SIN ver el código con el código real. Señala SOLO diferencias que importen (un caso borde no cubierto, una responsabilidad mal ubicada, un enfoque claramente mejor) y por qué; en "codigo" copia la línea exacta a la que se refiere. Si coinciden, lista vacía. Nunca escribas la corrección en código. Español neutro.\n\n${CRITERIO}`,
+          cwd: root,
+          sinHerramientas: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["diferencias"],
+            properties: { diferencias: { type: "array", maxItems: 4, items: { type: "object", additionalProperties: false, required: ["codigo", "texto"], properties: { codigo: { type: "string" }, texto: { type: "string" } } } } },
+          },
+          ...iaOpts(z.config, "mediano"),
+          prompt: [`Plan (sin ver el código):\n${plan.data.plan}`, `Código:\n${numerar(1, lineasArchivo.length)}`].join("\n\n"),
+        });
+        res.costoUsd += comp.costUsd;
+        for (const d of comp.data.diferencias) {
+          const line = findLine(lines0, d.codigo);
+          if (line > 0) findings.push({ line, etiqueta: "suggestion", bloqueante: false, texto: `🔀 Otra mirada (pensada sin ver tu código): ${d.texto}`, links: [], fuente: "otra-mirada" });
+        }
+      } catch (e) {
+        res.omitidos.push(`otra mirada: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
   }
 
   // Para "▶ Siguiente paso": lo que falló en las verificaciones queda registrado (sin IA).

@@ -1,6 +1,6 @@
 import path from "node:path";
 import * as vscode from "vscode";
-import { enCurso, minutosSilencio, output, relDe, root, silenciado, silenciar, type Ocupacion } from "./comun";
+import { correr, enCurso, leerConfig, minutosSilencio, modoEfectivo, MODOS, output, relDe, root, silenciado, silenciar, vista, type Ocupacion } from "./comun";
 
 /**
  * "¿Está pensando la IA?": barra de estado con lo que hace ahora (aunque lo haya pedido el chat
@@ -106,5 +106,100 @@ export class Estado implements vscode.Disposable {
     clearInterval(this.timer);
     this.item.dispose();
     this.cambio.dispose();
+  }
+}
+
+/**
+ * El modo que rige donde está el cursor (programar / aprender) y el siguiente paso, en la barra de
+ * estado. Clic en el modo: cambiarlo para esta función, este archivo, la carpeta o el proyecto
+ * (cambiar de modo solo cambia cómo se da la ayuda nueva: lo ya hecho no se toca).
+ */
+export class BarraModo implements vscode.Disposable {
+  private readonly modo = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
+  private readonly paso = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 48);
+  private timer?: NodeJS.Timeout;
+  private funcion?: string;
+
+  constructor(private readonly notasDe: (doc: vscode.TextDocument) => { ancla: { funcion?: string }; modo?: string }[]) {
+    this.modo.command = "cai.cambiarModo";
+    this.paso.command = "cai.siguiente";
+  }
+
+  registrar(ctx: vscode.ExtensionContext): void {
+    ctx.subscriptions.push(
+      this,
+      vscode.window.onDidChangeTextEditorSelection(() => this.programar()),
+      vscode.window.onDidChangeActiveTextEditor(() => this.programar()),
+      vscode.commands.registerCommand("cai.estado.actualizarModo", () => void this.actualizar()),
+      vscode.commands.registerCommand("cai.cambiarModo", () => this.cambiar()),
+    );
+    void this.actualizar();
+  }
+
+  /** El siguiente paso (lo calcula el panel). */
+  siguiente(p?: { accion: string; titulo: string }): void {
+    if (!p) return void this.paso.hide();
+    this.paso.text = `$(play) ${p.accion.length > 50 ? `${p.accion.slice(0, 50)}…` : p.accion}`;
+    this.paso.tooltip = `Siguiente paso: ${p.titulo}\nClic: ver todos los pendientes`;
+    this.paso.show();
+  }
+
+  private programar(): void {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => void this.actualizar(), 400);
+  }
+
+  private async actualizar(): Promise<void> {
+    const ed = vscode.window.activeTextEditor;
+    const cwd = ed && root(ed.document);
+    if (!ed || !cwd || ed.document.uri.scheme !== "file" || vista(cwd) !== "notas") return void this.modo.hide();
+    const { funcionEn } = await import("./notaView");
+    const f = await funcionEn(ed.document, ed.selection.active);
+    this.funcion = f?.clave;
+    const ef = modoEfectivo(leerConfig(cwd), relDe(cwd, ed.document.uri.fsPath), f?.clave);
+    this.modo.text = `$(${MODOS[ef.modo].icono}) ${ef.modo}`;
+    this.modo.tooltip = `Modo ${ef.modo} (por ${{ funcion: "esta función", archivo: "este archivo", carpeta: "la carpeta", proyecto: "el proyecto" }[ef.origen]}). Clic para cambiarlo.\nprogramar: ayuda directa, snippets, sugerencias rápidas · aprender: ayuda gradual, predecir, explicar con tus palabras`;
+    this.modo.show();
+  }
+
+  private async cambiar(): Promise<void> {
+    const ed = vscode.window.activeTextEditor;
+    const cwd = ed && root(ed.document);
+    if (!ed || !cwd) return;
+    const rel = relDe(cwd, ed.document.uri.fsPath);
+    // La carpeta como prefijo literal (sin glob: rutas como "app/[id]/" funcionan igual en la CLI).
+    const carpeta = rel.includes("/") ? `${rel.slice(0, rel.lastIndexOf("/"))}/` : undefined;
+    type Op = vscode.QuickPickItem & { args: string[] };
+    const alcance = await vscode.window.showQuickPick<Op>(
+      [
+        ...(this.funcion ? [{ label: `$(symbol-method) Esta función (${this.funcion.replace(/#\d+$/, "")})`, args: ["--funcion", `${rel}:${this.funcion}`] }] : []),
+        { label: `$(file) Este archivo (${rel})`, args: ["--archivo", rel] },
+        ...(carpeta ? [{ label: `$(folder) Esta carpeta (${carpeta})`, args: ["--carpeta", carpeta] }] : []),
+        { label: "$(project) Todo el proyecto", args: [] },
+      ],
+      { placeHolder: "¿Dónde cambiar el modo? (lo ya hecho no se toca)" },
+    );
+    if (!alcance) return;
+    const modo = await vscode.window.showQuickPick(
+      [
+        { label: "$(rocket) programar", description: "ayuda directa, snippets, sugerencias rápidas", v: "programar" },
+        { label: "$(mortar-board) aprender", description: "ayuda gradual, predecir, explicar con tus palabras", v: "aprender" },
+        ...(alcance.args.length ? [{ label: "$(arrow-up) heredar", description: "quitar el modo propio y usar el de arriba", v: "heredar" }] : []),
+      ],
+      { placeHolder: "Modo" },
+    );
+    if (!modo) return;
+    try {
+      await correr(["modo", modo.v, ...alcance.args], cwd);
+      await this.actualizar();
+      void vscode.commands.executeCommand("cai.panel.refrescar");
+    } catch (e) {
+      vscode.window.showErrorMessage(`ComplementAIry: ${(e as Error).message}`);
+    }
+  }
+
+  dispose(): void {
+    this.modo.dispose();
+    this.paso.dispose();
   }
 }
