@@ -182,9 +182,9 @@ async function ejecutar(argv: string[]): Promise<number> {
       }
       console.log(
         `\nPróximos pasos:\n` +
-          `  1. Completá .cai/proyecto.md y .cai/reglas.md con tus palabras.\n` +
-          `  2. Declará lo que sabés: cai perfil set typescript experto (aprendiz | intermedio | experto)\n` +
-          `  3. Atajos: instalá la extensión de VSCode (packages/vscode-complementairy) o pegá esto en tus keybindings.json\n` +
+          `  1. Completa .cai/proyecto.md y .cai/reglas.md con tus palabras (o, con código ya escrito: cai conocer; en VSCode, el panel te guía).\n` +
+          `  2. Declara lo que sabes: cai perfil set typescript experto (aprendiz | intermedio | experto)\n` +
+          `  3. Atajos: instala la extensión de VSCode o pega esto en tus keybindings.json\n` +
           `     (Ctrl+Shift+P → "Preferences: Open Keyboard Shortcuts (JSON)"):\n${KEYBINDINGS.replace(/^/gm, "     ")}\n` +
           `  4. O sin editor: cai watch (responde solo al guardar).`,
       );
@@ -1206,7 +1206,7 @@ async function ejecutar(argv: string[]): Promise<number> {
       }
       const p = loadPerfil();
       const temas = Object.entries(p.temas).sort((a, b) => b[1].puntaje - a[1].puntaje);
-      if (!temas.length) console.log("Perfil vacío. Declará lo que sabés: cai perfil set typescript experto");
+      if (!temas.length) console.log("Perfil vacío. Declara lo que sabes: cai perfil set typescript experto");
       for (const [t, v] of temas) console.log(`${t.padEnd(24)} ${nivelDe(v.puntaje).padEnd(11)} ${v.puntaje.toFixed(2)}  (${v.eventos} eventos${v.declarado ? `, declarado ${v.declarado}` : ""})`);
       const pat = Object.entries(loadPatrones()).sort((a, b) => b[1].veces - a[1].veces);
       if (pat.length) {

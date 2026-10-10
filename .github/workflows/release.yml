@@ -41,7 +41,7 @@ jobs:
       - name: Extensión de VSCode
         working-directory: packages/vscode-complementairy
         run: |
-          pnpm install && pnpm build
+          pnpm install && pnpm build && node scripts/humo.cjs
           npx --yes @vscode/vsce package --no-dependencies -o ../../release/complementairy.vsix
 
       - name: Armar la feature (con la CLI y la extensión adentro)

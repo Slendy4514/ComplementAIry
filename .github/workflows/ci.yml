@@ -14,3 +14,16 @@ jobs:
       - run: pnpm build
       - run: pnpm test
       - run: node dist/cli.js selftest
+  extension:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: packages/vscode-complementairy } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: pnpm install
+      - run: pnpm build
+      # Que la extensión arranque (un error al cargar o activar no lo ve el compilador).
+      - run: node scripts/humo.cjs

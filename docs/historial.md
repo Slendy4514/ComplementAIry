@@ -399,3 +399,15 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - cola de revisiones visible en el panel;
   - completar el "?" de un test al decidir.
 - Selftest: 193/193.
+
+## v0.10.1: la extensión no arrancaba; iniciar desde VSCode (2026-10-10)
+- **Reporte del usuario:** la extensión no iniciaba. También quería empezar de cero en un proyecto, y que la extensión lo guiara ("que si está vacío permita crearlo y las preguntas").
+- **Causa:** `notaView` armaba, al cargar el módulo, una tabla a partir de `BOTONES` de `notasView`. Como se importan entre sí, en ese momento `BOTONES` era `undefined`, y la activación entera fallaba. Se arregló armándola al usarla.
+- **Para que no se repita:** prueba de humo (`scripts/humo.cjs`), que carga la extensión con un `vscode` simulado y llama a `activate`. Corre en `pnpm package`, en el CI (job `extension`) y en el release. Sin el arreglo, la prueba falla.
+- **Iniciar desde VSCode:**
+  - si el proyecto no tiene `.cai/config.json`, se ofrece **🚀 Iniciar** (aviso, panel y chat);
+  - el recorrido: `cai init` → conocer el código, si hay (`cai conocer --sin-preguntas`) → **🎯 Entender el proyecto** en el chat, con la primera pregunta → al confirmar los objetivos, proponer la estructura (`cai plano`, que ahora recibe los objetivos y las correcciones);
+  - **Empezar de cero:** mueve `.cai` a `.cai.viejo-<fecha>` e inicia de nuevo;
+  - sin iniciar, nada automático (acompañante, guía, revisión al salir, panel) corre ni gasta IA.
+- Mensajes de `cai init` con tuteo (tenían voseo).
+- Selftest: 193/193.

@@ -2,7 +2,7 @@
   "name": "complementairy",
   "displayName": "ComplementAIry — tú programas, la IA te acompaña",
   "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "publisher": "complementairy",
   "license": "MIT",
   "engines": {
@@ -243,6 +243,15 @@
       {
         "command": "cai.objetivos.ver",
         "title": "ComplementAIry: ver los objetivos del proyecto"
+      },
+      {
+        "command": "cai.iniciar",
+        "title": "ComplementAIry: iniciar en este proyecto",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "cai.reiniciar",
+        "title": "ComplementAIry: empezar de cero en este proyecto"
       }
     ],
     "keybindings": [
@@ -602,7 +611,8 @@
   },
   "scripts": {
     "build": "tsc -p .",
-    "package": "pnpm build && vsce package --no-dependencies --allow-missing-repository -o complementairy.vsix"
+    "package": "pnpm build && node scripts/humo.cjs && vsce package --no-dependencies --allow-missing-repository -o complementairy.vsix",
+    "humo": "node scripts/humo.cjs"
   },
   "devDependencies": {
     "@types/node": "20",

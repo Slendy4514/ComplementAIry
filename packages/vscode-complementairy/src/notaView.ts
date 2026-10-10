@@ -757,11 +757,15 @@ texto.addEventListener("keydown", (e) => {
 // --- Historial de la nota: "qué pediste y cuándo" ------------------------------------------------
 
 type Msg = Nota["hilo"][number];
-const ETIQUETA_PEDIDO: Record<string, string> = Object.fromEntries([...BOTONES.map((b) => [b.pedido, b.etiqueta.replace(/^\S+\s/, "")]), ["mas", "Más ayuda"], ["lista", "¿Quedó lista?"], ["ayuda", "Ayuda"]]);
+// Se arma al usarla (no al cargar el módulo): notaView y notasView se importan entre sí, y al cargar
+// este archivo BOTONES todavía puede no existir (eso tumbaba la activación de la extensión).
+let etiquetasPedido: Record<string, string> | undefined;
+const ETIQUETA_PEDIDO = (): Record<string, string> =>
+  (etiquetasPedido ??= Object.fromEntries([...BOTONES.map((b) => [b.pedido, b.etiqueta.replace(/^\S+\s/, "")]), ["mas", "Más ayuda"], ["lista", "¿Quedó lista?"], ["ayuda", "Ayuda"]]));
 const ETIQUETA_KIND: Record<string, string> = { verificar: "¿Quedó lista?", revisar: "Revisión", acompanar: "Revisión al guardar", tests: "Tests", impacto: "Aviso de impacto", responder: "Respuesta", plano: "Plano", predecir: "Predicción" };
 
 export function etiquetaKind(kind?: string): string {
-  return (kind && (ETIQUETA_KIND[kind] ?? ETIQUETA_PEDIDO[kind])) || "Respuesta";
+  return (kind && (ETIQUETA_KIND[kind] ?? ETIQUETA_PEDIDO()[kind])) || "Respuesta";
 }
 
 /** "hoy 11:05", "ayer 18:20" o "9 oct 10:00". */
@@ -794,7 +798,7 @@ export function turnosDe(hilo: Msg[]): { humano: boolean; titulo: string; fecha:
   for (const x of hilo) {
     if (x.quien === "tu") {
       const p = x.meta?.pedido;
-      const titulo = p && p !== "pregunta" && ETIQUETA_PEDIDO[p] ? ETIQUETA_PEDIDO[p] : `“${x.texto.replace(/^Pido:\s*/, "").replace(/\s+/g, " ").slice(0, 42)}${x.texto.length > 42 ? "…" : ""}”`;
+      const titulo = p && p !== "pregunta" && ETIQUETA_PEDIDO()[p] ? ETIQUETA_PEDIDO()[p] : `“${x.texto.replace(/^Pido:\s*/, "").replace(/\s+/g, " ").slice(0, 42)}${x.texto.length > 42 ? "…" : ""}”`;
       out.push({ humano: true, titulo, fecha: x.fecha, resultado: "", mensajes: [x] });
     } else {
       const ult = out[out.length - 1];

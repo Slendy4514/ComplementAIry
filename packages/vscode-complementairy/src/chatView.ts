@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as vscode from "vscode";
 import { correr, dataDir, leerConfig, leerDecisiones, mostrarError, root, type Decision } from "./comun";
+import { tieneCai } from "./iniciar";
 import { sanear } from "./notaView";
 
 /**
@@ -76,13 +77,16 @@ export class ChatView implements vscode.WebviewViewProvider {
       wc,
       vscode.window.registerWebviewViewProvider("cai.chat", this, { webviewOptions: { retainContextWhenHidden: true } }),
       // Panel → 🎯 Objetivos: abre (o crea) la conversación "Entender el proyecto".
-      vscode.commands.registerCommand("cai.chat.entender", async () => {
+      vscode.commands.registerCommand("cai.chat.entender", async (o?: { empezar?: boolean }) => {
         const cwd = this.cwd();
         if (!cwd) return;
         const c = this.conversaciones(cwd).find((x) => x.tipo === "entender");
         this.actual = c?.id ?? (JSON.parse(await correr(["chat", "--nueva", "--entender", "--json"], cwd)) as Conversacion).id;
         await vscode.commands.executeCommand("cai.chat.focus");
         await this.render(undefined, true);
+        // Desde "Iniciar": la IA hace la primera pregunta (no esperas a escribir algo).
+        if (o?.empezar && !this.conversaciones(cwd).find((x) => x.id === this.actual)?.mensajes.length)
+          await this.recibir({ cmd: "enviar", arg: "Empecemos: pregúntame lo que necesites para entender el proyecto (lee primero lo que ya hay)." });
       }),
     );
   }
@@ -223,8 +227,22 @@ document.addEventListener("change", (e) => {
     if (m.cmd === "objetivos" && m.arg) {
       await correr(["entender", m.arg], cwd);
       await this.render();
-      return refrescarPanel();
+      refrescarPanel();
+      // Objetivos confirmados y sin estructura todavía: proponerla a partir de ellos.
+      if (m.arg === "confirmar" && !fs.existsSync(path.join(dataDir(cwd), "estructura.json"))) {
+        const op = await vscode.window.showInformationMessage("Objetivos confirmados ✓. ¿Propongo la estructura del proyecto (carpetas, archivos y por dónde empezar) a partir de ellos?", "Proponer la estructura", "Más tarde");
+        if (op === "Proponer la estructura")
+          try {
+            await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: proponiendo la estructura del proyecto…" }, () => correr(["plano"], cwd));
+            refrescarPanel();
+            await vscode.commands.executeCommand("cai.verEstructura");
+          } catch (e) {
+            mostrarError(e);
+          }
+      }
+      return;
     }
+    if (m.cmd === "iniciar") return void vscode.commands.executeCommand("cai.iniciar");
     if (m.cmd === "responderPregunta" && m.arg) return this.recibir({ cmd: "enviar", arg: m.arg });
     if (m.cmd === "borrar" && conv) {
       const ok = await vscode.window.showWarningMessage(`¿Borrar la conversación "${conv.titulo}"?`, { modal: true }, "Borrar");
@@ -264,6 +282,8 @@ document.addEventListener("change", (e) => {
     if (!this.view?.visible) return;
     const cwd = this.cwd();
     if (!cwd) return void this.view.webview.postMessage({ html: '<p class="quien">Abre un proyecto.</p>' });
+    if (!tieneCai(cwd))
+      return void this.view.webview.postMessage({ html: '<p>Este proyecto todavía no usa ComplementAIry.</p><button class="prim" data-cmd="iniciar">🚀 Iniciar ComplementAIry aquí</button><p class="quien">Crea su configuración y, si ya hay código, lo conoce; después te pregunta qué buscas (objetivos) y te propone la estructura.</p>' });
     // El chat de v0.9 (chat.json) se migra la primera vez (lo hace la CLI).
     if (!this.migrado) {
       this.migrado = true;

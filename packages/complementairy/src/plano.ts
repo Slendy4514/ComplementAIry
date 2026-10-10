@@ -11,7 +11,8 @@ import { actualizarMemoria, agregarPreguntas, unaLinea } from "./panorama.js";
 import { agregarTareas, cargarTareas, guardarTareas, rutasDe } from "./siguiente.js";
 import { iaOpts } from "./tutor.js";
 import { sanitizeGuia } from "./verify.js";
-import { aplicarAEstructura } from "./correcciones.js";
+import { aplicarAEstructura, bloqueCorrecciones } from "./correcciones.js";
+import { bloqueObjetivos } from "./entender.js";
 
 /**
  * Plano del proyecto (arquitectura desde el inicio): una propuesta concreta de carpetas,
@@ -114,6 +115,9 @@ export async function planoProyecto(root: string, descripcion?: string): Promise
       descripcion ? `Qué se quiere construir: ${descripcion}` : "",
       `Programador: ${nivel}.`,
       contextBlock(projectContext(root, "docs/ESTRUCTURA.md")),
+      // Los objetivos (y lo que queda fuera) que entendiste con el programador: la estructura los sigue.
+      bloqueObjetivos(root),
+      bloqueCorrecciones(root),
       `Archivos actuales (${archivos.length}):\n${archivos.join("\n") || "(proyecto vacío)"}`,
     ]
       .filter(Boolean)

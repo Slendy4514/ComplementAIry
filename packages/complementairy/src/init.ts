@@ -127,7 +127,7 @@ export function init(target: string): InitResult {
       changes.push(`(está dentro del repo ${top}: no se activó el pre-commit para no cambiar ese repo)`);
     }
   } catch {
-    changes.push("(no es repo git: cuando hagas `git init`, corré `git config core.hooksPath .githooks`)");
+    changes.push("(no es repo git: cuando hagas `git init`, corre `git config core.hooksPath .githooks`)");
   }
 
   // 5. CLAUDE.md (solo la sección de ComplementAIry) y 6. lo que escribe el humano.
@@ -174,7 +174,7 @@ function initResto(target: string, changes: string[]): InitResult {
       tasks = JSON.parse(stripJsonc(fs.readFileSync(tasksFile, "utf8"))) as typeof tasks;
     } catch {
       tasksOk = false;
-      changes.push("(.vscode/tasks.json no se pudo leer; no se tocó. Agregá las tareas ComplementAIry a mano o usá la extensión)");
+      changes.push("(.vscode/tasks.json no se pudo leer; no se tocó. Agrega las tareas ComplementAIry a mano o usa la extensión)");
     }
   }
   if (tasksOk) {

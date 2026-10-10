@@ -40,6 +40,15 @@ Deja el comando `cai` global (enlazado al repo: cada `pnpm build` se aplica al i
 Detalles y la alternativa sin GitHub: [devcontainer-feature/complementairy/README.md](devcontainer-feature/complementairy/README.md).
 
 ### En cada proyecto
+**Desde VSCode (lo más simple):** al abrir un proyecto que todavía no usa ComplementAIry, la extensión te ofrece **🚀 Iniciar** (también está en el panel y en Ctrl+Shift+P → "ComplementAIry: iniciar en este proyecto"). Hace todo el recorrido:
+1. crea la configuración (`cai init`: hooks de Claude Code, `CLAUDE.md`, skills, plantillas);
+2. si ya hay código, lo **conoce** (borradores de qué busca y de tus reglas, qué código no es tuyo; las preguntas te quedan en el panel);
+3. abre **🎯 Entender el proyecto** en el chat, con la primera pregunta;
+4. cuando confirmas los objetivos, te ofrece **proponer la estructura** a partir de ellos.
+
+**Empezar de cero** (Ctrl+Shift+P → "ComplementAIry: empezar de cero en este proyecto"): mueve `.cai/` a `.cai.viejo-<fecha>/` (nada se borra; tu código no se toca) e inicia de nuevo. Hasta que inicies, la extensión no hace nada automático en ese proyecto (ni gasta IA).
+
+**Desde la terminal:**
 ```bash
 cd mi-proyecto
 git init                                  # si todavía no es repo

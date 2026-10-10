@@ -6,6 +6,7 @@ import { cli, correr, envVista, guardadoPropio, guardar, leerConfig, mostrarErro
 import { registrarConfiguracion } from "./configuracion";
 import { NotaPanel } from "./notaView";
 import { ChatView } from "./chatView";
+import { registrarInicio, tieneCai } from "./iniciar";
 import fs from "node:fs";
 import path from "node:path";
 import { Rapidas } from "./rapidas";
@@ -97,6 +98,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   ctx.subscriptions.push(panel.onPasos((p) => barra.siguiente(p[0])));
   new NotaPanel(notas).registrar(ctx);
   new ChatView().registrar(ctx);
+  registrarInicio(ctx);
   void avisarInstruccionesViejas();
 
   /**
@@ -105,7 +107,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
    */
   function revisarEnFondo(doc: vscode.TextDocument, tipo: "completa" | "ligera"): void {
     const cwd = root(doc);
-    if (!cwd) return;
+    if (!cwd || !tieneCai(cwd)) return;
     void guardar(doc).then(() => {
       const nombre = path.basename(doc.uri.fsPath);
       vscode.window.setStatusBarMessage(`ComplementAIry: revisando ${nombre} en segundo plano (puedes seguir trabajando)`, 4000);
@@ -336,6 +338,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
     { dispose: () => asentados.forEach((t) => clearTimeout(t)) },
   );
   function acompanarAhora(doc: vscode.TextDocument, motivo: "manual" | "asentado"): void {
+    // Proyecto sin iniciar: nada automático (ni gasto de IA): primero se inicia (panel → 🚀 Iniciar).
+    const raiz = root(doc);
+    if (!raiz || !tieneCai(raiz)) return;
     probarAlGuardar(doc);
     {
       if (!vscode.workspace.getConfiguration("cai").get<boolean>("acompanar", true) || silenciado()) return;

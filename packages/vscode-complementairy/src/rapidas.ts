@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import * as vscode from "vscode";
+import { tieneCai } from "./iniciar";
 import { cli, correr, guiaActual, leerConfig, output, root, silenciado, vista } from "./comun";
 import type { NotasView } from "./notasView";
 
@@ -173,7 +174,7 @@ export class Rapidas implements vscode.Disposable {
     this.turno++;
     const doc = ed.document;
     const cwd = root(doc);
-    if (!cwd || doc.uri.scheme !== "file" || vista(cwd) !== "notas" || silenciado()) return;
+    if (!cwd || doc.uri.scheme !== "file" || vista(cwd) !== "notas" || silenciado() || !tieneCai(cwd)) return;
     const cfg = leerConfig(cwd).rapidas ?? {};
     if (cfg.activas === false) return;
     const turno = this.turno;

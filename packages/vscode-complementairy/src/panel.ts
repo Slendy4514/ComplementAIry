@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { tieneCai } from "./iniciar";
 import path from "node:path";
 import * as vscode from "vscode";
 import { correr, dataDir, leerDecisiones, mostrarError, root, todasLasNotas, type Decision, type Ocupacion } from "./comun";
@@ -211,6 +212,8 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
   private async cargar(): Promise<void> {
     const cwd = root(vscode.window.activeTextEditor?.document);
     if (!cwd) return;
+    // Sin iniciar: no se corre nada (solo se ofrece iniciarlo).
+    if (!tieneCai(cwd)) return void this.cambio.fire(undefined);
     try {
       this.pasos = (JSON.parse(await correr(["siguiente", "--json"], cwd, { silencioso: true })) as { pasos: Paso[] }).pasos;
       this.tareas = JSON.parse(await correr(["tareas", "--json"], cwd, { silencioso: true })) as Tarea[];
@@ -435,6 +438,12 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
   getChildren(n?: Nodo): Nodo[] {
     const cwd = root(vscode.window.activeTextEditor?.document);
     if (!cwd) return [{ k: "vacio", label: "Abre un proyecto" }];
+    // Sin ComplementAIry todavía: lo primero es iniciarlo (con su recorrido guiado).
+    if (!n && !tieneCai(cwd))
+      return [
+        { k: "accion", label: "🚀 Iniciar ComplementAIry en este proyecto", icono: "rocket", descripcion: "configuración, conocer el código y entender tus objetivos", comando: { command: "cai.iniciar", title: "Iniciar" } },
+        { k: "vacio", label: "Tú programas; la IA te acompaña (notas, guía, revisión, tests)." },
+      ];
     if (!n) {
       // ▶ Ahora (una sola cosa) · Pendientes (todo lo demás, en orden) · Proyecto · Hechas · IA
       const raiz: Nodo[] = [];

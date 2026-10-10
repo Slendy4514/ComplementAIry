@@ -200,7 +200,7 @@ export async function error(root: string): Promise<string> {
   });
 }
 
-export const SHELL_SNIPPET = `# ComplementAIry en tu shell (pegá en ~/.bashrc o ~/.zshrc)
+export const SHELL_SNIPPET = `# ComplementAIry en tu shell (pega en ~/.bashrc o ~/.zshrc)
 ia()  { cai pregunta "$*"; }          # ia cómo veo los logs de un contenedor
 iamas() { cai pregunta --mas; }       # más ayuda sobre la última pregunta
 ex()  { cai explica -- "$@"; }        # ex git rebase -i HEAD~3   (explica, no ejecuta)
