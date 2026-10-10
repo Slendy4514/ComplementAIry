@@ -53,15 +53,29 @@ Después escribe con tus palabras `.cai/proyecto.md` (qué buscas) y `.cai/regla
 
 ## Uso diario
 
-### Modos: programar o aprender
-| | 🚀 programar (por defecto) | 🎓 aprender |
-|---|---|---|
-| ayuda | directa (plano, piezas, snippets) | gradual (pista → piezas → pseudo → ejemplo) |
-| snippets | sí | después de que lo intentes |
-| sugerencias rápidas | sí | no (primero piensas tú) |
-| "¿quedó lista?" | verificación | + explícala con tus palabras (se compara con el código) y 🎯 predecir |
+### Modos: sugerir, aprender o programar
+| | 💡 sugerir (por defecto) | 🎓 aprender | 🚀 programar |
+|---|---|---|---|
+| quién escribe el código | tú | tú | la IA, **por pasos que diriges tú** o como un PR por porciones; entra a tu archivo **solo con tu clic** |
+| ayuda | directa (plano, piezas, snippets) | gradual (pista → piezas → pseudo → ejemplo) | plan de pasos + propuestas |
+| snippets | sí | después de que lo intentes | sí |
+| guía mientras escribes | sí | no (primero piensas tú) | sí |
+| "¿quedó lista?" | verificación | + explícala con tus palabras y 🎯 predecir | verificación |
 
-Se elige por **proyecto, carpeta, archivo o función** (gana el más específico): clic en el modo de la barra de estado, el selector del panel Nota o `cai modo aprender --funcion src/x.ts:miFuncion`. **Cambiar de modo no toca lo ya hecho**: notas, tareas, estructura y panorama quedan igual. En ningún modo la IA escribe tu código.
+Se elige por **proyecto, carpeta, archivo o función** (gana el más específico): clic en el modo de la barra de estado, el selector del panel Nota o `cai modo programar --funcion src/x.ts:miFuncion`. **Cambiar de modo no toca lo ya hecho.** Hasta v0.9, "programar" se llamaba así lo que hoy es "sugerir": una configuración vieja se lee como "sugerir" (nadie pasa al nuevo modo sin elegirlo).
+
+### Modo programar: la IA escribe, tú no te pierdes
+Delegar todo baja la comprensión (en el estudio de Anthropic, 2026, quienes delegaban todo sacaron menos de 40%; quienes pedían el código con explicación y preguntaban, 65% o más). Por eso, en este modo:
+- **Plan de pasos primero:** 3 a 5 pasos por **idea** (validar, caso especial, cálculo, resultado), no por líneas, que editas tú. **Si hacen falta más de 5, son dos funciones:** se propone una auxiliar, que queda como tarea y se trabaja **en su propia nota**.
+- **🧭 Tú diriges, la IA escribe:** dices en palabras cómo hacer el paso; la IA escribe **solo eso**. Si a tu paso le falta algo, no lo completa en silencio: te lo dice ("tu paso no dice cómo importar calcularCuota"). Ves la propuesta y la insertas (o la corriges).
+- **📦 Como un pull request, por porciones:** defines **tus casos** (el resultado esperado lo pones tú, con al menos un borde); la IA propone la función en porciones (una por paso) **ya probada contra tus casos**. Ves una porción a la vez y, para avanzar, la pruebas en el **probador**: tu entrada (que **tiene que pasar por esas líneas**: se comprueba con marcas en una copia, sin IA) y lo que esperas, escrito **antes** de ver el resultado. Si no coincide, ves el resultado real y por qué. Al final, ⤵ Insertar (con diff).
+- **Repertorio personal:** tus funciones 🟢 (escritas por ti o insertadas pasando el probador) se guardan en un repo git tuyo, entre proyectos (`~/.complementairy/repertorio`; en devcontainers, un volumen de Docker). Lo que ya hiciste va en pasos más grandes, y se puede proponer **tu versión adaptada** (como diff). Se configura por proyecto (guardar sí/no; usar siempre / preguntar / nunca); nunca guarda lo heredado ni de terceros.
+- **Después:** al día siguiente, una **prueba diferida** sobre lo que insertaste (otra entrada, comprobada ejecutando). Lo insertado sin probar (si apagas la prueba obligatoria) queda como **deuda de comprensión** en `cai deuda`. `cai programar estado` mide si sirve (aciertos a la primera, deuda, diferidas).
+
+### Entender antes de programar
+- **El proyecto** (chat → **🎯 Entender el proyecto**, o `cai entender --texto "…"`): la IA lee el proyecto y te pregunta de a poco, con opciones: qué buscas, para quién, qué es **"terminado"** (criterios comprobables), restricciones y qué queda fuera. Cuando cree que ya entendió, lo dice con un resumen; **tú lo confirmas** (o corriges, o lo reabres después). Lo confirmado entra al contexto de toda la IA.
+- **Una función o un archivo** (🎯 Objetivo en su nota): qué debe hacer y cuándo está terminada.
+- **"Creo que terminó":** "¿quedó lista?" compara la función contra sus criterios y, si los cumple, te propone **🏁 Dar por terminada**. El panorama revisa cada criterio del proyecto (✓ / ◐ / ✗ con evidencia) y, si se cumplen todos, te propone darlo por terminado. Siempre lo decides tú.
 
 ### Sin sesgo hacia lo ya hecho
 - **Revisión a ciegas:** el revisor ve el código, el objetivo y tus reglas, pero no la conversación ni comentarios tipo "esto está bien / no tocar". Primero describe qué hace (citando líneas), después opina; un hallazgo sin una línea real se descarta.
@@ -95,6 +109,8 @@ Hay código que no puede llevar `export`: scripts que carga otra aplicación tal
 - **📝 Resumen de la sesión** (en el chat, o `cai sesion`): qué hiciste, qué quedó listo, las decisiones y lo que falta commitear, con un **mensaje de commit sugerido** que editas y usas tú.
 
 ### En VSCode
+**Notas fáciles de leer:** arriba lo vigente (estado, ▶ Qué hacer y lo último que dijo la IA, resumido); abajo el **historial** de lo que pediste, una línea por pedido con qué y cuándo ("🙋 Piezas · hoy 10:32", "🤖 Revisión al guardar · ayer"), que se despliega con un clic. **Cada nota habla solo de su función:** lo que la IA ve de otra función o del archivo va a la nota del archivo ("Sobre `b`: …").
+
 **Una nota por función, en el panel "Nota".** Lo que dice la IA de una función va a **su** nota, que se va ampliando (revisión, plano, respuestas, verificación): sin duplicados. El panel **Nota** (barra lateral ComplementAIry) **sigue al cursor**: muestra la nota de la función donde estás, con:
 - su estado (🟢 lista · 🟡 casi · 🔴 falta · sin verificar) y el **▶ Qué hacer**;
 - botones: 💡 Pista · 🧩 Piezas · 📝 Pseudocódigo · 🔁 Ejemplo · 🧪 Tests · ❓ Explícame · **✅ ¿Quedó lista?** · Insertar snippet · ✓ Resuelta;
@@ -104,7 +120,7 @@ En el código **no se abre nada entre las líneas** ni te quita el foco: solo un
 
 **✅ ¿Quedó lista?** (`Ctrl+Alt+L` o el botón): revisa la función con lo que ya escribiste. Primero sin IA (sintaxis, tipos, lint, reglas); si eso pasa, la IA dice 🟢 lista (cierra la nota), 🟡 casi o 🔴 falta, con qué mejorar. También corre solo al guardar las funciones con nota que cambiaron. **Con autoguardado:** Ctrl+S actúa enseguida; un autoguardado espera a que dejes de editar (45 s por defecto) y corre una sola vez.
 
-**Guía mientras escribes:** dentro de cualquier función, tras una pausa (~1 s), aparece en gris **al final de la línea del cursor** qué toca ahora: el próximo paso (siguiendo los pasos de la nota, si los hay) o qué está mal en esa línea ("compara en vez de asignar"). Se actualiza en cada pausa, la anterior queda tenue mientras escribes, nunca trae código y no se inserta nada. Es corta (≤ 70 caracteres) y, si no cabe, se corta en una palabra: el **hover** sobre la línea y el panel Nota ("💡 Guía actual") la muestran completa. Funciona sin guardar. **Ctrl+Alt+Espacio** la pide ya. Con el proceso abierto: ~1 s y ~US$0,002 cada una (tope por hora configurable).
+**Guía mientras escribes:** no adelanta lo que ya escribiste más abajo (si lo que iba a sugerir ya está en otra línea, busca lo que falta). Dentro de cualquier función, tras una pausa (~1 s), aparece en gris **al final de la línea del cursor** qué toca ahora: el próximo paso (siguiendo los pasos de la nota, si los hay) o qué está mal en esa línea ("compara en vez de asignar"). Se actualiza en cada pausa, la anterior queda tenue mientras escribes, nunca trae código y no se inserta nada. Es corta (≤ 70 caracteres) y, si no cabe, se corta en una palabra: el **hover** sobre la línea y el panel Nota ("💡 Guía actual") la muestran completa. Funciona sin guardar. **Ctrl+Alt+Espacio** la pide ya. Con el proceso abierto: ~1 s y ~US$0,002 cada una (tope por hora configurable).
 
 **🧪 Tests:** el botón propone casos y **los prueba al instante** contra tu código (✅ pasa · ❌ falla · ❓ decide tú el resultado), y los **guarda como tests** en la carpeta de tests (los dudosos, apagados con su pregunta). **Cada vez que guardas con Ctrl+S** (con autoguardado: cuando dejas de editar) se vuelven a probar y el resultado aparece en la nota de la función y en la barra de estado: si un cambio rompe algo, lo ves en el momento. Tu código nunca se toca; los tests los crea tu clic (desde el chat no). Con el **proceso de Claude Code abierto** (`cai servir`, lo arranca la extensión) tardan **~1 s y cuestan ~US$0,002**; si ese proceso falla, se usa la llamada normal (~20 s). Se apagan en la configuración; en modo aprender no aparecen.
 
@@ -117,7 +133,14 @@ En el código **no se abre nada entre las líneas** ni te quita el foco: solo un
 | **Hechas recientes** | se archivan solas al día siguiente; cualquier tarea se puede descartar |
 | **IA** | qué está haciendo ahora (cancelar, silenciar 30 min) |
 
-**Chat "Proyecto"** (vista propia en la barra lateral, fuera de los archivos): preguntas generales como "¿por dónde sigo?", "¿qué falta para terminar?" o "¿cómo encaja X?". La IA **solo lee** el proyecto y conoce la estructura, el panorama, el índice y tus decisiones. Sus respuestas pueden traer decisiones (botones) y tareas (➕ Agregar tarea). Ahí también está **📝 Resumen de la sesión**.
+**Chat "Proyecto"** (vista propia en la barra lateral, fuera de los archivos), en **varias conversaciones** (Nueva, volver a una anterior, 🎯 Entender el proyecto) y con **la IA que elijas** en cada una (chica, mediana o grande). La IA **solo lee** el proyecto y conoce los objetivos, la estructura, el panorama, el índice, tus decisiones y tus correcciones. Según lo que le cuentes, propone:
+- **decisiones** con botones (y **Otra…**, **↩ Retractar**, cambiar de opción);
+- **cambios de tareas** ("voy a implementar X", "ya terminé Y"): crear, editar, marcar hecha o reabrir, cada uno con **Aplicar** (el botón queda en "✓ Aplicado");
+- **correcciones** de lo que entiende del proyecto ("ese archivo no es una API"): con **Aplicar corrección**, mandan sobre lo generado y el panorama ya no las pisa. También puedes corregir con ✎ sobre un archivo en el panel.
+
+Nada se aplica sin tu clic. Ahí también está **📝 Resumen de la sesión**.
+
+**💡 Ideas** (panel → Proyecto): funcionalidades nuevas y mejoras, salidas del panorama (sin costo extra) o con "🔄 Más ideas". Cada una: ➕ tarea o ✕ no me interesa (no vuelve). "Qué aprender" solo si lo activas (pensado para el modo aprender).
 
 Arriba de cada archivo: `🗺️ Plano · 💡 Ayuda con el archivo · 🔎 Revisar · 💬 N notas`.
 
@@ -149,12 +172,19 @@ Arriba de cada archivo: `🗺️ Plano · 💡 Ayuda con el archivo · 🔎 Revi
 | Chat del proyecto | vista "Proyecto" | `cai chat --texto "..."` |
 | Revisar con veredicto | 🔎 Revisar | `cai revisar <archivo> --completo` |
 | Retomar y cerrar | panel y chat | `cai hoy`, `cai deuda`, `cai sesion` |
+| Entender el proyecto / una función | chat → 🎯, o 🎯 Objetivo en la nota | `cai entender --texto "…"`, `cai entender --funcion f.ts:nombre --texto "…"`, `cai entender confirmar\|reabrir\|terminado` |
+| Conversaciones del chat | selector del chat | `cai chat --lista`, `--nueva`, `--conversacion <id>`, `--modelo chico\|mediano\|grande` |
+| Corregir lo que entiende | chat, o ✎ en el panel | `cai memoria corregir --modulo\|--estructura <archivo> \| --proyecto --texto "…"` |
+| Ideas | panel → 💡 Ideas | `cai ideas`, `cai ideas mas`, `cai ideas tarea\|descartar <id>` |
+| Modo programar | panel Nota (🧭, 📋, 📦, 🔬) | `cai programar plan\|paso\|contrato\|pr\|probar … --funcion f`, `cai programar estado`, `cai repertorio` |
 
 ### Desde el chat de Claude Code
 En un proyecto con `cai init`, el chat de Claude Code también es ComplementAIry:
 - **Sabe usarlo:** viene con la skill `cai`, que indica qué comando corresponde a cada pedido, más `cai-guia`, `cai-revisar` y `cai-snippet`. La sección de `CLAUDE.md` le explica las reglas.
 - **Corre los mismos comandos que los atajos.** Por ejemplo, "revisa src/cuota.ts" lleva a `cai revisar`, "¿cómo sigo?" a `cai panorama` y "tests para calcularCuota" a `cai tests`. Lo que esos comandos escriben (`panorama.md`, `conocimiento.md`, ADRs, `ESTRUCTURA.md`) se conserva, solo si el comando es **una sola llamada a `cai`, sin encadenar**.
-- **Conoce el proyecto:** consulta `cai indice`, `cai decisiones` y `cai chat` antes de responder. En modo notas, lo que diga sobre tu código va a las notas (`cai responder`), no como comentarios en el archivo. Si tu `CLAUDE.md` tiene instrucciones de una versión anterior, la extensión ofrece actualizarlas (`cai init --solo-claude`).
+- **Es el mismo chat que el del plugin:** entiende el proyecto (`cai entender`), conversa (`cai chat`), cambia tareas cuando le cuentas qué harás, propone ideas, y en modo programar propone planes, pasos y PRs.
+- **Lo que solo decides tú, con sus botones:** para decidir, retractar, descartar, confirmar objetivos o aplicar una corrección, Claude Code te pregunta con su herramienta de preguntas y **un hook registra tu respuesta** (comprobado: la respuesta llega después de tu clic; si la pregunta ya trae una respuesta puesta, se rechaza, y el texto de la pregunta tiene que incluir exactamente lo que se registra). Si lo intentara con un comando, se revierte.
+- **Conoce el proyecto:** consulta `cai entender estado`, `cai indice`, `cai decisiones` y `cai memoria correcciones` antes de responder. En modo notas, lo que diga sobre tu código va a las notas (`cai responder`), no como comentarios en el archivo. Si tu `CLAUDE.md` tiene instrucciones de una versión anterior, la extensión ofrece actualizarlas (`cai init --solo-claude`).
 - **No puede escribir tu código:** los hooks lo bloquean. Tampoco puede activar snippets (`cai expandir`), instalar (`cai init`), crear snippets ni declarar tu perfil: eso lo haces tú.
 
 ## Qué IA usa y cómo ahorra tokens

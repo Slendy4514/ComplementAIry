@@ -21,11 +21,11 @@ import { planoProyecto } from "./plano.js";
 import { verificar } from "./verificar.js";
 import { servir } from "./servir.js";
 import { deuda, hoy, resumenSesion } from "./resumenSesion.js";
-import { cargarChat, conversar as conversarProyecto, limpiarChat as limpiarChatProyecto } from "./chat.js";
+import { aplicarPropuesta, borrarConversacion, cargarConversacion, crearConversacion, conversar as conversarProyecto, elegirModelo, listarConversaciones, type Tamano } from "./chat.js";
 import { revisarCompleto } from "./revisionCompleta.js";
 import { actualizarIndice, leerIndice, lineaIndice } from "./indice.js";
-import { cargarDecisiones, decidir, retractar } from "./decisiones.js";
-import { esModo, MODOS, modoEfectivo } from "./modos.js";
+import { cargarDecisiones, decidir, proponerDecisiones, retractar } from "./decisiones.js";
+import { esModo, migrarModos, MODOS, modoEfectivo } from "./modos.js";
 import { funcionesDe, funcionPorClave } from "./notasFuncion.js";
 import { rapida } from "./rapida.js";
 import { cargarDialogos, conversar, olvidarDialogo } from "./dialogo.js";
@@ -34,7 +34,14 @@ import { estadoPanorama, leerMemoria, panorama, preguntasAbiertas, responderPreg
 import { conBloqueo, enCurso, OcupadoError, ocuparEsperando } from "./ocupado.js";
 import { responderNota } from "./responder.js";
 import { cargarNotas, guardarNotas, nuevaNota, mensaje, todasLasNotas } from "./notas.js";
-import { cargarTareas, guardarTareas, siguiente, actualizarTareas, agregarTareas } from "./siguiente.js";
+import { cargarCorrecciones, corregir, quitarCorreccion } from "./correcciones.js";
+import { proponerCorreccion } from "./confirmar.js";
+import { entenderFuncion, marcarObjetivo } from "./objetivoFuncion.js";
+import { definirContrato, descartarPropuesta, deudaComprension, editarPlan, leerPropuesta, medicion, pasoDirigido, pendienteDiferida, planFuncion, probarDiferida, probarPorcion, propuestaPR, registrarInsercion } from "./programar.js";
+import { borrarDeRepertorio, cargarRepertorio, dirRepertorio, politica } from "./repertorio.js";
+import { cargarIdeas, descartarIdea, ideaATarea, masIdeas } from "./ideas.js";
+import { confirmarObjetivos, darPorTerminado, leerEvaluacion, leerObjetivos, objetivosMd, reabrirObjetivos } from "./entender.js";
+import { aplicarCambioTarea, cargarTareas, guardarTareas, siguiente, actualizarTareas, agregarTareas, type CambioTarea } from "./siguiente.js";
 import { planoArchivo } from "./planoArchivo.js";
 import { conContenido, conocer, sugerirAutoria } from "./conocer.js";
 import { createInterface } from "node:readline/promises";
@@ -63,7 +70,7 @@ const HELP = `ComplementAIry (cai) — tú programas, la IA te acompaña
   cai decisiones [decidir <id> "<opción>" | retractar <id>]   lo que decidiste (la IA lo respeta; se puede retractar)
   cai servir                      proceso abierto para la extensión (sugerencias rápidas sin esperar el arranque)
   cai actividad [--n 20]          qué hizo la IA (hora, qué, archivo, modelo, costo, tiempo)
-  cai modo [programar|aprender|heredar] [--archivo f | --funcion f:nombre | --carpeta glob]
+  cai modo [sugerir|aprender|programar|heredar] [--archivo f | --funcion f:nombre | --carpeta glob]
                                     modo de trabajo (gana función > archivo > carpeta > proyecto); no toca lo ya hecho
   cai rapida <archivo> --linea N  pista de una línea donde estás (VSCode la muestra en gris)
   cai verificar <archivo> [--funcion X]  "¿quedó lista?": sin IA primero; lista → cierra la nota, si no deja mejoras
@@ -514,6 +521,8 @@ async function ejecutar(argv: string[]): Promise<number> {
       if (h.empezaronAFallar.length) console.log(`  ❌ empezaron a fallar sus tests: ${h.empezaronAFallar.join(", ")}`);
       if (h.decisionesPendientes) console.log(`  ❓ ${h.decisionesPendientes} decisión(es) esperan que elijas`);
       for (const c of h.conviene) console.log(`  · ${c}`);
+      if (h.diferida) console.log(`  🎯 prueba diferida: ${h.diferida.funcion.replace(/#\d+$/, "")} (${h.diferida.archivo}), la insertaste desde una propuesta: ¿qué devuelve con otra entrada?`);
+      if (h.creeTerminado) console.log("  🏁 Cree que el proyecto cumple todos sus criterios de terminado: cai entender (y, si estás de acuerdo, cai entender terminado)");
       return 0;
     }
     case "deuda": {
@@ -523,7 +532,7 @@ async function ejecutar(argv: string[]): Promise<number> {
         return 0;
       }
       for (const [rel, x] of Object.entries(d))
-        console.log(`${rel}: ${x.notasAbiertas} nota(s)${x.bloqueantes ? ` (${x.bloqueantes} bloqueantes)` : ""} · ${x.testsApagados} test(s) apagados · ${x.sinTests.length ? `sin tests: ${x.sinTests.join(", ")}` : "todas con tests"}${x.decisionesPendientes ? ` · ${x.decisionesPendientes} decisión(es)` : ""}`);
+        console.log(`${rel}: ${x.notasAbiertas} nota(s)${x.bloqueantes ? ` (${x.bloqueantes} bloqueantes)` : ""} · ${x.testsApagados} test(s) apagados · ${x.sinTests.length ? `sin tests: ${x.sinTests.join(", ")}` : "todas con tests"}${x.decisionesPendientes ? ` · ${x.decisionesPendientes} decisión(es)` : ""}${x.sinEntender?.length ? ` · ⚠ sin entender (insertadas sin probar): ${x.sinEntender.join(", ")}` : ""}`);
       if (!Object.keys(d).length) console.log("✓ sin deuda pendiente");
       return 0;
     }
@@ -539,28 +548,225 @@ async function ejecutar(argv: string[]): Promise<number> {
       return 0;
     }
     case "chat": {
-      // cai chat --texto "…" [--json] · cai chat --historial [--json] · cai chat --limpiar
-      if (argv.includes("--limpiar")) {
-        await limpiarChatProyecto(root);
-        console.log("✓ chat del proyecto vacío");
+      // cai chat --texto "…" [--conversacion <id> | --nueva] [--entender] [--modelo chico|mediano|grande] [--json]
+      // cai chat --lista [--json] · cai chat --historial [--conversacion <id>] [--json] · cai chat --borrar <id>
+      // cai chat --aplicar <id> <mensaje> tarea|correccion <k>   (tu clic en la extensión: solo humano)
+      const opt = (k: string) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : undefined);
+      const json = argv.includes("--json");
+      if (argv.includes("--lista")) {
+        const cs = listarConversaciones(root);
+        if (json) process.stdout.write(JSON.stringify(cs));
+        else for (const c of cs) console.log(`[${c.id}] ${c.titulo} · ${c.tipo} · ${c.modelo} · ${c.actualizada.slice(0, 16).replace("T", " ")}`);
+        if (!cs.length && !json) console.log("(sin conversaciones)");
+        return 0;
+      }
+      if (argv.includes("--aplicar")) {
+        const [id, msg, tipo, k] = argv.slice(argv.indexOf("--aplicar") + 1);
+        if (!id || !msg || (tipo !== "tarea" && tipo !== "correccion") || k === undefined) throw new Error("uso: cai chat --aplicar <conversación> <mensaje> tarea|correccion <número>");
+        console.log(`✓ ${await aplicarPropuesta(root, id, msg, tipo, Number(k))}`);
+        return 0;
+      }
+      if (opt("--borrar")) {
+        borrarConversacion(root, opt("--borrar")!);
+        console.log("✓ conversación borrada");
+        return 0;
+      }
+      if (argv.includes("--limpiar") || (argv.includes("--nueva") && !argv.includes("--texto"))) {
+        // "Limpiar" (v0.9) = empezar una conversación nueva; la anterior queda en la lista.
+        const c = await crearConversacion(root, { ...(argv.includes("--entender") ? { tipo: "entender" as const } : {}), ...(opt("--modelo") ? { modelo: opt("--modelo") as Tamano } : {}) });
+        if (json) process.stdout.write(JSON.stringify(c));
+        else console.log(`✓ conversación nueva: ${c.id}`);
+        return 0;
+      }
+      if (opt("--modelo") && opt("--conversacion") && !argv.includes("--texto")) {
+        const c = await elegirModelo(root, opt("--conversacion")!, opt("--modelo")!);
+        console.log(`✓ ${c.titulo}: responde el modelo ${c.modelo}`);
         return 0;
       }
       if (argv.includes("--historial")) {
-        const h = cargarChat(root);
-        if (argv.includes("--json")) process.stdout.write(JSON.stringify(h));
-        else for (const m of h) console.log(`${m.quien === "ia" ? "IA" : "Tú"}: ${m.texto}\n`);
+        const id = opt("--conversacion") ?? listarConversaciones(root)[0]?.id;
+        const c = id ? cargarConversacion(root, id) : undefined;
+        if (json) process.stdout.write(JSON.stringify(c ?? null));
+        else for (const m of c?.mensajes ?? []) console.log(`${m.quien === "ia" ? "IA" : "Tú"}: ${m.texto}\n`);
         return 0;
       }
-      const t = argv.includes("--texto") ? argv[argv.indexOf("--texto") + 1] : argv.slice(1).filter((a) => !a.startsWith("--")).join(" ");
+      const t = opt("--texto") ?? argv.slice(1).filter((a) => !a.startsWith("--")).join(" ");
       if (!t?.trim()) throw new Error('uso: cai chat --texto "<tu pregunta sobre el proyecto>"');
-      const r = await conversarProyecto(root, t);
-      if (argv.includes("--json")) process.stdout.write(JSON.stringify(r));
+      const conversacion = argv.includes("--nueva") ? (await crearConversacion(root, { ...(argv.includes("--entender") ? { tipo: "entender" as const } : {}) })).id : opt("--conversacion");
+      const r = await conversarProyecto(root, t, { ...(conversacion ? { conversacion } : {}), ...(opt("--modelo") ? { modelo: opt("--modelo")! } : {}), ...(argv.includes("--entender") ? { tipo: "entender" as const } : {}) });
+      if (json) process.stdout.write(JSON.stringify(r));
       else {
         console.log(r.respuesta.texto);
-        for (const d of r.decisiones) console.log(`\n❓ [${d.id}] ${d.pregunta}: ${d.opciones.map((o) => o.opcion).join(" / ")}  (decide con: cai decisiones decidir ${d.id} "<opción>")`);
-        for (const x of r.respuesta.tareas ?? []) console.log(`\n➕ tarea sugerida: ${x.titulo} (${x.archivo})`);
+        for (const d of r.decisiones) console.log(`\n❓ [${d.id}] ${d.pregunta}: ${d.opciones.map((o) => o.opcion).join(" / ")}  (la decide el programador)`);
+        r.respuesta.cambiosTareas?.forEach((x, k) => console.log(`\n📋 propuesta de tarea (${x.accion}${x.id ? ` ${x.id}` : ""}): ${x.titulo}  → la aplica el programador: cai chat --aplicar ${r.conversacion} ${r.mensaje} tarea ${k}`));
+        r.respuesta.correcciones?.forEach((x) => console.log(`\n✎ corrección propuesta (${x.tipo}${x.archivo ? ` ${x.archivo}` : ""}): ${x.despues}`));
+        for (const p of r.respuesta.preguntas ?? []) console.log(`\n❓ ${p.pregunta}${p.opciones.length ? ` (${p.opciones.join(" / ")})` : ""}`);
+        if (r.respuesta.creeEntendido) console.log("\n✓ Cree que ya entendió: confírmalo (cai entender confirmar) o sigue corrigiendo.");
       }
       return 0;
+    }
+    case "programar": {
+      // Modo programar (la IA escribe; entra a tu archivo SOLO con tu clic en la extensión):
+      // cai programar plan <archivo> --funcion f [--pasos "a" --pasos "b"…]      proponer (o editar: tú) el plan de 3-5 pasos
+      // cai programar paso <archivo> --funcion f --paso n --texto "cómo hacerlo"   tú diriges, la IA escribe ese paso
+      // cai programar contrato <archivo> --funcion f --caso "f(1)" "3" …          tus casos (tú pones lo esperado)
+      // cai programar pr <archivo> --funcion f [--desde <id del repertorio>]       propuesta por porciones (o tu versión adaptada)
+      // cai programar probar <archivo> --funcion f --porcion k --entrada "f(2)" --espero "4"   el probador (tú)
+      // cai programar insertado <archivo> --funcion f    (la extensión, tras tu clic) · descartar · ver [--json]
+      // cai programar diferida <archivo> --funcion f --entrada … --espero …  ·  cai programar estado [--json]
+      const opt = (k: string) => (rest.includes(k) ? rest[rest.indexOf(k) + 1] : undefined);
+      const json = argv.includes("--json");
+      if (sub === "estado") {
+        const m = medicion(root);
+        const pend = pendienteDiferida(root);
+        if (json) process.stdout.write(JSON.stringify({ ...m, deuda: deudaComprension(root), diferida: pend }));
+        else console.log(`Modo programar: ${m.funciones} función(es) insertadas desde propuestas · ${m.pruebas} pruebas (${m.aciertosPrimera}/${m.porciones} porciones acertadas a la primera) · ${m.sinProbar} porción(es) sin probar · diferidas: ${m.diferidasAcertadas}/${m.diferidas}${pend ? `\nPrueba diferida pendiente: ${pend.funcion} (${pend.archivo})` : ""}`);
+        return 0;
+      }
+      const archivo = rest.find((a) => !a.startsWith("--") && !["--funcion", "--paso", "--texto", "--caso", "--desde", "--porcion", "--entrada", "--espero", "--pasos"].includes(rest[rest.indexOf(a) - 1] ?? ""));
+      const funcion = opt("--funcion");
+      if (!sub || !archivo || !funcion) throw new Error("uso: cai programar plan|paso|contrato|pr|probar|insertado|descartar|ver|diferida <archivo> --funcion <nombre> … (detalle: cai --help)");
+      const rel = path.relative(root, path.resolve(archivo));
+      const out = (x: unknown, texto: string) => (json ? process.stdout.write(JSON.stringify(x)) : console.log(texto));
+      if (sub === "plan") {
+        const pasos = rest.flatMap((a, i) => (rest[i - 1] === "--pasos" ? [a] : []));
+        if (pasos.length) {
+          const plan = await editarPlan(root, rel, funcion, pasos);
+          out(plan, `✓ plan (${plan.pasos.length} pasos)`);
+        } else {
+          const r = await planFuncion(root, rel, funcion);
+          out(r, `${r.plan.pasos.map((p, i) => `${i + 1}. ${p.texto}${p.repertorio ? " (ya lo hiciste antes)" : ""}`).join("\n")}${r.tarea ? `\n→ separa ${r.tarea}: quedó como tarea (trabájala en su propia nota)` : ""}\n  · US$${r.costoUsd.toFixed(3)}`);
+        }
+        return 0;
+      }
+      if (sub === "paso") {
+        const p = await pasoDirigido(root, rel, funcion, Number(opt("--paso") ?? 1), opt("--texto") ?? "");
+        out(p, `${p.falta ? `⚠ Tu paso no dice: ${p.falta}\n` : ""}${p.explicacion}\n\n${p.codigo}\n\n(irá ${p.linea ? `después de la línea ${p.linea}` : "donde elijas"}; lo inserta el programador con un clic)`);
+        return 0;
+      }
+      if (sub === "contrato") {
+        const casos = rest.flatMap((a, i) => (rest[i - 1] === "--caso" ? [{ llamada: a, esperado: rest[i + 1] ?? "" }] : []));
+        await definirContrato(root, rel, funcion, casos);
+        out({ casos }, `✓ ${casos.length} casos (el resultado esperado lo pusiste tú)`);
+        return 0;
+      }
+      if (sub === "pr") {
+        const p = await propuestaPR(root, rel, funcion, { ...(opt("--desde") ? { desde: opt("--desde")! } : {}) });
+        out(p, `Propuesta en ${p.porciones?.length ?? 1} porción(es); contra tus casos: ${p.contrato?.filter((c) => c.pasa).length}/${p.contrato?.length} ✓\n${p.porciones?.map((x, i) => `${i + 1}. líneas ${x.desde}-${x.hasta}: ${x.porque}`).join("\n")}\n(se revisa porción por porción en el panel Nota, con el probador)`);
+        return 0;
+      }
+      if (sub === "probar") {
+        const r = await probarPorcion(root, rel, funcion, Number(opt("--porcion") ?? 1) - 1, opt("--entrada") ?? "", opt("--espero") ?? "");
+        out(r, `${!r.prueba.toca ? "✗ Tu entrada no pasa por esta porción: elige una que la recorra." : r.prueba.acierto ? "✓ Coincide." : `✗ Esperabas ${r.prueba.espero}, da ${r.prueba.obtenido}.${r.prueba.explicacion ? ` ${r.prueba.explicacion}` : ""}`} (${r.aprobadas}/${r.total} porciones probadas)`);
+        return 0;
+      }
+      if (sub === "insertado") {
+        const r = await registrarInsercion(root, rel, funcion);
+        out(r, `✓ registrado: ${r.porciones} porción(es), ${r.pruebas} prueba(s)${r.sinProbar ? ` · ${r.sinProbar} sin probar (deuda de comprensión)` : ""}`);
+        return 0;
+      }
+      if (sub === "descartar") {
+        descartarPropuesta(root, rel, funcion);
+        out({ ok: true }, "✓ propuesta descartada");
+        return 0;
+      }
+      if (sub === "ver") {
+        const p = leerPropuesta(root, rel, funcion);
+        out(p, p ? `${p.tipo} · ${p.fecha}\n${p.codigo}` : "(sin propuesta)");
+        return 0;
+      }
+      if (sub === "diferida") {
+        const r = await probarDiferida(root, rel, funcion, opt("--entrada") ?? "", opt("--espero") ?? "");
+        out(r, r.acierto ? `✓ coincide (${r.obtenido})` : `✗ da ${r.obtenido}`);
+        return 0;
+      }
+      throw new Error(`subcomando desconocido: programar ${sub}`);
+    }
+    case "repertorio": {
+      // cai repertorio [--json] · cai repertorio borrar <id>   (tu repertorio personal, entre proyectos)
+      if (sub === "borrar") {
+        const e = borrarDeRepertorio(rest[0] ?? "");
+        console.log(`✓ quitado del repertorio: ${e.nombre} (${e.proyecto}); queda en su historial de git`);
+        return 0;
+      }
+      const es = cargarRepertorio();
+      if (argv.includes("--json")) process.stdout.write(JSON.stringify({ dir: dirRepertorio(), politica: politica(root), entradas: es }));
+      else {
+        console.log(`Repertorio: ${dirRepertorio()} · en este proyecto: guardar ${politica(root).guardar ? "sí" : "no"}, usar "${politica(root).usar}"`);
+        for (const e of es) console.log(`[${e.id}] ${e.firma} — ${e.resumen} (${e.proyecto}/${e.archivo})`);
+        if (!es.length) console.log("(vacío: se llena con tus funciones 🟢)");
+      }
+      return 0;
+    }
+    case "ideas": {
+      // cai ideas [--json] · mas · tarea <id> · descartar <id> (descartar: solo humano)
+      if (sub === "mas") {
+        const r = await masIdeas(root);
+        console.log(r.ideas.length ? r.ideas.map((i) => `💡 [${i.id}] (${i.tipo}) ${i.titulo} — ${i.porque}`).join("\n") : "(no se me ocurrió nada nuevo que no hayas visto o descartado)");
+        console.log(`  · US$${r.costoUsd.toFixed(3)}`);
+        return 0;
+      }
+      if (sub === "tarea" || sub === "descartar") {
+        const i = sub === "tarea" ? ideaATarea(root, rest[0] ?? "") : descartarIdea(root, rest[0] ?? "");
+        console.log(`✓ ${sub === "tarea" ? `tarea agregada: ${i.titulo}` : `no se volverá a proponer: ${i.titulo}`}`);
+        return 0;
+      }
+      const ideas = cargarIdeas(root).filter((i) => !i.descartada && !i.tarea);
+      if (argv.includes("--json")) process.stdout.write(JSON.stringify(ideas));
+      else for (const i of ideas) console.log(`💡 [${i.id}] (${i.tipo}) ${i.titulo} — ${i.porque}`);
+      if (!ideas.length && !argv.includes("--json")) console.log("(sin ideas: salen con el panorama, o pide más con: cai ideas mas)");
+      return 0;
+    }
+    case "entender": {
+      // cai entender [--texto "…"] [--nueva] [--json]   conversar para entender el proyecto (borrador)
+      // cai entender estado [--json] · confirmar · reabrir [--motivo "…"] · terminado   (estos tres, solo humano)
+      const json = argv.includes("--json");
+      // Una función (--funcion archivo:nombre) o un archivo (--archivo f): su objetivo y criterios.
+      const fArg = argv.includes("--funcion") ? argv[argv.indexOf("--funcion") + 1] : undefined;
+      const aArg = argv.includes("--archivo") ? argv[argv.indexOf("--archivo") + 1] : undefined;
+      if (fArg || aArg) {
+        const [fa, fn] = fArg ? [fArg.slice(0, fArg.lastIndexOf(":")), fArg.slice(fArg.lastIndexOf(":") + 1)] : [aArg!, undefined];
+        if (!fa) throw new Error("uso: cai entender [confirmar|terminado|reabrir] --funcion <archivo>:<nombre> | --archivo <archivo> [--texto \"…\"]");
+        const rel = path.relative(root, path.resolve(fa));
+        if (sub === "confirmar" || sub === "reabrir" || sub === "terminado") {
+          const o = await marcarObjetivo(root, rel, fn, sub);
+          console.log(`✓ ${fn ?? rel}: ${sub === "confirmar" ? "objetivo confirmado" : sub === "terminado" ? "terminada" : "reabierta"} (${o.texto})`);
+          return 0;
+        }
+        const t = argv.includes("--texto") ? argv[argv.indexOf("--texto") + 1]! : "";
+        const r = await entenderFuncion(root, rel, fn, t);
+        if (json) process.stdout.write(JSON.stringify(r));
+        else console.log(`🎯 ${r.objetivo.texto}\n${r.objetivo.criterios.map((c) => `  - ${c}`).join("\n")}${r.preguntas.length ? `\n${r.preguntas.map((p) => `❓ ${p.pregunta}${p.opciones.length ? ` (${p.opciones.join(" / ")})` : ""}`).join("\n")}` : ""}${r.creoQueEntendi ? "\n✓ Cree que ya lo entendió: el programador lo confirma (cai entender confirmar --funcion …)" : ""}`);
+        return 0;
+      }
+      if (sub === "confirmar" || sub === "reabrir" || sub === "terminado") {
+        const opt = (k: string) => (rest.includes(k) ? rest[rest.indexOf(k) + 1] : undefined);
+        const o = sub === "confirmar" ? confirmarObjetivos(root) : sub === "reabrir" ? reabrirObjetivos(root, opt("--motivo") ?? "") : darPorTerminado(root);
+        console.log(`✓ objetivos: ${o.estado}${sub === "reabrir" ? " (sigue la conversación en el chat → 🎯 Entender el proyecto)" : ""}`);
+        return 0;
+      }
+      if (!sub || sub === "estado" || sub.startsWith("--")) {
+        const t = argv.includes("--texto") ? argv[argv.indexOf("--texto") + 1] : undefined;
+        if (t) {
+          const r = await conversarProyecto(root, t, { tipo: "entender", ...(argv.includes("--nueva") ? { conversacion: (await crearConversacion(root, { tipo: "entender" })).id } : {}) });
+          if (json) process.stdout.write(JSON.stringify(r));
+          else {
+            console.log(r.respuesta.texto);
+            for (const p of r.respuesta.preguntas ?? []) console.log(`\n❓ ${p.pregunta}${p.opciones.length ? ` (${p.opciones.join(" / ")})` : ""}`);
+            if (r.respuesta.creeEntendido) console.log("\n✓ Cree que ya entendió: el programador lo confirma (cai entender confirmar) o sigue corrigiendo.");
+          }
+          return 0;
+        }
+        const o = leerObjetivos(root);
+        const ev = leerEvaluacion(root);
+        if (json) process.stdout.write(JSON.stringify({ ...o, evaluacion: ev }));
+        else {
+          console.log(objetivosMd(o));
+          if (ev) console.log(`Revisión de "terminado" (${ev.fecha.slice(0, 10)}): ${ev.criterios.map((c) => `${{ cumple: "✓", parcial: "◐", no: "✗" }[c.estado]} ${o.criterios.find((x) => x.id === c.id)?.texto ?? c.id}`).join(" · ")}${ev.creeTerminado ? "\n🏁 Cree que se cumplen todos: el programador puede darlo por terminado (cai entender terminado)." : ""}`);
+        }
+        return 0;
+      }
+      throw new Error('uso: cai entender [--texto "…"] | estado | confirmar | reabrir [--motivo "…"] | terminado');
     }
     case "indice": {
       // cai indice [actualizar [archivo…]] [--json]: el mapa de funciones del proyecto (sin IA)
@@ -579,7 +785,18 @@ async function ejecutar(argv: string[]): Promise<number> {
       return 0;
     }
     case "decisiones": {
-      // cai decisiones [--json] · decidir <id> "<opción>" · retractar <id>
+      // cai decisiones [--json] · decidir <id> "<opción>" · retractar <id>  (estos dos: solo humano)
+      // cai decisiones proponer "<pregunta>" --opcion "a" --opcion "b" [--recomendada "a"] [--archivo f] [--funcion nombre]
+      if (sub === "proponer") {
+        const pregunta = rest.find((a, i) => !a.startsWith("--") && !["--opcion", "--recomendada", "--archivo", "--funcion"].includes(rest[i - 1] ?? ""));
+        const opciones = rest.flatMap((a, i) => (rest[i - 1] === "--opcion" ? [{ opcion: a, consecuencia: "" }] : []));
+        const opt = (k: string) => (rest.includes(k) ? rest[rest.indexOf(k) + 1] : undefined);
+        if (!pregunta || opciones.length < 2) throw new Error('uso: cai decisiones proponer "<pregunta>" --opcion "a" --opcion "b" [--recomendada "a"] [--archivo f] [--funcion nombre]');
+        const archivo = opt("--archivo") ? path.relative(root, path.resolve(opt("--archivo")!)) : undefined;
+        const [d] = proponerDecisiones(root, [{ pregunta, opciones, ...(opt("--recomendada") ? { recomendada: opt("--recomendada")! } : {}) }], { ...(archivo ? { archivo } : {}), ...(opt("--funcion") ? { funcion: opt("--funcion")! } : {}) }, "Claude Code");
+        console.log(d ? `decisión ${d.id} pendiente. Pregúntale al programador con AskUserQuestion, encabezado "cai:${d.id}", con la pregunta "${d.pregunta}" y sus opciones como opciones.` : "(ya hay una decisión parecida pendiente o vigente: míralas con cai decisiones)");
+        return 0;
+      }
       if (sub === "decidir") {
         const d = decidir(root, rest[0] ?? "", rest.slice(1).filter((a) => !a.startsWith("--")).join(" "));
         console.log(`✓ ${d.pregunta} → ${d.eleccion} (la IA la respeta desde ahora; puedes retractarla)`);
@@ -622,7 +839,7 @@ async function ejecutar(argv: string[]): Promise<number> {
       return 0;
     }
     case "modo": {
-      // cai modo [programar|aprender|heredar] [--archivo f | --funcion f:nombre | --carpeta ruta/] [--json]
+      // cai modo [sugerir|aprender|programar|heredar] [--archivo f | --funcion f:nombre | --carpeta ruta/] [--json]
       const args = argv.slice(1);
       const opt = (k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
       const cfgFile = path.join(dataDir(root), "config.json");
@@ -633,6 +850,7 @@ async function ejecutar(argv: string[]): Promise<number> {
         } catch (e) {
           throw new Error(`${path.relative(root, cfgFile)} no es un JSON válido (${(e as Error).message}); arréglalo antes de cambiar el modo`);
         }
+      migrarModos(raw); // lo de antes de v0.10 ("programar" = hoy "sugerir") se guarda ya migrado
       const fnArg = opt("--funcion");
       const [fnArchivo, fnNombre] = fnArg ? [fnArg.slice(0, fnArg.lastIndexOf(":")), fnArg.slice(fnArg.lastIndexOf(":") + 1)] : [];
       if (!sub || sub.startsWith("--")) {
@@ -671,7 +889,7 @@ async function ejecutar(argv: string[]): Promise<number> {
         const c = opt("--carpeta")!;
         poner("porCarpeta", /[*?]/.test(c) ? c : `${path.relative(root, path.resolve(c)).split(path.sep).join("/")}/`);
         donde = c;
-      } else if (heredar) throw new Error("el proyecto no hereda de nadie: elige programar o aprender");
+      } else if (heredar) throw new Error("el proyecto no hereda de nadie: elige sugerir, aprender o programar");
       else {
         raw.modo = sub;
         donde = "el proyecto";
@@ -742,6 +960,41 @@ async function ejecutar(argv: string[]): Promise<number> {
         else console.log(r.hilo[r.hilo.length - 1]!.texto);
         return 0;
       }
+      if (sub === "corregir") {
+        // cai memoria corregir --modulo <archivo> | --estructura <archivo> | --proyecto  --texto "lo que debe decir"
+        // Lo tuyo manda sobre lo generado (el panorama y el plano no lo pisan). Solo humano: desde el chat se revierte.
+        const opt = (k: string) => (rest.includes(k) ? rest[rest.indexOf(k) + 1] : undefined);
+        const texto = opt("--texto");
+        const tipo = opt("--modulo") !== undefined ? "modulo" : opt("--estructura") !== undefined ? "estructura" : rest.includes("--proyecto") ? "proyecto" : undefined;
+        if (!tipo || !texto) throw new Error('uso: cai memoria corregir --modulo <archivo> | --estructura <archivo> | --proyecto  --texto "lo que debe decir"');
+        const archivo = tipo === "modulo" ? opt("--modulo") : tipo === "estructura" ? opt("--estructura") : undefined;
+        const c = corregir(root, { tipo, ...(archivo ? { archivo: path.relative(root, path.resolve(archivo)) } : {}), despues: texto, ...(opt("--antes") ? { antes: opt("--antes")! } : {}), origen: "tú" });
+        console.log(`✓ corrección ${c.id} guardada: ${c.archivo ? `${c.archivo}: ` : ""}${c.despues} (manda sobre lo generado; se quita con: cai memoria quitar ${c.id})`);
+        return 0;
+      }
+      if (sub === "proponer") {
+        // Claude Code: cai memoria proponer --modulo f | --estructura f | --proyecto --texto "…" → luego te pregunta con el encabezado cai:<id>
+        const opt = (k: string) => (rest.includes(k) ? rest[rest.indexOf(k) + 1] : undefined);
+        const texto = opt("--texto");
+        const tipo = opt("--modulo") !== undefined ? "modulo" : opt("--estructura") !== undefined ? "estructura" : rest.includes("--proyecto") ? "proyecto" : undefined;
+        if (!tipo || !texto) throw new Error('uso: cai memoria proponer --modulo <archivo> | --estructura <archivo> | --proyecto  --texto "lo que debe decir"');
+        const archivo = tipo === "modulo" ? opt("--modulo") : tipo === "estructura" ? opt("--estructura") : undefined;
+        const p = proponerCorreccion(root, { tipo, ...(archivo ? { archivo: path.relative(root, path.resolve(archivo)) } : {}), despues: texto });
+        console.log(`propuesta ${p.id}. Pregúntale al programador con AskUserQuestion, encabezado "cai:${p.id}", incluyendo en la pregunta el texto exacto: "${p.despues}", opciones "Aplicar" / "No".`);
+        return 0;
+      }
+      if (sub === "quitar") {
+        const c = quitarCorreccion(root, rest[0] ?? "");
+        console.log(`✓ corrección quitada: ${c.archivo ? `${c.archivo}: ` : ""}${c.despues}`);
+        return 0;
+      }
+      if (sub === "correcciones") {
+        const cs = cargarCorrecciones(root);
+        if (argv.includes("--json")) process.stdout.write(JSON.stringify(cs));
+        else for (const c of cs) console.log(`[${c.id}] ${c.tipo}${c.archivo ? ` ${c.archivo}` : ""}: ${c.despues}`);
+        if (!cs.length && !argv.includes("--json")) console.log("(sin correcciones)");
+        return 0;
+      }
       const dialogos = cargarDialogos(root);
       const abiertas = preguntasAbiertas(root).map((a) => ({ ...a, dialogo: dialogos[a.pregunta] ?? [] }));
       if (argv.includes("--json")) {
@@ -770,27 +1023,26 @@ async function ejecutar(argv: string[]): Promise<number> {
       return 0;
     }
     case "tareas": {
-      const cambiar = ["hecha", "pendiente", "descartar"].includes(sub ?? "");
+      // cai tareas [--json] · agregar "<t>" [--archivo f] [--detalle "…"] · editar <id> [--titulo "…"] [--detalle "…"] [--archivo f]
+      // · hecha|pendiente|reabrir|descartar <id>   (descartar es solo humano: desde el chat se revierte)
+      const opt = (k: string) => (rest.includes(k) ? rest[rest.indexOf(k) + 1] : undefined);
+      const cambio: CambioTarea | undefined =
+        sub === "agregar"
+          ? { accion: "crear", titulo: rest.find((a, i) => !a.startsWith("--") && !["--archivo", "--detalle"].includes(rest[i - 1] ?? "")) ?? "", ...(opt("--archivo") ? { archivo: opt("--archivo")! } : {}), ...(opt("--detalle") ? { detalle: opt("--detalle")! } : {}) }
+          : sub === "editar"
+            ? { accion: "editar", id: rest[0]!, ...(opt("--titulo") !== undefined ? { titulo: opt("--titulo")! } : {}), ...(opt("--detalle") !== undefined ? { detalle: opt("--detalle")! } : {}), ...(opt("--archivo") !== undefined ? { archivo: opt("--archivo")! } : {}) }
+            : sub === "hecha" || sub === "descartar"
+              ? { accion: sub, id: rest[0]! }
+              : sub === "pendiente" || sub === "reabrir"
+                ? { accion: "reabrir", id: rest[0]! }
+                : undefined;
+      if (cambio) {
+        if (cambio.accion === "crear" && !cambio.titulo) throw new Error('uso: cai tareas agregar "<título>" [--archivo f] [--detalle "…"]');
+        console.log(`✓ ${aplicarCambioTarea(root, cambio)}`);
+        return 0;
+      }
       // Al listar: se actualizan (hechas solas, separadas, archivadas) y no se muestran las archivadas.
-      const tareas = cambiar ? cargarTareas(root) : (await actualizarTareas(root)).filter((t) => !t.archivada);
-      if (sub === "agregar") {
-        // cai tareas agregar "<título>" [--archivo f] [--detalle "…"]  (p. ej. desde una sugerencia del chat)
-        const opt = (k: string) => (rest.includes(k) ? rest[rest.indexOf(k) + 1] : undefined);
-        const titulo = rest.find((a, i) => !a.startsWith("--") && !["--archivo", "--detalle"].includes(rest[i - 1] ?? ""));
-        if (!titulo) throw new Error('uso: cai tareas agregar "<título>" [--archivo f] [--detalle "…"]');
-        const n = agregarTareas(root, [{ titulo, ...(opt("--archivo") ? { archivo: opt("--archivo")! } : {}), ...(opt("--detalle") ? { detalle: opt("--detalle")! } : {}), origen: "manual" }]);
-        console.log(n ? `✓ tarea agregada: ${titulo}` : "(ya existía)");
-        return 0;
-      }
-      if (sub === "hecha" || sub === "pendiente" || sub === "descartar") {
-        const t = tareas.find((x) => x.id === rest[0]);
-        if (!t) throw new Error(`no existe la tarea ${rest[0]} (míralas con: cai tareas)`);
-        if (sub === "descartar") Object.assign(t, { archivada: true, descartada: true }); // no vuelve a proponerse
-        else Object.assign(t, { hecha: sub === "hecha", archivada: false, ...(sub === "hecha" ? { hechaEn: new Date().toISOString() } : { hechaEn: undefined }) });
-        guardarTareas(root, tareas);
-        console.log(`✓ ${t.id}: ${sub === "descartar" ? "descartada" : t.hecha ? "hecha" : "pendiente"}`);
-        return 0;
-      }
+      const tareas = (await actualizarTareas(root)).filter((t) => !t.archivada);
       if (argv.includes("--json")) {
         process.stdout.write(JSON.stringify(tareas));
         return 0;

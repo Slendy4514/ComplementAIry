@@ -18,6 +18,13 @@ En este proyecto el programador escribe el código y tú lo acompañas. Desde el
 | plano de un archivo | `cai plano --archivo <archivo>` | resumen + nota por función + tareas por crear |
 | sobre el archivo entero ("¿cómo organizo este archivo?") | `cai responder <archivo> --archivo-entero --texto "..."` | nota arriba del archivo |
 | "¿cómo va el proyecto?", "¿qué falta?", preguntas generales | `cai chat --texto "…"` (o `cai indice`, `cai deuda`, `cai hoy`) | responde con estructura, índice, decisiones; deja decisiones y tareas con botones |
+| entender el proyecto / sus objetivos | `cai entender --texto "…"` (estado: `cai entender estado`) | borrador de objetivos y criterios de terminado; **confirmar es suyo** (pregúntale con header `cai:obj`) |
+| el objetivo de una función o archivo | `cai entender --funcion <archivo>:<f> --texto "…"` (o `--archivo <archivo>`) | objetivo + criterios en su nota; confirmar/terminar es suyo |
+| "voy a implementar X", "ya terminé Y" | `cai tareas agregar "…"`, `cai tareas editar <id> --titulo "…"`, `cai tareas hecha\|reabrir <id>` | descartar una tarea es suyo (header `cai:-t<n>`) |
+| "eso no es así" (corrige lo que entiendes del proyecto) | `cai memoria proponer --modulo <archivo> \| --estructura <archivo> \| --proyecto --texto "…"` | luego pregúntale con header `cai:<id>` y el texto exacto; si responde "Aplicar", queda |
+| ideas para el proyecto | `cai ideas`, `cai ideas mas`, `cai ideas tarea <id>` | descartar una idea es suyo |
+| una decisión que depende de él | `cai decisiones proponer "<pregunta>" --opcion "a" --opcion "b"` | y pregúntale con AskUserQuestion, header `cai:<id>`: su respuesta queda registrada |
+| modo programar (si está activo) | `cai programar plan\|paso\|pr <archivo> --funcion <f> …` | propuestas; el código entra SOLO con su clic en VSCode; sus casos y el probador son suyos |
 | "¿está listo el archivo?" | `cai revisar <archivo> --completo` | revisión + "¿quedó lista?" de cada función + tests + veredicto 🟢/🟡/🔴 |
 | tests de una función | `cai tests <archivo> <función> --probar` | propone y EJECUTA casos (también sin export); guardarlos lo decide él |
 | decisiones tomadas | `cai decisiones` | respétalas; decidir/retractar es suyo |
@@ -34,6 +41,8 @@ En este proyecto el programador escribe el código y tú lo acompañas. Desde el
 | quién escribió qué | `cai origen` | |
 
 **Los hace el humano (están bloqueados para ti; sugiérele el comando):** `cai memoria responder`, `cai init`, `cai expandir` (activar snippets), `cai snippet nuevo`, `cai perfil set`.
+
+**Lo que solo decide él, desde este chat:** pregúntaselo con AskUserQuestion. En el `header` va `cai:<id>` (`cai:d1a2b3` decidir, `cai:-d1a2b3` retractar, `cai:-t12` descartar tarea, `cai:-i1a2b3` descartar idea, `cai:obj` confirmar objetivos, `cai:fin` dar el proyecto por terminado, `cai:p1a2b3` aplicar una corrección propuesta). Opciones EXACTAS: las de la decisión (para `cai:<id>`), "Retractar"/"Mantener" (`cai:-d…`), "Descartar"/"Mantener" (`cai:-t…`, `cai:-i…`), "Confirmar"/"Reabrir" (`cai:obj`), "Dar por terminado"/"Seguir" (`cai:fin`), "Aplicar"/"No" (`cai:p…`); una sola opción (sin multiSelect). La pregunta tiene que incluir el texto completo de lo que se registra. Nunca pongas respuestas tú: un hook registra la suya.
 
 Además:
 - Si un comando sale con código 3, la IA ya está trabajando en ese archivo (lo pidió el editor): espera y vuelve a intentarlo, no lo fuerces.

@@ -129,3 +129,28 @@ export function agregar(n: Nota, texto: string): boolean {
   n.actualizada = new Date().toISOString();
   return true;
 }
+
+/** Esquema común: de qué función habla cada cosa que dice la IA (para que cada nota hable solo de lo suyo). */
+export const CAMPO_FUNCION = {
+  type: "string",
+  description: 'De qué habla este punto: "" si es sobre ESTA función; el nombre de OTRA función si habla de ella; "archivo" si es algo general del archivo.',
+};
+
+/**
+ * En la nota de una función va solo lo de esa función. Lo que la IA dijo sobre OTRA función o sobre
+ * el archivo se manda a la nota del archivo ("Sobre `x`: …"). Devuelve lo que sí es de esta función.
+ */
+export function repartir<T extends { funcion?: string }>(notas: Nota[], rel: string, funciones: Funcion[], src: string, actual: { clave: string; nombre: string }, items: T[], kind: string, texto: (x: T) => string): T[] {
+  const propios: T[] = [];
+  const ajenos: string[] = [];
+  for (const it of items) {
+    const f = (it.funcion ?? "").trim().replace(/\(\)$/, "").replace(/^`|`$/g, "");
+    if (!f || f === actual.nombre || f === actual.clave || f === "esta") propios.push(it);
+    else ajenos.push(f.toLowerCase() === "archivo" ? texto(it) : `Sobre \`${f}\`: ${texto(it)}`);
+  }
+  if (ajenos.length) {
+    const n = notaPara(notas, rel, funciones, src, { linea: 1, alcance: "archivo", origen: kind });
+    agregar(n, `**Visto al revisar \`${actual.nombre}\`** (no es de esa función)\n${ajenos.map((a) => `- ${a}`).join("\n")}`);
+  }
+  return propios;
+}

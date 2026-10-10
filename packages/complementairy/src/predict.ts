@@ -172,6 +172,8 @@ export async function runPredecir(root: string, rel: string): Promise<{ creadas:
 }
 
 export interface Ejecucion {
+  /** Marcas de la copia de preparación (modo programar) por las que pasó la ejecución. */
+  marcas?: number[];
   ok: boolean;
   valor?: unknown;
   error?: string;
@@ -217,8 +219,8 @@ export function ejecutar(root: string, rel: string, langId: string, p: Prediccio
           `    if isinstance(v, float) and math.isinf(v): return "Infinity" if v > 0 else "-Infinity"\n    return v\n` +
           `try:\n    _m = importlib.import_module(${JSON.stringify(mod)})\n    ${p.funcion} = getattr(_m, ${JSON.stringify(p.funcion)})\n` +
           `except Exception as e:\n    print("@@" + json.dumps({"ok": False, "infra": True, "error": type(e).__name__ + ": " + str(e)}))\n    sys.exit(0)\n` +
-          `try:\n    v = _j(${p.expresion})\n    print("@@" + json.dumps({"ok": True, "valor": v}, default=str, allow_nan=False))\n` +
-          `except Exception as e:\n    print("@@" + json.dumps({"ok": False, "error": type(e).__name__ + ": " + str(e)}))\n`,
+          `try:\n    v = _j(${p.expresion})\n    print("@@" + json.dumps({"ok": True, "valor": v, "marcas": sorted(getattr(__import__("builtins"), "_cai_hits", set()))}, default=str, allow_nan=False))\n` +
+          `except Exception as e:\n    print("@@" + json.dumps({"ok": False, "error": type(e).__name__ + ": " + str(e), "marcas": sorted(getattr(__import__("builtins"), "_cai_hits", set()))}))\n`,
       );
       cmd = `python3 ${JSON.stringify(tmp + ".py")}`;
     } else {
@@ -229,12 +231,13 @@ export function ejecutar(root: string, rel: string, langId: string, p: Prediccio
           `catch (e) { console.log("@@" + JSON.stringify({ ok: false, infra: true, error: String(e && e.message || e) })); process.exit(0); }\n` +
           `const ${p.funcion} = mod[${JSON.stringify(p.funcion)}];\n` +
           `const _j = (v) => v === undefined ? "undefined" : typeof v === "number" && Number.isNaN(v) ? "NaN" : v === Infinity ? "Infinity" : v === -Infinity ? "-Infinity" : v;\n` +
-          `try { const v = await ${p.expresion}; console.log("@@" + JSON.stringify({ ok: true, valor: _j(v) })); }\n` +
-          `catch (e) { console.log("@@" + JSON.stringify({ ok: false, error: (e && e.name ? e.name + ": " : "") + String(e && e.message || e) })); }\n`,
+          `try { const v = await ${p.expresion}; console.log("@@" + JSON.stringify({ ok: true, valor: _j(v), marcas: [...(globalThis.__caiHits ?? [])] })); }\n` +
+          `catch (e) { console.log("@@" + JSON.stringify({ ok: false, error: (e && e.name ? e.name + ": " : "") + String(e && e.message || e), marcas: [...(globalThis.__caiHits ?? [])] })); }\n`,
       );
       cmd = `npx --no-install tsx ${JSON.stringify(tmp + ".mts")}`;
     }
-    const r = spawnSync("sh", ["-c", cmd], { cwd: root, encoding: "utf8", timeout: 30_000 });
+    // Sin __pycache__ en tu proyecto (la copia y tu módulo se importan para probarlos).
+    const r = spawnSync("sh", ["-c", cmd], { cwd: root, encoding: "utf8", timeout: 30_000, env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } });
     const line = (r.stdout ?? "").split("\n").find((l) => l.startsWith("@@"));
     if (!line) return { ok: false, infra: true, error: `no se pudo ejecutar (${(r.stderr ?? "").trim().split("\n").slice(-1)[0] ?? "sin salida"})` };
     try {

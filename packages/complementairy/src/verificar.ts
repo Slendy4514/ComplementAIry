@@ -12,7 +12,8 @@ import { langFor } from "./lang.js";
 import { ask } from "./llm.js";
 import { medir, type Funcion } from "./metricas.js";
 import { cargarNotas, guardarNotas, mensaje, type Nota } from "./notas.js";
-import { claveFuncion, consolidar, funcionPorClave, notaPara } from "./notasFuncion.js";
+import { guardarEnRepertorio } from "./repertorio.js";
+import { CAMPO_FUNCION, claveFuncion, consolidar, funcionPorClave, notaPara, repartir } from "./notasFuncion.js";
 import { conBloqueo } from "./ocupado.js";
 import { iaOpts, type Tamano } from "./tutor.js";
 
@@ -46,7 +47,12 @@ const schema = (o: { independiente: boolean; explicacion: boolean }) => ({
     deberia: { type: "string", description: "Qué debería hacer según lo que pedía su nota y las reglas." },
     estado: { type: "string", enum: ["lista", "casi", "falta"] },
     resumen: { type: "string", description: "Una o dos oraciones: qué hace bien o qué le falta." },
-    mejoras: { type: "array", maxItems: 4, items: { type: "string" }, description: "Concretas y cortas, sin código. Vacío si no hay." },
+    mejoras: {
+      type: "array",
+      maxItems: 4,
+      description: "Concretas y cortas, sin código. Vacío si no hay. En la nota de una función van solo las de ESA función: si ves algo de otra, márcalo en 'funcion'.",
+      items: { type: "object", additionalProperties: false, required: ["texto", "funcion"], properties: { texto: { type: "string" }, funcion: CAMPO_FUNCION } },
+    },
     que_hacer: { type: "string", description: "El próximo paso en una oración (vacío si está lista)." },
     decisiones: SCHEMA_DECISIONES,
     ...(o.independiente ? { otra_mirada: { type: "string", description: "Comparando con el plan hecho SIN ver el código: SOLO diferencias que importen (un caso borde no cubierto, un enfoque claramente mejor) y por qué. \"\" si coinciden." } } : {}),
@@ -189,7 +195,7 @@ export async function verificar(
         nota.planIndependiente = plan; // ya pagado: se reutiliza (p. ej. en "Revisar archivo completo")
       }
       const conExplicacion = !!o.explicacion?.trim();
-      const { data, costUsd, modelo } = await ask<{ estado: Estado; resumen: string; mejoras: string[]; que_hacer: string; otra_mirada?: string; explicacion?: { coincide: boolean; comentario: string }; decisiones?: { pregunta: string; opciones: Opcion[]; recomendada: string }[] }>({
+      const { data, costUsd, modelo } = await ask<{ estado: Estado; resumen: string; mejoras: ({ texto: string; funcion?: string } | string)[]; que_hacer: string; otra_mirada?: string; explicacion?: { coincide: boolean; comentario: string }; decisiones?: { pregunta: string; opciones: Opcion[]; recomendada: string }[] }>({
         kind: "verificar",
         ref: { archivo: rel, funcion: clave },
         system: SYSTEM,
@@ -201,6 +207,8 @@ export async function verificar(
           `Archivo: ${rel} (${lang.id}). Función: ${f.nombre}.`,
           contextoComun(root, rel, { funcion: clave }),
           nota.accion ? `Lo que su nota pedía hacer: ${nota.accion}` : "",
+          // Su objetivo confirmado manda: "lista" solo si cumple TODOS sus criterios.
+          nota.objetivo?.confirmado ? `Objetivo CONFIRMADO por el programador: ${nota.objetivo.texto}\nCriterios de terminada (compáralos uno por uno; "lista" solo si cumple todos):\n${nota.objetivo.criterios.map((c) => `- ${c}`).join("\n")}` : "",
           plan ? `Plan hecho SIN ver el código (otra mirada; compáralo con lo que hizo):\n${plan}` : "",
           conExplicacion ? `Cómo explica el programador su función, con sus palabras: "${o.explicacion!.trim().slice(0, 800)}"` : "",
           `Código de ${f.nombre}:\n${sinAprobaciones(codigo).split("\n").map((l, i) => `${f.linea + i}| ${l}`).join("\n")}`,
@@ -210,9 +218,21 @@ export async function verificar(
       });
       res.costoUsd += costUsd;
       llamadas++;
-      registrar(nota, data.estado, data.resumen, data.mejoras, data.que_hacer, h, false, { otra: data.otra_mirada ?? "", modelo, costo: costUsd });
+      // Lo que habla de otra función o del archivo va a la nota del archivo (esta nota, solo lo suyo).
+      const mejoras = repartir(notas, rel, funciones, src, { clave, nombre: f.nombre }, (data.mejoras ?? []).map((m) => (typeof m === "string" ? { texto: m, funcion: "" } : m)), "verificar", (m) => m.texto).map((m) => m.texto);
+      registrar(nota, data.estado, data.resumen, mejoras, data.que_hacer, h, false, { otra: data.otra_mirada ?? "", modelo, costo: costUsd });
       if (data.decisiones?.length) proponerDecisiones(root, data.decisiones, { archivo: rel, funcion: clave }, "verificar");
       nota.verificacion!.lineas = codigo.split("\n");
+      // Cumple su objetivo confirmado: la IA CREE que terminó; darla por terminada es tu clic.
+      if (data.estado === "lista" && nota.objetivo?.confirmado && !nota.objetivo.terminada)
+        nota.hilo.push(mensaje("ia", `**🏁 Creo que cumple su objetivo** (${nota.objetivo.criterios.length} criterio(s)). Si estás de acuerdo, dala por terminada; si no, reábrela.`, { kind: "verificar" }));
+      // 🟢 y tuya: al repertorio personal (entre proyectos), si este proyecto lo permite. Nunca bloquea.
+      if (data.estado === "lista")
+        try {
+          guardarEnRepertorio(root, { nombre: f.nombre, firma: (codigo.split("\n")[0] ?? "").trim().replace(/\s*\{\s*$/, ""), lenguaje: lang.id, resumen: data.resumen, codigo, archivo: rel, origen: nota.programada ? "programar" : "tuya" });
+        } catch {
+          /* el repertorio es opcional: si falla (sin git, sin permisos), sigue */
+        }
       if (conExplicacion && data.explicacion) nota.explicacion = { texto: o.explicacion!.trim(), coincide: data.explicacion.coincide, comentario: data.explicacion.comentario, fecha: new Date().toISOString() };
       res.veredictos.push({ funcion: clave, estado: data.estado, resumen: data.resumen, sinIa: false, nota: nota.id });
     }

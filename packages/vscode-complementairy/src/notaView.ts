@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as vscode from "vscode";
-import { claveDeSimbolo, correr, guiaActual, leerConfig, leerDecisiones, modoEfectivo, MODOS, mostrarError, notasDe, relDe, root, vista, type Nota } from "./comun";
+import { claveDeSimbolo, correr, guiaActual, leerConfig, leerDecisiones, leerPropuesta, modoEfectivo, MODOS, mostrarError, notasDe, relDe, root, vista, type Nota } from "./comun";
 import { resaltarDestino } from "./acciones";
 import { BOTONES, ESTADO, ICONO, type NotasView } from "./notasView";
 
@@ -105,6 +105,11 @@ export class NotaPanel implements vscode.WebviewViewProvider {
       vscode.window.onDidChangeTextEditorSelection((e) => e.textEditor.document.uri.scheme === "file" && this.programar()),
       vscode.window.onDidChangeActiveTextEditor(() => this.programar()),
       this.notas.onCambio(() => void this.render()),
+      // Propuestas del modo programar (también las que pide Claude Code): se ven al instante.
+      ...(() => {
+        const w = vscode.workspace.createFileSystemWatcher("**/{.cai,.aicode}/cache/propuestas/*.json");
+        return [w, w.onDidChange(() => void this.render()), w.onDidCreate(() => void this.render()), w.onDidDelete(() => void this.render())];
+      })(),
       ...this.vigilarEnVivo(),
       this.notas.onPensando((p) => {
         const k = `${p.uri}#${p.id ?? "nueva"}`;
@@ -283,6 +288,19 @@ export class NotaPanel implements vscode.WebviewViewProvider {
         case "insertar":
           if (nota) return void vscode.commands.executeCommand("cai.nota.insertar", doc.uri.toString(), nota.id, Number(arg));
           return;
+        case "objetivo":
+        case "entender":
+        case "plan":
+        case "editarPlan":
+        case "paso":
+        case "contrato":
+        case "pr":
+        case "adaptar":
+        case "probar":
+        case "insertarPropuesta":
+        case "descartarPropuesta":
+        case "diffPropuesta":
+          return this.programarAccion(m.cmd, arg, doc, nota);
         case "resolver":
           if (nota) await vscode.commands.executeCommand("cai.nota.resolver", doc.uri.toString(), nota.id);
           return;
@@ -359,6 +377,10 @@ button:hover{filter:brightness(1.15)}button:disabled{opacity:.5;cursor:default}
 .pensando{margin:8px 0;color:var(--vscode-descriptionForeground)}
 .vacio{color:var(--vscode-descriptionForeground);margin-top:12px}
 details summary{cursor:pointer;color:var(--vscode-descriptionForeground);margin:6px 0}
+.ultimo{border-left:3px solid var(--vscode-focusBorder);padding:2px 8px;margin:8px 0}
+.historial{margin-top:10px;border-top:1px solid var(--vscode-widget-border,rgba(128,128,128,.25));padding-top:4px}
+details.turno>summary{display:flex;justify-content:space-between;gap:8px;color:var(--vscode-foreground);margin:3px 0}
+details.turno>summary span.quien{white-space:nowrap}
 #caja{position:sticky;bottom:0;background:var(--vscode-sideBar-background);padding-top:6px}
 select{font:inherit;color:var(--vscode-dropdown-foreground);background:var(--vscode-dropdown-background);border:1px solid var(--vscode-dropdown-border,transparent)}
 textarea{width:100%;box-sizing:border-box;min-height:52px;resize:vertical;font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,transparent);padding:4px}
@@ -408,6 +430,187 @@ texto.addEventListener("keydown", (e) => {
 </script></body></html>`;
   }
 
+  // --- Modo programar y objetivo (todo pasa por la CLI; el código entra a tu archivo SOLO aquí, con tu clic) ---
+
+  private bloqueProgramar(cwd: string, rel: string, funcion: string, nota: Nota | undefined, ocupado: boolean): string {
+    const nombre = funcion.replace(/#\d+$/, "");
+    const off = { off: ocupado };
+    let h = `<div class="accion"><b>🧭 Modo programar</b> <span class="quien">la IA escribe por pasos que diriges tú (o como un PR por porciones); entra a tu archivo solo con tu clic</span>`;
+    // Plan (3-5 pasos por idea).
+    if (nota?.plan) {
+      h += `<ol>${nota.plan.pasos.map((p) => `<li>${p.hecho ? "✓ " : ""}${esc(p.texto)}${p.repertorio ? ` <span class="quien">(ya lo hiciste: ${esc(p.repertorio)})</span>` : ""}</li>`).join("")}</ol>`;
+      if (nota.plan.separar) h += `<div class="quien">Separa <code>${esc(nota.plan.separar.nombre)}</code> (${esc(nota.plan.separar.proposito)}): quedó como tarea y se trabaja en su propia nota.</div>`;
+    }
+    const reps = [...new Set((nota?.plan?.pasos ?? []).flatMap((p) => (p.repertorio ? [p.repertorio] : [])))];
+    h += `<div class="botones">${nota?.plan ? this.boton("editarPlan", "✎ Editar plan", undefined, off) : this.boton("plan", "🧭 Plan de pasos", undefined, { prim: true, off: ocupado })}${this.boton("contrato", nota?.contrato?.length ? `📋 Mis casos (${nota.contrato.length})` : "📋 Definir mis casos", undefined, off)}${nota?.contrato?.length ? this.boton("pr", "📦 Propuesta como PR", undefined, off) : ""}${reps.map((id) => this.boton("adaptar", `📚 Usar mi versión (${esc(id)})`, id, off)).join("")}</div>`;
+    if (nota?.contrato?.length) h += `<div class="quien">Tus casos: ${nota.contrato.map((c) => `<code>${esc(c.llamada)}</code> → <code>${esc(c.esperado)}</code>`).join(" · ")}</div>`;
+    if (nota?.programada) h += `<div class="quien">Insertada desde una propuesta (${esc(nota.programada.tipo)}): ${nota.programada.pruebas} prueba(s), ${nota.programada.aciertosPrimera}/${nota.programada.porciones} a la primera${nota.programada.sinProbar ? ` · ⚠ ${nota.programada.sinProbar} sin probar (deuda de comprensión)` : ""}</div>`;
+    h += "</div>";
+    // La propuesta en preparación.
+    const p = leerPropuesta(cwd, rel, funcion);
+    if (!p) return h;
+    if (p.tipo === "dirigido") {
+      h += `<div class="accion"><b>Propuesta para el paso ${p.paso ?? ""}</b> <span class="quien">"${esc(p.instruccion ?? "")}"</span>${p.falta ? `<div>⚠ <b>Tu paso no dice:</b> ${esc(p.falta)} <span class="quien">(no lo completé; corrige tu paso si hace falta)</span></div>` : ""}<div>${esc(p.explicacion ?? "")}</div><pre><code>${esc(p.codigo)}</code></pre><div class="quien">Irá ${p.linea ? `después de la línea ${p.linea}` : "donde elijas"}.</div><div class="botones">${this.boton("insertarPropuesta", "⤵ Insertar", p.fecha, { prim: true, off: ocupado })}${this.boton("descartarPropuesta", "Así no: corrijo mi paso", undefined, off)}</div></div>`;
+      return h;
+    }
+    const ps = p.porciones ?? [];
+    const okCasos = p.contrato?.filter((c) => c.pasa).length ?? 0;
+    const lineas = p.codigo.split("\n");
+    const actual = ps.findIndex((x) => !x.aprobada);
+    h += `<div class="accion"><b>📦 Propuesta${p.tipo === "adaptada" ? ` (tu versión de ${esc(p.original?.proyecto ?? "")}, adaptada)` : ""}</b> · contra tus casos: ${okCasos}/${p.contrato?.length ?? 0} ✓${p.contrato?.some((c) => !c.pasa) ? `<div>✗ ${p.contrato.filter((c) => !c.pasa).map((c) => `<code>${esc(c.llamada)}</code> esperabas ${esc(c.esperado)}, da ${esc(c.obtenido)}`).join("; ")}</div>` : ""}`;
+    if (p.tipo === "adaptada") h += `${p.cambios?.length ? `<ul>${p.cambios.map((c) => `<li>${esc(c.que)} <span class="quien">— ${esc(c.porque)}</span></li>`).join("")}</ul>` : ""}${this.boton("diffPropuesta", "Ver diff con tu versión", undefined, off)}`;
+    ps.forEach((x, k) => {
+      const codigo = lineas.slice(x.desde - 1, x.hasta).join("\n");
+      const pruebas = x.pruebas.map((y) => `<div class="quien">${!y.toca ? "↷ no recorre esta porción" : y.acierto ? "✓" : "✗"} <code>${esc(y.entrada)}</code> esperabas <code>${esc(y.espero)}</code>, da <code>${esc(y.obtenido.slice(0, 80))}</code>${y.explicacion ? ` — ${esc(y.explicacion)}` : ""}</div>`).join("");
+      if (x.aprobada) h += `<details><summary>✓ Porción ${k + 1} (líneas ${x.desde}-${x.hasta})</summary><pre><code>${esc(codigo)}</code></pre>${pruebas}</details>`;
+      else if (k === actual) h += `<div><b>Porción ${k + 1} de ${ps.length}</b> <span class="quien">${esc(x.porque)}</span><pre><code>${esc(codigo)}</code></pre>${pruebas}<div class="quien">Pruébala con TU entrada (tiene que pasar por estas líneas) y lo que esperas, antes de ver el resultado.</div>${this.boton("probar", "🔬 Probar esta porción", k, { prim: true, off: ocupado })}</div>`;
+    });
+    if (actual > 0 && actual < ps.length - 1) h += `<div class="quien">🔒 ${ps.length - actual - 1} porción(es) más después de esta.</div>`;
+    const obligatoria = leerConfig(cwd).programar?.prediccionObligatoria !== false;
+    if (actual === -1 || !obligatoria) h += `<div class="botones">${this.boton("insertarPropuesta", actual === -1 ? "⤵ Insertar en mi archivo" : "⤵ Insertar sin probar todo (queda como deuda)", p.fecha, { prim: actual === -1, off: ocupado })}${this.boton("descartarPropuesta", "Descartar", undefined, off)}</div>`;
+    else h += this.boton("descartarPropuesta", "Descartar propuesta", undefined, off);
+    return `${h}</div>`;
+  }
+
+  private async programarAccion(cmd: string, arg: unknown, doc: vscode.TextDocument, nota: Nota | undefined): Promise<void> {
+    const cwd = root(doc);
+    if (!cwd || this.modo.tipo !== "funcion") return;
+    const rel = relDe(cwd, doc.uri.fsPath);
+    const funcion = this.modo.funcion;
+    const nombre = funcion?.replace(/#\d+$/, "") ?? "";
+    const destino = funcion ? ["--funcion", funcion] : [];
+    const k = `${this.modo.uri}#${nota?.id ?? "nueva"}`;
+    // Mientras la IA trabaja, "pensando…" en la nota.
+    const ocupar = async <T,>(fn: () => Promise<T>): Promise<T> => {
+      this.pensando.add(k);
+      await this.render();
+      try {
+        return await fn();
+      } finally {
+        this.pensando.delete(k);
+        await this.render();
+      }
+    };
+    const fArg = funcion ? ["--funcion", `${rel}:${funcion}`] : ["--archivo", rel];
+    switch (cmd) {
+      case "objetivo":
+        await correr(["entender", String(arg), ...fArg], cwd);
+        return void this.render();
+      case "entender":
+        await ocupar(() => correr(["entender", ...fArg, "--texto", typeof arg === "string" ? arg : "", "--json"], cwd));
+        return;
+      case "plan":
+        if (!funcion) return;
+        await ocupar(() => correr(["programar", "plan", rel, ...destino, "--json"], cwd));
+        void vscode.commands.executeCommand("cai.panel.refrescar");
+        return;
+      case "editarPlan": {
+        if (!funcion) return;
+        const v = await vscode.window.showInputBox({ prompt: `Plan de ${nombre}: 3 a 5 pasos separados por "|" (si son más, son dos funciones)`, value: (nota?.plan?.pasos ?? []).map((p) => p.texto).join(" | ") });
+        if (v === undefined) return;
+        await correr(["programar", "plan", rel, ...destino, ...v.split("|").flatMap((x) => (x.trim() ? ["--pasos", x.trim()] : []))], cwd);
+        return void this.render();
+      }
+      case "paso": {
+        if (!funcion || typeof arg !== "string" || !arg.trim()) return;
+        const n = (nota?.plan?.pasos.findIndex((p) => !p.hecho) ?? -1) + 1 || 1;
+        await ocupar(() => correr(["programar", "paso", rel, ...destino, "--paso", String(n), "--texto", arg.trim(), "--json"], cwd));
+        return;
+      }
+      case "contrato": {
+        if (!funcion) return;
+        // Tus casos: la entrada y el resultado esperado los pones tú (uno a la vez; vacío para terminar).
+        const casos: string[] = [];
+        for (let i = 1; i <= 8; i++) {
+          const llamada = await vscode.window.showInputBox({ prompt: `Caso ${i} de ${nombre}: la llamada (vacío para terminar; al menos 2 y uno borde: vacío, 0, negativo, null…)`, value: `${nombre}(` , valueSelection: [nombre.length + 1, nombre.length + 1] });
+          if (!llamada?.trim() || llamada.trim() === `${nombre}(`) break;
+          const esperado = await vscode.window.showInputBox({ prompt: `¿Qué debe dar ${llamada.trim()}? (un valor, o "error: parte del mensaje")` });
+          if (esperado === undefined) return;
+          casos.push("--caso", llamada.trim(), esperado.trim());
+        }
+        if (!casos.length) return;
+        await correr(["programar", "contrato", rel, ...destino, ...casos], cwd);
+        return void this.render();
+      }
+      case "pr":
+      case "adaptar":
+        if (!funcion) return;
+        await ocupar(() => correr(["programar", "pr", rel, ...destino, ...(cmd === "adaptar" && typeof arg === "string" ? ["--desde", arg] : []), "--json"], cwd));
+        return;
+      case "probar": {
+        if (!funcion) return;
+        const entrada = await vscode.window.showInputBox({ prompt: `Tu entrada para la porción ${Number(arg) + 1}: una llamada a ${nombre}(…) que pase por esas líneas`, value: `${nombre}(`, valueSelection: [nombre.length + 1, nombre.length + 1] });
+        if (!entrada?.trim()) return;
+        const espero = await vscode.window.showInputBox({ prompt: `¿Qué esperas que dé ${entrada.trim()}? (antes de ejecutar; un valor o "error")` });
+        if (!espero?.trim()) return;
+        const r = JSON.parse(await ocupar(() => correr(["programar", "probar", rel, ...destino, "--porcion", String(Number(arg) + 1), "--entrada", entrada.trim(), "--espero", espero.trim(), "--json"], cwd))) as { prueba: { toca: boolean; acierto: boolean; obtenido: string }; aprobadas: number; total: number };
+        vscode.window.setStatusBarMessage(`ComplementAIry: ${!r.prueba.toca ? "esa entrada no pasa por esta porción: elige otra" : r.prueba.acierto ? `✓ coincide (${r.aprobadas}/${r.total} porciones)` : `✗ da ${r.prueba.obtenido}`}`, 8000);
+        return;
+      }
+      case "descartarPropuesta":
+        if (!funcion) return;
+        await correr(["programar", "descartar", rel, ...destino], cwd);
+        return void this.render();
+      case "diffPropuesta": {
+        const p = funcion && leerPropuesta(cwd, rel, funcion);
+        if (!p || !p.original) return;
+        const a = await vscode.workspace.openTextDocument({ content: p.original.codigo, language: doc.languageId });
+        const b = await vscode.workspace.openTextDocument({ content: p.codigo, language: doc.languageId });
+        return void vscode.commands.executeCommand("vscode.diff", a.uri, b.uri, `${nombre}: tu versión (${p.original.proyecto}) ↔ adaptada`);
+      }
+      case "insertarPropuesta":
+        if (funcion) return this.insertarPropuesta(cwd, rel, funcion, doc, typeof arg === "string" ? arg : "");
+    }
+  }
+
+  /** Tu clic: la propuesta entra a tu archivo (con vista previa), y queda registrado cómo se probó. */
+  private async insertarPropuesta(cwd: string, rel: string, funcion: string, doc: vscode.TextDocument, vista: string): Promise<void> {
+    const p = leerPropuesta(cwd, rel, funcion);
+    if (!p) return;
+    // Se inserta exactamente lo que viste (si la propuesta cambió mientras tanto, se vuelve a mostrar).
+    if (vista && p.fecha !== vista) {
+      void vscode.window.showWarningMessage("La propuesta cambió desde que la viste: revísala de nuevo antes de insertarla.");
+      return void this.render();
+    }
+    if (p.porciones?.some((x) => !x.aprobada) && leerConfig(cwd).programar?.prediccionObligatoria !== false)
+      return void vscode.window.showWarningMessage("Faltan porciones por probar (la prueba es obligatoria en este proyecto).");
+    const ed = await vscode.window.showTextDocument(doc, { preview: false });
+    const edit = new vscode.WorkspaceEdit();
+    if (p.tipo === "dirigido") {
+      // Como los snippets: después de la línea indicada (si sigue ahí), o en el cursor.
+      let linea = p.linea && doc.lineAt(Math.min(p.linea, doc.lineCount) - 1).text.trim() === (p.despues ?? "").trim() ? p.linea : undefined;
+      if (linea) {
+        const r = doc.lineAt(linea - 1).range;
+        ed.selection = new vscode.Selection(r.start, r.end);
+        ed.revealRange(r, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+      }
+      const donde = await vscode.window.showInformationMessage(linea ? `¿Insertar el paso después de la línea ${linea}?` : "¿Dónde insertar el paso?", { modal: true }, ...(linea ? ["Aquí"] : []), "En el cursor");
+      if (!donde) return;
+      if (donde === "En el cursor") linea = ed.selection.active.line + 1;
+      edit.insert(doc.uri, doc.lineAt(linea! - 1).range.end, `\n${p.codigo}`);
+    } else {
+      const simbolos = await funcionesDe(doc);
+      const s = simbolos.find((x) => claveDeSimbolo(simbolos, x) === funcion);
+      if (!s) return void vscode.window.showWarningMessage(`No encuentro ${funcion} en el archivo: ¿la renombraste?`);
+      const ok = await vscode.window.showInformationMessage(`¿Reemplazar ${funcion.replace(/#\d+$/, "")} por la propuesta (${p.porciones?.length ?? 1} porción(es))?`, { modal: true }, "Reemplazar", "Ver diff primero");
+      if (ok === "Ver diff primero") {
+        const b = await vscode.workspace.openTextDocument({ content: p.codigo, language: doc.languageId });
+        const a = await vscode.workspace.openTextDocument({ content: doc.getText(s.range), language: doc.languageId });
+        return void vscode.commands.executeCommand("vscode.diff", a.uri, b.uri, "Tu función ↔ propuesta");
+      }
+      if (ok !== "Reemplazar") return;
+      edit.replace(doc.uri, s.range, p.codigo);
+    }
+    if (!(await vscode.workspace.applyEdit(edit))) return void vscode.window.showWarningMessage("No se pudo insertar (¿cambió el archivo?).");
+    try {
+      const r = await correr(["programar", "insertado", rel, "--funcion", funcion], cwd);
+      vscode.window.setStatusBarMessage(`ComplementAIry: ${r.trim().replace(/^✓\s*/, "")}`, 6000);
+    } catch (e) {
+      mostrarError(e);
+    }
+    await this.render();
+  }
+
   /** Markdown → HTML, y luego solo etiquetas de texto (sin atributos salvo href http/https): lo que viene de la IA o de archivos no puede inyectar botones, estilos ni imágenes. */
   private async md(texto: string): Promise<string> {
     try {
@@ -444,7 +647,7 @@ texto.addEventListener("keydown", (e) => {
       const propio = m.funcion ? cfg.modos?.porFuncion?.[`${rel}:${m.funcion}`] : cfg.modos?.porArchivo?.[rel];
       // Lo que regiría sin un modo propio aquí (para mostrar "heredado (…)").
       const heredado = m.funcion ? modoEfectivo(cfg, rel).modo : modoEfectivo({ ...cfg, modos: { ...cfg.modos, porArchivo: {} } }, rel).modo;
-      html += `<div class="sub">Modo ${m.funcion ? "de esta función" : "de este archivo"}: <select data-cmd="modo">${opcion("heredar", `heredado (${heredado})`, !propio)}${opcion("programar", "programar", propio === "programar")}${opcion("aprender", "aprender", propio === "aprender")}</select> <span class="quien">· rige: ${ef.modo} (por ${{ funcion: "esta función", archivo: "el archivo", carpeta: "la carpeta", proyecto: "el proyecto" }[ef.origen]})</span></div>`;
+      html += `<div class="sub">Modo ${m.funcion ? "de esta función" : "de este archivo"}: <select data-cmd="modo">${opcion("heredar", `heredado (${heredado})`, !propio)}${["sugerir", "aprender", "programar"].map((k) => opcion(k, k, propio === k)).join("")}</select> <span class="quien">· rige: ${ef.modo} (por ${{ funcion: "esta función", archivo: "el archivo", carpeta: "la carpeta", proyecto: "el proyecto" }[ef.origen]})</span></div>`;
       if (ocupado) html += `<div class="pensando">⏳ pensando…${this.vivo ? `<div class="msg">${esc(this.vivo).replace(/\n/g, "<br>")}</div>` : ""}</div>`;
       // Impacto (sin IA): una función que esta usa cambió.
       if (nota?.impacto?.length) html += `<div class="accion">⚠ Cambió ${nota.impacto.map((i) => `<code>${esc(i.funcion)}</code>`).join(", ")}, que esta función usa: revisa si sigue bien (✅ ¿Quedó lista? lo limpia).</div>`;
@@ -461,6 +664,13 @@ texto.addEventListener("keydown", (e) => {
         const vig = ds.filter((x) => x.estado === "vigente");
         if (vig.length) html += `<div class="sub">Decidido: ${vig.map((d) => `${esc(d.pregunta)} → <b>${esc(d.eleccion ?? "")}</b>`).join(" · ")} <span class="quien">(se cambia o retracta en el panel → Proyecto → Decisiones)</span></div>`;
       }
+      // 🎯 Objetivo de la función (o del archivo): qué debe hacer y cuándo está terminada; lo confirmas tú.
+      if (nota?.objetivo) {
+        const o = nota.objetivo;
+        html += `<div class="accion"><b>🎯 Objetivo</b> <span class="quien">${o.terminada ? "🏁 terminada" : o.confirmado ? "✓ confirmado por ti" : "borrador: confírmalo o corrígelo abajo"}</span><div>${esc(o.texto)}</div>${o.criterios.length ? `<ul>${o.criterios.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}<div class="botones">${!o.confirmado ? this.boton("objetivo", "✓ Confirmar objetivo", "confirmar", { prim: true, off: ocupado }) : ""}${o.confirmado && !o.terminada && v?.estado === "lista" ? this.boton("objetivo", "🏁 Dar por terminada", "terminado", { prim: true, off: ocupado }) : ""}${o.confirmado ? this.boton("objetivo", "↺ Reabrir", "reabrir", { off: ocupado }) : ""}</div></div>`;
+      }
+      // Modo programar: plan de pasos, tú diriges / como un PR (por porciones con el probador), y la propuesta.
+      if (m.funcion && cwd && MODOS[ef.modo].proponerSolucion) html += this.bloqueProgramar(cwd, rel, m.funcion, nota, ocupado);
       // Tests de esta función: el resultado de la última prueba (al pedirlos o al guardar con Ctrl+S).
       if (nota?.ultimaPrueba) {
         const u = nota.ultimaPrueba;
@@ -477,27 +687,41 @@ texto.addEventListener("keydown", (e) => {
       const botones = BOTONES.filter((b) => (m.funcion ? b.pedido !== "plano" : b.pedido !== "tests") && !dados.has(b.pedido)).map((b) => this.boton("pedir", b.etiqueta, b.pedido, { off: ocupado }));
       if (["pista", "piezas", "pseudo", "ejemplo"].some((e) => dados.has(e))) botones.unshift(this.boton("pedir", "➕ Más ayuda", "mas", { off: ocupado }));
       botones.push(this.boton("verificar", m.funcion ? "✅ ¿Quedó lista?" : "🔎 Revisar archivo", undefined, { prim: true, off: ocupado }));
+      if (!nota?.objetivo) botones.push(this.boton("entender", "🎯 Objetivo", undefined, { off: ocupado }));
       if (m.funcion && MODOS[ef.modo].predecir) botones.push(this.boton("predecir", "🎯 Predecir", undefined, { off: ocupado }));
       if (nota) nota.snippets.forEach((s, i) => botones.push(this.boton("insertar", `⤵ Insertar <code>${esc(s.llamada.split(/\s/)[0]!)}</code>`, i, { off: ocupado })));
       if (nota && nota.estado === "abierta") botones.push(this.boton("resolver", "✓ Resuelta", undefined, { off: ocupado }));
       html += `<div class="botones">${botones.join("")}</div>`;
       if (!nota) html += `<p class="vacio">${m.funcion ? `<code>${esc(m.funcion)}</code> todavía no tiene nota.` : "El archivo no tiene nota general."} Pide ayuda con un botón o escríbele abajo.</p>`;
       else {
-        // Lo más nuevo arriba; lo viejo, plegado.
-        const msgs = [...nota.hilo].reverse();
-        // De dónde salió cada respuesta: tipo, modelo y costo (para saber qué pasó).
-        const meta = (x: Nota["hilo"][number]) => (x.meta ? ` · ${esc(x.meta.kind ?? "")}${x.meta.modelo ? ` · ${esc(x.meta.modelo.replace(/^claude-/, ""))}` : ""}${x.meta.costo !== undefined ? ` · US$${x.meta.costo.toFixed(3)}` : ""}` : "");
-        const render = async (x: Nota["hilo"][number]) => `<div class="msg"><div class="quien">${x.quien === "ia" ? `${ICONO[nota.tipo] ?? "📝"} ComplementAIry` : "Tú"} · ${new Date(x.fecha).toLocaleString()}${meta(x)}</div>${await this.md(x.texto)}</div>`;
+        // Resumen arriba (lo último que dijo la IA) + historial de pedidos (qué y cuándo), cada uno plegable.
         if (nota.explicacion) html += `<div class="accion"><b>Tu explicación</b> ${nota.explicacion.coincide ? "✓ coincide con el código" : "✗ no coincide del todo"}: “${esc(nota.explicacion.texto)}”${nota.explicacion.comentario ? `<div class="quien">${esc(nota.explicacion.comentario)}</div>` : ""}</div>`;
-        for (const x of msgs.slice(0, 3)) html += await render(x);
-        if (msgs.length > 3) {
-          html += `<details><summary>${msgs.length - 3} mensaje(s) anteriores</summary>`;
-          for (const x of msgs.slice(3)) html += await render(x);
-          html += "</details>";
+        const turnos = turnosDe(nota.hilo);
+        const ultimaIa = [...nota.hilo].reverse().find((x) => x.quien === "ia");
+        if (ultimaIa) {
+          const corto = resumenMd(ultimaIa.texto);
+          html += `<div class="ultimo"><div class="quien">Lo último (${esc(etiquetaKind(ultimaIa.meta?.kind))} · ${cuando(ultimaIa.fecha)}${metaDe(ultimaIa)})</div>${await this.md(corto)}${corto !== ultimaIa.texto ? `<details><summary>ver todo</summary>${await this.md(ultimaIa.texto)}</details>` : ""}</div>`;
+        }
+        if (turnos.length) {
+          html += `<div class="historial"><div class="quien"><b>Historial</b></div>`;
+          for (const t of [...turnos].reverse()) {
+            const cuerpo = (await Promise.all(t.mensajes.map(async (x) => `<div class="msg"><div class="quien">${x.quien === "ia" ? `${ICONO[nota.tipo] ?? "📝"} ComplementAIry` : "Tú"} · ${cuando(x.fecha)}${metaDe(x)}</div>${await this.md(x.texto)}</div>`))).join("");
+            html += `<details class="turno"><summary><span>${t.humano ? "🙋" : "🤖"} ${esc(t.titulo)}</span><span class="quien">${cuando(t.fecha)}${t.resultado ? ` · ${esc(t.resultado)}` : ""}</span></summary>${cuerpo}</details>`;
+          }
+          html += "</div>";
         }
       }
       const nombre = m.funcion?.replace(/#\d+$/, "");
-      caja = MODOS[ef.modo].explicar && m.funcion
+      const siguiente = nota?.plan?.pasos.findIndex((p) => !p.hecho) ?? -1;
+      caja = m.funcion && MODOS[ef.modo].proponerSolucion
+        ? {
+            placeholder: siguiente >= 0 ? `Paso ${siguiente + 1}: ${nota!.plan!.pasos[siguiente]!.texto} — dime en palabras CÓMO hacerlo (la IA escribe solo eso)` : `Dime en palabras el siguiente paso de ${nombre} (la IA escribe solo eso), o pregúntale`,
+            botones: [{ cmd: "paso", texto: `🧭 Escribir ${siguiente >= 0 ? `el paso ${siguiente + 1}` : "este paso"}` }, { cmd: "texto", texto: "Preguntar" }, { cmd: "entender", texto: "🎯 Objetivo" }],
+            ocupado,
+          }
+        : nota?.objetivo && !nota.objetivo.confirmado && m.funcion
+          ? { placeholder: `Corrige o completa el objetivo de ${nombre} (o responde sus preguntas)`, botones: [{ cmd: "entender", texto: "🎯 Enviar" }, { cmd: "texto", texto: "Preguntar otra cosa" }], ocupado }
+          : MODOS[ef.modo].explicar && m.funcion
         ? { placeholder: `Escríbele sobre ${nombre}, o explica con tus palabras qué hace y verifica`, botones: [{ cmd: "texto", texto: "Enviar" }, { cmd: "verificarExplicando", texto: "✅ Verificar con mi explicación" }], ocupado }
         : { placeholder: m.funcion ? `Escríbele sobre ${nombre} (Enter envía; también !pista, !pseudo…)` : "Pregunta sobre el archivo (Enter envía)", botones: [{ cmd: "texto", texto: "Enviar" }], ocupado };
     } else if (m.tipo === "tarea") {
@@ -528,4 +752,68 @@ texto.addEventListener("keydown", (e) => {
     if (gen !== this.generacion) return;
     void this.view.webview.postMessage({ html, caja });
   }
+}
+
+// --- Historial de la nota: "qué pediste y cuándo" ------------------------------------------------
+
+type Msg = Nota["hilo"][number];
+const ETIQUETA_PEDIDO: Record<string, string> = Object.fromEntries([...BOTONES.map((b) => [b.pedido, b.etiqueta.replace(/^\S+\s/, "")]), ["mas", "Más ayuda"], ["lista", "¿Quedó lista?"], ["ayuda", "Ayuda"]]);
+const ETIQUETA_KIND: Record<string, string> = { verificar: "¿Quedó lista?", revisar: "Revisión", acompanar: "Revisión al guardar", tests: "Tests", impacto: "Aviso de impacto", responder: "Respuesta", plano: "Plano", predecir: "Predicción" };
+
+export function etiquetaKind(kind?: string): string {
+  return (kind && (ETIQUETA_KIND[kind] ?? ETIQUETA_PEDIDO[kind])) || "Respuesta";
+}
+
+/** "hoy 11:05", "ayer 18:20" o "9 oct 10:00". */
+export function cuando(fecha: string): string {
+  const d = new Date(fecha);
+  const hora = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const dia = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dif = Math.round((dia(new Date()) - dia(d)) / 86_400_000);
+  return dif === 0 ? `hoy ${hora}` : dif === 1 ? `ayer ${hora}` : `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${hora}`;
+}
+
+const metaDe = (x: Msg) => (x.meta?.modelo || x.meta?.costo !== undefined ? ` · ${x.meta.modelo ? esc(x.meta.modelo.replace(/^claude-/, "")) : ""}${x.meta.costo !== undefined ? ` · US$${x.meta.costo.toFixed(3)}` : ""}` : "");
+
+/** Lo principal de una respuesta: hasta 4 líneas con contenido (el resto, en "ver todo"). */
+export function resumenMd(texto: string): string {
+  const lineas = texto.split("\n");
+  const out: string[] = [];
+  let n = 0;
+  for (const l of lineas) {
+    if (/^\s*(---|```)/.test(l)) break; // no cortar a mitad de un bloque: hasta el primer separador
+    out.push(l);
+    if (l.trim() && ++n >= 4) break;
+  }
+  return out.join("\n").trim() || texto;
+}
+
+/** Agrupa el hilo en turnos: un pedido tuyo con sus respuestas, o algo automático de la IA. */
+export function turnosDe(hilo: Msg[]): { humano: boolean; titulo: string; fecha: string; resultado: string; mensajes: Msg[] }[] {
+  const out: { humano: boolean; titulo: string; fecha: string; resultado: string; mensajes: Msg[] }[] = [];
+  for (const x of hilo) {
+    if (x.quien === "tu") {
+      const p = x.meta?.pedido;
+      const titulo = p && p !== "pregunta" && ETIQUETA_PEDIDO[p] ? ETIQUETA_PEDIDO[p] : `“${x.texto.replace(/^Pido:\s*/, "").replace(/\s+/g, " ").slice(0, 42)}${x.texto.length > 42 ? "…" : ""}”`;
+      out.push({ humano: true, titulo, fecha: x.fecha, resultado: "", mensajes: [x] });
+    } else {
+      const ult = out[out.length - 1];
+      // Una respuesta se suma al pedido anterior si es su respuesta (mismo turno); si no, es algo automático.
+      if (ult?.humano && ult.mensajes.length === 1) ult.mensajes.push(x);
+      else out.push({ humano: false, titulo: etiquetaKind(x.meta?.kind), fecha: x.fecha, resultado: "", mensajes: [x] });
+      const t = out[out.length - 1]!;
+      t.resultado = resultadoCorto(x.texto);
+    }
+  }
+  return out;
+}
+
+/** El resultado en pocas palabras: el veredicto (🟢/🟡/🔴), un conteo de tests o la primera frase. */
+function resultadoCorto(texto: string): string {
+  const v = /^\*\*(🟢|🟡|🔴) ([^*]+)\*\*/.exec(texto);
+  if (v) return `${v[1]} ${v[2]!.toLowerCase()}`;
+  const t = /(\d+) ✅[^\d]*(\d+) ❌/.exec(texto);
+  if (t) return `${t[1]}✅ ${t[2]}❌`;
+  const plano = texto.replace(/\*\*[^*]*\*\*\s*·?\s*/, "").replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
+  return plano.length > 40 ? `${plano.slice(0, 40)}…` : plano;
 }

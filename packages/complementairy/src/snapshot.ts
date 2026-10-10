@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { dataDir, type Zoner } from "./config.js";
 import { decisionesHonestas } from "./decisiones.js";
+import { objetivosHonestos } from "./entender.js";
 import { listFiles } from "./files.js";
 import { parseMemoria, sinSugerencia, unaLinea } from "./memoria.js";
 import { snippetPolicy } from "./snippets.js";
@@ -27,11 +28,66 @@ function watched(z: Zoner): string[] {
   if (fs.existsSync(path.join(git, "config"))) extra.push(".git/config");
   const hooks = path.join(git, "hooks");
   if (fs.existsSync(hooks)) for (const f of fs.readdirSync(hooks)) extra.push(`.git/hooks/${f}`);
+  // Las propuestas del modo programar viven en .cai/cache (ignorado por git) pero se vigilan: aprobar
+  // una porción (el probador) es del humano, y un comando de la IA no puede hacerlo por él.
+  const prop = path.join(cacheDir(z.root), "propuestas");
+  if (fs.existsSync(prop)) for (const f of fs.readdirSync(prop)) if (f.endsWith(".json")) extra.push(path.relative(z.root, path.join(prop, f)).split(path.sep).join("/"));
   return [...listFiles(z), ...extra];
 }
 
 /** Clave reservada del manifiesto donde se guarda el comando (no es una ruta posible). */
 const CMD = "\u0000comando";
+
+/** Lo que SOLO puede hacer el humano (el hook lo rechaza antes de correr; si igual corre, se revierte). */
+const SOLO_HUMANO: [RegExp, string][] = [
+  [/\bdecisiones\s+(decidir|retractar)\b/, "decidir o retractar una decisión"],
+  [/\bentender\s+(confirmar|reabrir|terminado)\b/, "confirmar, reabrir o dar por terminados los objetivos"],
+  [/\bchat\b.*--aplicar\b/, "aplicar una propuesta del chat"],
+  [/\bmemoria\s+(corregir|quitar|responder)\b/, "corregir la memoria o responder sus preguntas"],
+  [/\b(ideas|tareas)\s+descartar\b/, "descartar una idea o una tarea"],
+  [/\bprogramar\s+(contrato|probar|insertado|diferida)\b/, "definir los casos, probar una porción o registrar lo insertado"],
+  [/\bprogramar\s+plan\b.*--pasos\b/, "editar el plan"],
+  [/\brepertorio\s+borrar\b/, "borrar del repertorio personal"],
+  [/\bnotas\s+anotar\b/, "escribir en las notas a nombre del programador"],
+];
+
+/** Si el comando es de los que solo hace el humano, por qué (para rechazarlo antes de correr). */
+export function soloHumano(comando: string): string | null {
+  if (!/\b(cai|complementairy|aicode|cli\.js)\b/.test(comando)) return null;
+  const plano = comando.replace(/['"\\]/g, "");
+  return SOLO_HUMANO.find(([re]) => re.test(plano))?.[1] ?? null;
+}
+
+/** Una propuesta escrita por un comando de la IA: ninguna porción aprobada ni probada (o se borró). */
+function propuestaSinAprobar(b: Buffer | null): boolean {
+  if (!b) return true;
+  try {
+    const p = JSON.parse(b.toString("utf8")) as { porciones?: { aprobada?: boolean; pruebas?: unknown[] }[] };
+    return (p.porciones ?? []).every((x) => !x.aprobada && !x.pruebas?.length);
+  } catch {
+    return false;
+  }
+}
+
+/** Notas cambiadas por `cai entender --funcion`: nadie confirma ni da por terminado un objetivo por el programador. */
+function objetivosDeNotasIntactos(antes: Buffer | null, despues: Buffer | null): boolean {
+  type N = { id: string; objetivo?: { confirmado?: string; terminada?: string } };
+  const leer = (b: Buffer | null): N[] | null => {
+    if (!b) return [];
+    try {
+      return (JSON.parse(b.toString("utf8")) as { notas?: N[] }).notas ?? [];
+    } catch {
+      return null;
+    }
+  };
+  const a = leer(antes);
+  const d = leer(despues);
+  if (!a || !d) return false;
+  return d.every((n) => {
+    const v = a.find((x) => x.id === n.id);
+    return (n.objetivo?.confirmado ?? "") === (v?.objetivo?.confirmado ?? "") && (n.objetivo?.terminada ?? "") === (v?.objetivo?.terminada ?? "");
+  });
+}
 
 /**
  * Archivos que un comando de ComplementAIry (ejecutado por la IA desde el chat) puede generar.
@@ -57,6 +113,10 @@ export function generadosPor(comando: string): ((rel: string, antes: Buffer | nu
   // Notas, tareas, índice y decisiones PROPUESTAS (decidir o retractar es solo humano: comando aparte).
   const notasYTareas = (rel: string, antes: Buffer | null, despues: Buffer | null) =>
     /^\.(cai|aicode)\/(notas\/[^/]+\.json|tareas\.json|indice\.json)$/.test(rel) || (/^\.(cai|aicode)\/decisiones\.json$/.test(rel) && decisionesHonestas(antes, despues));
+  // Conversar (chat/entender): sus conversaciones, decisiones PROPUESTAS y el BORRADOR de objetivos (nunca lo confirmado).
+  const conversar = (rel: string, antes: Buffer | null, despues: Buffer | null) =>
+        (datos(rel) && (/\/chats\/[\w-]+\.json$/.test(rel) || /\/chat\.json$/.test(rel) || /\/objetivos\.md$/.test(rel) || (/\/objetivos\.json$/.test(rel) && objetivosHonestos(antes, despues)))) ||
+        (/^\.(cai|aicode)\/decisiones\.json$/.test(rel) && decisionesHonestas(antes, despues));
   switch (m[1]) {
     case "guia":
     case "revisar":
@@ -75,18 +135,35 @@ export function generadosPor(comando: string): ((rel: string, antes: Buffer | nu
       return () => false; // solo leen (el marcador de visita vive en .cai/cache)
     case "indice":
       return (rel) => /^\.(cai|aicode)\/indice\.json$/.test(rel);
+    case "entender":
+      // Objetivo de una función/archivo (--funcion/--archivo): su nota, sin confirmar ni terminar por él.
+      if (/\bentender\s+(confirmar|reabrir|terminado)\b/.test(plano)) return null;
+      if (/--(funcion|archivo)\b/.test(plano)) return (rel, antes, despues) => /^\.(cai|aicode)\/notas\/[^/]+\.json$/.test(rel) && objetivosDeNotasIntactos(antes, despues);
+      return conversar;
     case "chat":
-      return (rel, antes, despues) => (datos(rel) && /\/chat\.json$/.test(rel)) || notasYTareas(rel, antes, despues);
+      // Aplicar una propuesta (tareas, correcciones): solo humano.
+      return /--aplicar\b/.test(plano) ? null : conversar;
     case "decisiones":
       // Consultar sí; decidir y retractar los decide el humano (desde el panel o la terminal).
-      return /\bdecisiones\s+(decidir|retractar)\b/.test(plano) ? null : () => false;
+      return /\bdecisiones\s+(decidir|retractar)\b/.test(plano) ? null : (rel, antes, despues) => /^\.(cai|aicode)\/decisiones\.json$/.test(rel) && decisionesHonestas(antes, despues);
+    case "programar":
+      // Tus casos, el probador, el plan que editas y registrar lo que insertaste: solo humano (si lo hiciera
+      // la IA, se probaría a sí misma). Proponer (plan, paso, pr, descartar): sus notas y tareas, y propuestas
+      // SIN aprobar (ninguna porción probada).
+      if (/\bprogramar\s+(contrato|probar|insertado|diferida)\b/.test(plano) || (/\bprogramar\s+plan\b/.test(plano) && /--pasos\b/.test(plano))) return null;
+      return (rel, antes, despues) => notasYTareas(rel, antes, despues) || (/\/cache\/propuestas\/[^/]+\.json$/.test(rel) && propuestaSinAprobar(despues));
+    case "repertorio":
+      return /\brepertorio\s+borrar\b/.test(plano) ? null : () => false;
+    case "ideas":
+      // Descartar una idea es definitivo (no vuelve a proponerse): eso lo decide el humano.
+      return /\bideas\s+descartar\b/.test(plano) ? null : (rel) => /^\.(cai|aicode)\/(ideas|tareas)\.json$/.test(rel);
     case "tareas":
       // Descartar una tarea es definitivo (no vuelve a proponerse): eso lo decide el humano.
       return /\btareas\s+descartar\b/.test(plano) ? null : notasYTareas;
     case "tests":
       return notasYTareas; // el archivo de tests nuevo/ampliado ya pasa por "solo comentarios"
     case "panorama":
-      return (rel, antes, despues) => (datos(rel) && (/\/panorama\.md$/.test(rel) || memoriaHonesta(rel, antes, despues, true))) || notasYTareas(rel, antes, despues);
+      return (rel, antes, despues) => (datos(rel) && (/\/(panorama\.md|ideas\.json)$/.test(rel) || memoriaHonesta(rel, antes, despues, true))) || notasYTareas(rel, antes, despues);
     case "conocer":
       // proyecto.md / reglas.md solo si estaban vacíos (si no, el comando escribe *.borrador.md).
       return (rel, antes) => datos(rel) && (/\/(conocimiento|proyecto\.borrador|reglas\.borrador)\.md$/.test(rel) || (/\/(proyecto|reglas)\.md$/.test(rel) && plantilla(antes)));

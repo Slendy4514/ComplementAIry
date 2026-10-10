@@ -115,6 +115,35 @@ export function agregarTareas(root: string, nuevas: Omit<Tarea, "id" | "hecha" |
   return n;
 }
 
+/** Un cambio de tareas (lo propone el chat o Claude Code; se aplica solo con tu clic o tu respuesta). */
+export interface CambioTarea {
+  accion: "crear" | "editar" | "hecha" | "reabrir" | "descartar";
+  id?: string;
+  titulo?: string;
+  archivo?: string;
+  detalle?: string;
+}
+
+/** Aplica un cambio de tareas y dice qué pasó (con un error explicativo si no se puede). */
+export function aplicarCambioTarea(root: string, c: CambioTarea): string {
+  if (c.accion === "crear") {
+    if (!c.titulo?.trim()) throw new Error("para crear una tarea hace falta un título");
+    const n = agregarTareas(root, [{ titulo: c.titulo.trim(), ...(c.archivo ? { archivo: c.archivo } : {}), ...(c.detalle ? { detalle: c.detalle } : {}), origen: "manual" }]);
+    return n ? `tarea agregada: ${c.titulo.trim()}` : `ya existía: ${c.titulo.trim()}`;
+  }
+  const tareas = cargarTareas(root);
+  const t = tareas.find((x) => x.id === c.id);
+  if (!t) throw new Error(`no existe la tarea ${c.id ?? "(sin id)"} (míralas con: cai tareas)`);
+  if (c.accion === "editar") {
+    if (c.titulo?.trim()) t.titulo = c.titulo.trim();
+    if (c.detalle !== undefined) t.detalle = c.detalle;
+    if (c.archivo !== undefined) t.archivo = c.archivo || undefined;
+  } else if (c.accion === "descartar") Object.assign(t, { archivada: true, descartada: true }); // no vuelve a proponerse
+  else Object.assign(t, { hecha: c.accion === "hecha", archivada: false, descartada: false, ...(c.accion === "hecha" ? { hechaEn: new Date().toISOString() } : { hechaEn: undefined }) });
+  guardarTareas(root, tareas);
+  return `${t.id}: ${{ editar: "editada", descartar: "descartada", hecha: "hecha", reabrir: "pendiente otra vez" }[c.accion]} (${t.titulo})`;
+}
+
 /** Marca hechas, sin IA, las tareas cuya función ya existe en su archivo. */
 export async function actualizarTareas(root: string): Promise<Tarea[]> {
   const tareas = cargarTareas(root);

@@ -98,7 +98,7 @@ export interface Mensaje {
   quien: "tu" | "ia";
   texto: string;
   fecha: string;
-  meta?: { kind?: string; modelo?: string; costo?: number };
+  meta?: { kind?: string; modelo?: string; costo?: number; pedido?: string };
 }
 
 export interface Nota {
@@ -123,7 +123,39 @@ export interface Nota {
   testsProbados?: { funcion: string; fecha: string; archivo?: string };
   impacto?: { funcion: string; archivo: string; fecha: string }[];
   ultimaPrueba?: { fecha: string; pasan: number; fallan: number; detalle: { descripcion: string; estado: string; obtenido?: string; esperado: string; llamada: string }[] };
+  /** Modo programar (ver la CLI, programar.ts). */
+  plan?: { pasos: { texto: string; hecho?: boolean; repertorio?: string }[]; separar?: { nombre: string; proposito: string } | null; fecha: string };
+  contrato?: { llamada: string; esperado: string }[];
+  programada?: { fecha: string; tipo: string; porciones: number; pruebas: number; aciertosPrimera: number; sinProbar: number };
+  objetivo?: { texto: string; criterios: string[]; confirmado?: string; terminada?: string };
   actualizada: string;
+}
+
+/** Una propuesta del modo programar (en preparación; nunca en tu archivo hasta tu clic). */
+export interface Propuesta {
+  tipo: "dirigido" | "pr" | "adaptada";
+  fecha: string;
+  archivo: string;
+  funcion: string;
+  paso?: number;
+  instruccion?: string;
+  codigo: string;
+  despues?: string;
+  linea?: number;
+  falta?: string;
+  explicacion?: string;
+  porciones?: { desde: number; hasta: number; paso: number; porque: string; aprobada: boolean; pruebas: { entrada: string; espero: string; obtenido: string; toca: boolean; acierto: boolean; explicacion?: string }[] }[];
+  contrato?: { llamada: string; esperado: string; obtenido: string; pasa: boolean }[];
+  original?: { id: string; codigo: string; proyecto: string };
+  cambios?: { que: string; porque: string }[];
+}
+
+export function leerPropuesta(cwd: string, rel: string, funcion: string): Propuesta | null {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dataDir(cwd), "cache", "propuestas", `${encodeURIComponent(rel)}#${encodeURIComponent(funcion)}.json`), "utf8")) as Propuesta;
+  } catch {
+    return null;
+  }
 }
 
 export const archivoNotas = (cwd: string, rel: string) => path.join(dataDir(cwd), "notas", rel.replace(/[\\/]/g, "__") + ".json");
@@ -262,6 +294,11 @@ export interface ConfigProyecto {
   ia?: { modelos?: { chico?: string; mediano?: string; grande?: string } };
   tests?: { carpeta?: string; crearConIa?: boolean; alGuardar?: boolean };
   revisar?: { alSalir?: "nunca" | "ligera" | "completa"; minutosFuera?: number };
+  modosVersion?: number;
+  chat?: { modelo?: "chico" | "mediano" | "grande" };
+  ideas?: { aprender?: boolean };
+  repertorio?: { guardar?: boolean; usar?: "siempre" | "preguntar" | "nunca" };
+  programar?: { prediccionObligatoria?: boolean };
   [k: string]: unknown;
 }
 
@@ -270,7 +307,7 @@ export function leerConfig(cwd: string, estricto = false): ConfigProyecto {
   const f = path.join(dataDir(cwd), "config.json");
   if (!fs.existsSync(f)) return {};
   try {
-    return JSON.parse(fs.readFileSync(f, "utf8")) as ConfigProyecto;
+    return migrarModos(JSON.parse(fs.readFileSync(f, "utf8")) as ConfigProyecto);
   } catch (e) {
     if (estricto) throw new Error(`${path.relative(cwd, f)} no es un JSON válido (${(e as Error).message}); arréglalo antes de guardar la configuración para no perder lo que tiene`);
     return {};
@@ -279,11 +316,21 @@ export function leerConfig(cwd: string, estricto = false): ConfigProyecto {
 
 // --- Modos (igual que la CLI, modos.ts): función > archivo > carpeta > proyecto -------------------
 
-export type Modo = "programar" | "aprender";
-export const MODOS: Record<Modo, { etiqueta: string; icono: string; explicar: boolean; predecir: boolean; rapidas: boolean }> = {
-  programar: { etiqueta: "programar", icono: "rocket", explicar: false, predecir: false, rapidas: true },
-  aprender: { etiqueta: "aprender", icono: "mortar-board", explicar: true, predecir: true, rapidas: false },
+export type Modo = "sugerir" | "aprender" | "programar";
+export const MODOS: Record<Modo, { etiqueta: string; icono: string; explicar: boolean; predecir: boolean; rapidas: boolean; proponerSolucion: boolean; descripcion: string }> = {
+  sugerir: { etiqueta: "sugerir", icono: "lightbulb", explicar: false, predecir: false, rapidas: true, proponerSolucion: false, descripcion: "ayuda directa, snippets, sugerencias rápidas; el código lo escribes tú" },
+  aprender: { etiqueta: "aprender", icono: "mortar-board", explicar: true, predecir: true, rapidas: false, proponerSolucion: false, descripcion: "ayuda gradual, predecir, explicar con tus palabras" },
+  programar: { etiqueta: "programar", icono: "rocket", explicar: false, predecir: false, rapidas: true, proponerSolucion: true, descripcion: "la IA escribe por pasos que diriges tú (o como un PR por porciones); entra con tu clic" },
 };
+
+/** Igual que la CLI (modos.ts → migrarModos): antes de v0.10 "programar" era lo que hoy es "sugerir". */
+export function migrarModos<T extends ConfigProyecto>(c: T): T {
+  if (c.modosVersion === 2) return c;
+  if (c.modo === "programar") c.modo = "sugerir";
+  for (const g of Object.values(c.modos ?? {})) for (const [k, v] of Object.entries(g ?? {})) if (v === "programar") g![k] = "sugerir";
+  c.modosVersion = 2;
+  return c;
+}
 const esModo = (m: unknown): m is Modo => typeof m === "string" && m in MODOS;
 
 // Glob a RegExp: "**" + "/" = cero o más carpetas (como picomatch); "*" = dentro de una carpeta.
@@ -317,7 +364,7 @@ export function modoEfectivo(cfg: ConfigProyecto, rel: string, funcion?: string)
     .filter((x) => x.n >= 0)
     .sort((x, y) => y.n - x.n)[0];
   if (c) return { modo: c.m as Modo, origen: "carpeta" };
-  return { modo: esModo(cfg.modo) ? cfg.modo : "programar", origen: "proyecto" };
+  return { modo: esModo(cfg.modo) ? cfg.modo : "sugerir", origen: "proyecto" };
 }
 
 // --- Decisiones (.cai/decisiones.json; decidir y retractar pasan por la CLI) --------------------------

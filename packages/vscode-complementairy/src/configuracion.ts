@@ -47,7 +47,7 @@ export function registrarConfiguracion(ctx: vscode.ExtensionContext): void {
 function inicial(c: ConfigProyecto, enLinea: boolean): Record<string, string | boolean> {
   const s = vscode.workspace.getConfiguration("cai").get<string>("vista", "proyecto");
   return {
-    modo: c.modo ?? "programar",
+    modo: c.modo ?? "sugerir",
     procesoAbierto: c.rapidas?.procesoAbierto !== false,
     ayuda: c.ayuda?.porDefecto ?? "auto",
     rapidas: c.rapidas?.activas !== false,
@@ -66,6 +66,11 @@ function inicial(c: ConfigProyecto, enLinea: boolean): Record<string, string | b
     grande: c.ia?.modelos?.grande ?? "claude-opus-5-5",
     vista: c.vista ?? (s === "comentarios" ? "comentarios" : "notas"),
     tests: c.tests?.carpeta ?? "tests",
+    chatModelo: c.chat?.modelo ?? "mediano",
+    ideasAprender: c.ideas?.aprender === true,
+    repGuardar: c.repertorio?.guardar !== false,
+    repUsar: c.repertorio?.usar ?? "preguntar",
+    prediccionObligatoria: c.programar?.prediccionObligatoria !== false,
     enLinea,
   };
 }
@@ -90,7 +95,7 @@ async function guardar(cwd: string, d: Record<string, string | boolean>): Promis
   };
   const texto = (k: string) => String(d[k] ?? "").trim();
   poner(["vista"], "vista", texto("vista") === "comentarios" ? "comentarios" : "notas");
-  poner(["modo"], "modo", texto("modo") === "aprender" ? "aprender" : "programar");
+  poner(["modo"], "modo", ["aprender", "programar"].includes(texto("modo")) ? texto("modo") : "sugerir");
   poner(["rapidas", "procesoAbierto"], "procesoAbierto", d.procesoAbierto === true);
   poner(["ayuda", "porDefecto"], "ayuda", texto("ayuda") || "auto");
   poner(["rapidas", "activas"], "rapidas", d.rapidas === true);
@@ -108,6 +113,11 @@ async function guardar(cwd: string, d: Record<string, string | boolean>): Promis
   poner(["ia", "modelos", "mediano"], "mediano", texto("mediano") || "claude-sonnet-5-5");
   poner(["ia", "modelos", "grande"], "grande", texto("grande") || "claude-opus-5-5");
   poner(["tests", "carpeta"], "tests", texto("tests") || "tests");
+  poner(["chat", "modelo"], "chatModelo", ["chico", "grande"].includes(texto("chatModelo")) ? texto("chatModelo") : "mediano");
+  poner(["ideas", "aprender"], "ideasAprender", d.ideasAprender === true);
+  poner(["repertorio", "guardar"], "repGuardar", d.repGuardar === true);
+  poner(["repertorio", "usar"], "repUsar", ["siempre", "nunca"].includes(texto("repUsar")) ? texto("repUsar") : "preguntar");
+  poner(["programar", "prediccionObligatoria"], "prediccionObligatoria", d.prediccionObligatoria === true);
   // Objetos que quedaron vacíos (nada cambió ahí) no se escriben.
   for (const [k, v] of Object.entries(nuevo)) if (v && typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length && !(k in actual)) delete nuevo[k];
   const ia = nuevo.ia as { modelos?: object } | undefined;
@@ -143,7 +153,12 @@ button{font:inherit;background:var(--vscode-button-background);color:var(--vscod
 <h1>ComplementAIry: configuración</h1>
 <div class="ayuda">Se guarda en <code>.cai/config.json</code> de este proyecto (lo demás de ese archivo se conserva).</div>
 <h2>Modo</h2>
-${fila("Modo del proyecto", sel("modo", c.modo ?? "programar", [["programar", "🚀 Programar: ayuda directa, snippets, sugerencias rápidas"], ["aprender", "🎓 Aprender: ayuda gradual, predecir, explicar con tus palabras"]]), "Se puede cambiar por carpeta, archivo o función desde la barra de estado o el panel Nota (gana el más específico). Cambiar de modo no toca lo ya hecho: notas, tareas, estructura y panorama quedan igual.")}
+${fila("Modo del proyecto", sel("modo", c.modo ?? "sugerir", [["sugerir", "💡 Sugerir: ayuda directa, snippets, sugerencias rápidas (el código lo escribes tú)"], ["aprender", "🎓 Aprender: ayuda gradual, predecir, explicar con tus palabras"], ["programar", "🚀 Programar: la IA escribe por pasos que diriges tú (o como un PR por porciones); entra con tu clic"]]), "Se puede cambiar por carpeta, archivo o función desde la barra de estado o el panel Nota (gana el más específico). Cambiar de modo no toca lo ya hecho: notas, tareas, estructura y panorama quedan igual.")}
+${fila("Ideas: qué aprender", chk("ideasAprender", c.ideas?.aprender === true), "Además de funcionalidades y mejoras, el panel sugiere conceptos o técnicas para aprender (pensado para el modo aprender). Apagado por defecto.")}
+<h2>Modo programar</h2>
+${fila("Probar cada porción (obligatorio)", chk("prediccionObligatoria", c.programar?.prediccionObligatoria !== false), "En una propuesta \"como un PR\", para avanzar pruebas cada porción con tu entrada y lo que esperas. Apagado: puedes insertar sin probar, y queda como deuda de comprensión.")}
+${fila("Repertorio: guardar", chk("repGuardar", c.repertorio?.guardar !== false), "Tus funciones 🟢 de este proyecto se guardan en tu repertorio personal (repo git en ~/.complementairy/repertorio, entre proyectos). Apágalo en proyectos de clientes. Nunca guarda lo heredado ni de terceros.")}
+${fila("Repertorio: usar", sel("repUsar", c.repertorio?.usar ?? "preguntar", [["preguntar", "Preguntar (te muestra lo parecido y eliges)"], ["siempre", "Siempre (lo que ya hiciste va en pasos más grandes)"], ["nunca", "Nunca"]]), "En modo programar, lo que ya hiciste antes va en pasos más grandes y se puede proponer tu versión adaptada (como diff).")}
 <h2>Ayuda</h2>
 ${fila("Al preguntar, dame", sel("ayuda", c.ayuda?.porDefecto ?? "auto", [["auto", "Según mi nivel (automático)"], ["pista", "💡 Una pista"], ["piezas", "🧩 Las piezas (funciones/APIs)"], ["pseudo", "📝 Pseudocódigo"], ["ejemplo", "🔁 Un ejemplo análogo"]]), "Lo que responde cuando preguntas sin pedir un escalón. Siempre puedes pedir otro con los botones o \"no entiendo\" para subir uno.")}
 ${fila("Guía mientras escribes", chk("rapidas", c.rapidas?.activas !== false), "Texto gris al final de la línea del cursor: qué sigue o qué está mal ahí. Se actualiza en cada pausa. No se inserta nada.")}
@@ -164,6 +179,7 @@ ${fila("Máximo de llamadas por hora", numero("maxHora", a.maxLlamadasHora ?? 20
 ${fila("Chico", txt("chico", m.chico ?? "claude-haiku-4-5", "modelos"), "Sugerencias rápidas, comentario al terminar una función, verificar al guardar, conversar sobre preguntas.")}
 ${fila("Mediano", txt("mediano", m.mediano ?? "claude-sonnet-5-5", "modelos"), "Responder notas, revisar un archivo, \"¿quedó lista?\" con el botón, tests, plano de un archivo.")}
 ${fila("Grande", txt("grande", m.grande ?? "claude-opus-5-5", "modelos"), "Panorama, estructura del proyecto, conocer, arquitectura.")}
+${fila("Chat del proyecto", sel("chatModelo", c.chat?.modelo ?? "mediano", [["chico", "Chico (rápido y barato)"], ["mediano", "Mediano"], ["grande", "Grande (más a fondo)"]]), "Con qué IA empieza una conversación nueva (en cada conversación lo puedes cambiar).")}
 <h2>Dónde se ve</h2>
 ${fila("Vista", sel("vista", String(inicial(c, enLinea).vista), [["notas", "Notas (panel Nota; el archivo no se toca)"], ["comentarios", "Comentarios @guia dentro del archivo"]]), "")}
 ${fila("Notas también dentro del código", chk("enLinea", enLinea), "Hilos de VSCode entre las líneas (como antes). Apagado: solo el ícono del margen y el panel Nota.")}

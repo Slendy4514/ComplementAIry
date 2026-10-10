@@ -158,7 +158,7 @@ export class BarraModo implements vscode.Disposable {
     this.funcion = f?.clave;
     const ef = modoEfectivo(leerConfig(cwd), relDe(cwd, ed.document.uri.fsPath), f?.clave);
     this.modo.text = `$(${MODOS[ef.modo].icono}) ${ef.modo}`;
-    this.modo.tooltip = `Modo ${ef.modo} (por ${{ funcion: "esta función", archivo: "este archivo", carpeta: "la carpeta", proyecto: "el proyecto" }[ef.origen]}). Clic para cambiarlo.\nprogramar: ayuda directa, snippets, sugerencias rápidas · aprender: ayuda gradual, predecir, explicar con tus palabras`;
+    this.modo.tooltip = `Modo ${ef.modo} (por ${{ funcion: "esta función", archivo: "este archivo", carpeta: "la carpeta", proyecto: "el proyecto" }[ef.origen]}). Clic para cambiarlo.\n${(Object.keys(MODOS) as (keyof typeof MODOS)[]).map((k) => `${k}: ${MODOS[k].descripcion}`).join("\n")}`;
     this.modo.show();
   }
 
@@ -182,8 +182,7 @@ export class BarraModo implements vscode.Disposable {
     if (!alcance) return;
     const modo = await vscode.window.showQuickPick(
       [
-        { label: "$(rocket) programar", description: "ayuda directa, snippets, sugerencias rápidas", v: "programar" },
-        { label: "$(mortar-board) aprender", description: "ayuda gradual, predecir, explicar con tus palabras", v: "aprender" },
+        ...(Object.keys(MODOS) as (keyof typeof MODOS)[]).map((k) => ({ label: `$(${MODOS[k].icono}) ${k}`, description: MODOS[k].descripcion, v: k as string })),
         ...(alcance.args.length ? [{ label: "$(arrow-up) heredar", description: "quitar el modo propio y usar el de arriba", v: "heredar" }] : []),
       ],
       { placeHolder: "Modo" },

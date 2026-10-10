@@ -11,6 +11,7 @@ import { actualizarMemoria, agregarPreguntas, unaLinea } from "./panorama.js";
 import { agregarTareas, cargarTareas, guardarTareas, rutasDe } from "./siguiente.js";
 import { iaOpts } from "./tutor.js";
 import { sanitizeGuia } from "./verify.js";
+import { aplicarAEstructura } from "./correcciones.js";
 
 /**
  * Plano del proyecto (arquitectura desde el inicio): una propuesta concreta de carpetas,
@@ -136,7 +137,8 @@ export async function planoProyecto(root: string, descripcion?: string): Promise
   }
   // Para el panel: la estructura como datos, y lo que falta como tareas (se marcan solas al crear el archivo).
   fs.mkdirSync(dataDir(root), { recursive: true });
-  fs.writeFileSync(path.join(dataDir(root), "estructura.json"), JSON.stringify({ version: 1, fecha, ...data }, null, 2));
+  // Lo que corregiste del rol de un archivo se mantiene al volver a proponer la estructura.
+  fs.writeFileSync(path.join(dataDir(root), "estructura.json"), JSON.stringify(aplicarAEstructura(root, { version: 1, fecha, ...data }), null, 2));
   // En el orden de "Por dónde empezar" (el primer paso que nombra el archivo).
   const paso = (archivo: string) => {
     const base = path.basename(archivo).replace(/\.[^.]+$/, "");

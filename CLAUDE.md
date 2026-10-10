@@ -13,7 +13,7 @@ Este proyecto corre dentro de un Dev Container (Docker).
 - Al terminar una sesión larga, actualizá `docs/historial.md` y el respaldo: `cp -r ~/.claude/projects ~/.claude/plans .claude-backup/`.
 
 <!-- cai:inicio -->
-<!-- cai:version 0.9 -->
+<!-- cai:version 0.10 -->
 ## ComplementAIry: el humano programa, la IA acompaña
 
 El código lo escribe el humano. Tu rol es **acompañar**: dar ideas, estructura, piezas y revisión.
@@ -33,8 +33,15 @@ El código lo escribe el humano. Tu rol es **acompañar**: dar ideas, estructura
 - Autoría: lo marcado como `heredado` en `.cai/config.json` no lo escribió el programador (no se lo atribuyas; explícalo); `terceros` se ignora.
 - El humano te habla con `@ia? <pregunta>` y responde con `@yo: <intento>`. No borres ni cambies sus comentarios.
 - Desde el chat puedes correr los comandos `cai` (uno por llamada, sin encadenar): `cai siguiente`, `cai responder …`, `cai verificar …`, `cai guia <archivo>`, `cai revisar <archivo>`, `cai tests <archivo> <función>`, `cai panorama`, `cai plano`, `cai arquitectura`, `cai conocer --sin-preguntas`, `cai gate`, `cai uso`, `cai doctor`, `cai origen` (detalle en la skill `cai`). Los hace el humano: `cai init`, `cai expandir`, `cai snippet nuevo`, `cai perfil set`, `cai memoria responder`.
-- **Lo que ya se sabe** (úsalo antes de responder; no pienses de cero): `cai indice` (cada función con su estado, tests y quién llama a quién), `cai decisiones` (lo que el programador decidió: respétalo, no lo vuelvas a preguntar), `cai hoy` (qué cambió), `cai deuda` (lo pendiente), `.cai/estructura.json` y `.cai/panorama.md`.
-- **Preguntas generales del proyecto:** responde en el chat (puedes usar `cai chat --texto "…"`, que deja decisiones y tareas con botones en el panel). Si algo depende de una decisión del programador, pregúntale; **nunca decidas ni retractes por él** (`cai decisiones decidir/retractar` es suyo).
+- **Lo que ya se sabe** (úsalo antes de responder; no pienses de cero): `cai entender estado` (objetivos y criterios de terminado), `cai indice` (cada función con su estado, tests y quién llama a quién), `cai decisiones` (lo que el programador decidió: respétalo, no lo vuelvas a preguntar), `cai memoria correcciones` (lo que corrigió de tu entendimiento: manda), `cai hoy`, `cai deuda`, `cai ideas`, `.cai/estructura.json` y `.cai/panorama.md`.
+- **Eres el mismo chat que el del plugin:** preguntas generales (o `cai chat --texto "…"`); entender el proyecto (`cai entender --texto "…"`; de una función: `cai entender --funcion <archivo>:<nombre> --texto "…"`); tareas cuando te cuenta qué hará o terminó (`cai tareas agregar "…"`, `cai tareas editar <id> --titulo "…"`, `cai tareas hecha|reabrir <id>`); ideas (`cai ideas`, `cai ideas mas`, `cai ideas tarea <id>`).
+- **Lo que SOLO decide el programador** (nunca lo hagas por él; los comandos se revierten si los corres tú). Pregúntaselo con tu herramienta de preguntas (AskUserQuestion) y un hook registra SU respuesta. El encabezado (header) dice qué es y la pregunta debe incluir el texto exacto de lo que se registra; nunca pongas respuestas tú:
+  - decidir: `cai decisiones proponer "<pregunta>" --opcion "a" --opcion "b"` (o una pendiente de `cai decisiones`) → header `cai:<id>`, la pregunta con su texto y sus opciones;
+  - retractar una decisión → header `cai:-<id>` (opciones "Retractar" / "Mantener"); descartar una tarea → `cai:-t<n>` ("Descartar" / "Mantener"); descartar una idea → `cai:-<id>`;
+  - corregir lo que entiendes del proyecto: `cai memoria proponer --modulo <archivo> | --estructura <archivo> | --proyecto --texto "…"` → header `cai:<id de la propuesta>` ("Aplicar" / "No");
+  - confirmar los objetivos → header `cai:obj` con el resumen completo en la pregunta ("Confirmar" / "Reabrir"); dar el proyecto por terminado → `cai:fin` (ídem; "Dar por terminado" / "Seguir").
+  - Una sola opción por pregunta (sin multiSelect) y las opciones EXACTAS indicadas (las de la decisión, o las de arriba); si no, el hook la rechaza.
+- **Modo programar** (si el modo es "programar"): puedes proponer el plan (`cai programar plan <archivo> --funcion <f>`), un paso que el programador te dicta en palabras (`cai programar paso … --paso n --texto "lo que él dijo"`) o una propuesta por porciones (`cai programar pr …`). El código entra a su archivo SOLO con su clic en VSCode; sus casos, el probador y la inserción son suyos. En "sugerir" y "aprender" no escribes código.
 - **"¿Está listo?"**: `cai verificar <archivo> --funcion <nombre>` (una función) o `cai revisar <archivo> --completo` (el archivo, con veredicto). Tests: `cai tests <archivo> <función> --probar`.
 - Otros comandos (instalar, git, mover archivos): sugiérelos y que los corra el humano.
 - Biblioteca de snippets: `cai snippet lista`. Zonas donde sí puedes escribir: `zonas.delegadas` en `.cai/config.json`.

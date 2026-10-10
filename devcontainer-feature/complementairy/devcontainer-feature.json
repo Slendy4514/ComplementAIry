@@ -1,6 +1,6 @@
 {
   "id": "complementairy",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "name": "ComplementAIry",
   "description": "Tú programas, la IA te acompaña: comando `cai` y extensión de VSCode de ComplementAIry en el contenedor.",
   "documentationURL": "https://github.com/Slendy4514/ComplementAIry",
@@ -16,5 +16,15 @@
     "ghcr.io/devcontainers/features/common-utils"
   ],
   "postAttachCommand": "/usr/local/share/complementairy/al-conectar.sh",
-  "licenseURL": "https://github.com/Slendy4514/ComplementAIry/blob/main/LICENSE"
+  "licenseURL": "https://github.com/Slendy4514/ComplementAIry/blob/main/LICENSE",
+  "mounts": [
+    {
+      "source": "complementairy-repertorio",
+      "target": "/usr/local/share/complementairy/repertorio",
+      "type": "volume"
+    }
+  ],
+  "containerEnv": {
+    "CAI_REPERTORIO": "/usr/local/share/complementairy/repertorio"
+  }
 }

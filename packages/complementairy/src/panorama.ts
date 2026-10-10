@@ -14,6 +14,9 @@ import { agregarPreguntas, parseMemoria, sinSugerencia, sobreElCodigo, sugerenci
 import { agregarTareas, cargarTareas, guardarTareas, rutasDe } from "./siguiente.js";
 import type { Nota } from "./notas.js";
 import { iaOpts } from "./tutor.js";
+import { aplicarAResumenes, bloqueCorrecciones } from "./correcciones.js";
+import { bloqueObjetivos, guardarEvaluacion, leerObjetivos, type Criterio, type EvaluacionTerminado } from "./entender.js";
+import { contextoIdeas, registrarIdeas, schemaIdeas, tiposIdeas, type Idea, type TipoIdea } from "./ideas.js";
 
 /**
  * Panorama del proyecto completo y memoria del proyecto (.cai/conocimiento.md).
@@ -45,6 +48,8 @@ interface Sugerencias {
   riesgos: string[];
   /** Texto suelto en cachés de versiones anteriores. */
   preguntas: (string | { pregunta: string; sugerencia: string })[];
+  ideas?: Omit<Idea, "id" | "fecha">[];
+  criterios?: EvaluacionTerminado["criterios"];
 }
 
 const RESUMEN_SCHEMA = {
@@ -54,11 +59,23 @@ const RESUMEN_SCHEMA = {
   properties: { resumenes: { type: "array", items: { type: "object", additionalProperties: false, required: ["archivo", "resumen"], properties: { archivo: { type: "string" }, resumen: { type: "string" } } } } },
 };
 
-const PANORAMA_SCHEMA = {
+// Ideas (funcionalidades/mejoras) y, si hay objetivos confirmados, la revisión de cada criterio de
+// "terminado": en la misma llamada (sin costo extra).
+const panoramaSchema = (tipos: TipoIdea[], criterios: Criterio[]) => ({
   type: "object",
   additionalProperties: false,
-  required: ["estado", "sugerencias", "alternativas", "riesgos", "preguntas"],
+  required: ["estado", "sugerencias", "alternativas", "riesgos", "preguntas", "ideas", ...(criterios.length ? ["criterios"] : [])],
   properties: {
+    ideas: schemaIdeas(tipos),
+    ...(criterios.length
+      ? {
+          criterios: {
+            type: "array",
+            description: `Para CADA criterio de terminado (por su id: ${criterios.map((c) => c.id).join(", ")}): ¿se cumple hoy? Con evidencia concreta (funciones, tests, archivos).`,
+            items: { type: "object", additionalProperties: false, required: ["id", "estado", "evidencia"], properties: { id: { type: "string" }, estado: { type: "string", enum: ["cumple", "parcial", "no"] }, evidencia: { type: "string" } } },
+          },
+        }
+      : {}),
     estado: { type: "string", description: "Cómo está el proyecto, en 2-3 oraciones." },
     sugerencias: {
       type: "array",
@@ -88,7 +105,7 @@ const PANORAMA_SCHEMA = {
       },
     },
   },
-};
+});
 
 const SISTEMA = `Eres el compañero de ComplementAIry mirando el proyecto COMPLETO (no un archivo). Con los resúmenes de cada módulo, las mediciones y lo que el programador escribió:
 - Describe el estado del proyecto en pocas frases.
@@ -257,7 +274,10 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
   // 3. Sugerencias a nivel proyecto: solo si cambió algo de lo que las alimenta.
   const ctx = projectContext(root, "README.md");
   const medibles = archivos.flatMap((a) => a.violaciones.map((v) => `${a.rel}: ${v.detalle}`));
-  const entrada = h(JSON.stringify([resumenes, medibles, sinTests, ctx.proyecto, ctx.reglas, mem.respondidas, mem.notas, testsExistentes, dependencias]));
+  // Objetivos confirmados: sus criterios de "terminado" se revisan en esta misma llamada.
+  const objetivos = leerObjetivos(root);
+  const criteriosObjetivos = objetivos.estado === "entendido" || objetivos.estado === "terminado" ? objetivos.criterios : [];
+  const entrada = h(JSON.stringify([resumenes, medibles, sinTests, ctx.proyecto, ctx.reglas, mem.respondidas, mem.notas, testsExistentes, dependencias, bloqueObjetivos(root), criteriosObjetivos, bloqueCorrecciones(root), contextoIdeas(root), tiposIdeas(root)]));
   let sug = prev.sugerencias;
   if (!o.sinIa && archivos.length && (entrada !== prev.entrada || !sug)) {
     log("cai: analizando el proyecto completo");
@@ -265,7 +285,7 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
       kind: "panorama",
       system: SISTEMA,
       cwd: root,
-      schema: PANORAMA_SCHEMA,
+      schema: panoramaSchema(tiposIdeas(root), criteriosObjetivos),
       sinHerramientas: true,
       ...iaOpts(z.config, "grande"),
       prompt: [
@@ -274,7 +294,11 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
         mem.notas ? `Notas del programador:\n${mem.notas}` : "",
         mem.respondidas.length ? `Lo que el programador ya respondió:\n- ${mem.respondidas.join("\n- ")}` : "",
         mem.abiertas.length ? `Preguntas que ya le hiciste y aún no responde (NO las repitas ni reformules):\n- ${mem.abiertas.map((a) => a.p).join("\n- ")}` : "",
-        `Módulos (${archivos.length}):\n${archivos.map((a) => `- ${a.rel}${origenDe(z.config, a.rel) === "heredado" ? " [HEREDADO: no lo escribió el programador]" : ""} (${a.lineas} líneas): ${resumenes[a.rel]?.resumen ?? "(sin resumen)"}${a.nombres.length ? ` Funciones: ${a.nombres.slice(0, 25).join(", ")}.` : ""}`).join("\n")}`,
+        bloqueObjetivos(root),
+        criteriosObjetivos.length ? `Criterios de terminado a revisar (id: criterio):\n${criteriosObjetivos.map((c) => `- ${c.id}: ${c.texto}`).join("\n")}` : "",
+        bloqueCorrecciones(root),
+        contextoIdeas(root),
+        `Módulos (${archivos.length}):\n${archivos.map((a) => `- ${a.rel}${origenDe(z.config, a.rel) === "heredado" ? " [HEREDADO: no lo escribió el programador]" : ""} (${a.lineas} líneas): ${aplicarAResumenes(root, resumenes)[a.rel]?.resumen ?? "(sin resumen)"}${a.nombres.length ? ` Funciones: ${a.nombres.slice(0, 25).join(", ")}.` : ""}`).join("\n")}`,
         // Proyecto chico: el código real (más preciso que los resúmenes). Grande: solo resúmenes.
         totalCodigo <= 30_000 ? `Código completo:\n${archivos.map((a) => `=== ${a.rel}\n${a.codigo}`).join("\n\n")}` : "",
         `Tests: carpeta configurada "${carpetaTests || "(junto al código)"}"; archivos de test existentes: ${testsExistentes.length ? testsExistentes.join(", ") : "ninguno"}.`,
@@ -288,6 +312,8 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
     });
     costo += costUsd;
     sug = data;
+    registrarIdeas(root, data.ideas ?? []);
+    if (criteriosObjetivos.length && data.criterios) guardarEvaluacion(root, data.criterios);
     // Cada sugerencia, una tarea con el archivo a tocar. Las del panorama anterior que sigan
     // pendientes se reemplazan (la IA reformula los títulos: si no, se acumularían).
     guardarTareas(root, cargarTareas(root).filter((t) => t.origen !== "panorama" || t.hecha || t.descartada));
@@ -310,7 +336,7 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
   for (const a of memFinal.abiertas.filter((x) => x.r)) memFinal.respondidas.push(`${sinSugerencia(a.p)} → ${unaLinea(a.r)}`);
   memFinal.abiertas = memFinal.abiertas.filter((x) => !x.r);
   agregarPreguntas(memFinal, nuevas);
-  escribirMemoria(memFile, resumenes, memFinal);
+  escribirMemoria(memFile, aplicarAResumenes(root, resumenes), memFinal); // tus correcciones mandan (la caché guarda lo generado)
   fs.mkdirSync(path.dirname(cache), { recursive: true });
   fs.writeFileSync(cache, JSON.stringify({ resumenes, entrada, sugerencias: sug }, null, 2));
 
@@ -372,7 +398,7 @@ export function actualizarMemoria(root: string, f: (m: Memoria) => void): void {
   }
   const m = leerMemoria(memFile);
   f(m);
-  escribirMemoria(memFile, resumenes, m);
+  escribirMemoria(memFile, aplicarAResumenes(root, resumenes), m);
 }
 
 

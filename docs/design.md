@@ -323,6 +323,16 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 - **Retomar y cerrar** (`resumenSesion.ts`): `hoy` (desde la última visita, por huellas), `deuda` y `sesion` (medido sin IA; resumen y commit sugerido con el modelo chico).
 - **Tests sin export** (`sandbox.ts`): el archivo se carga **tal cual** en `node:vm` en un proceso aparte. tree-sitter detecta declaraciones de primer nivel y globales del entorno; los globales son **dobles** (Proxy) que registran lo usado o devuelven valores propuestos **como datos JSON**. La expresión de prueba se valida (llamada simple sobre algo declarado, argumentos literales). Los tests guardados usan el ayudante `_cai/aislado.mjs`. Nada es específico de una aplicación.
 
+## Entender, chat completo y modo programar (v0.10)
+- **Modos** (`modos.ts`): sugerir (antes "programar"), aprender y programar (`proponerSolucion`). `migrarModos`: sin `modosVersion: 2`, "programar" se lee como "sugerir" (CLI y extensión).
+- **Entender** (`entender.ts` → `.cai/objetivos.json` + `objetivos.md`): borrador que arma la IA en la conversación "entender" del chat; confirmar/reabrir/terminado son humanos. `objetivosHonestos` (snapshot): un comando de la IA solo cambia el borrador. El panorama evalúa los criterios de terminado en la misma llamada (`cache/terminado.json`); "cree que terminó" es determinista (todos "cumple"). Por función/archivo: `objetivoFuncion.ts` (`nota.objetivo`), y verificar compara contra los criterios confirmados.
+- **Chat** (`chat.ts` → `.cai/chats/<id>.json`): conversaciones normal/entender, modelo por conversación (`chat.modelo` por defecto), propuestas de `cambiosTareas` y `correcciones` que se aplican solo con `--aplicar` (humano: el snapshot lo revierte si lo corre la IA). Migra el `chat.json` de v0.9.
+- **Correcciones** (`correcciones.ts` → `.cai/correcciones.json`): resumen de módulo, rol en la estructura o hecho del proyecto; mandan sobre lo generado (`aplicarAResumenes`, `aplicarAEstructura`, `bloqueCorrecciones` en el contexto común).
+- **Claude Code = chat del plugin** (`confirmar.ts`): lo que solo decide el humano se registra con su respuesta en AskUserQuestion (header `cai:<id>`). PreToolUse rechaza llamadas con `answers`; PostToolUse lee `tool_response.answers` (verificado con un hook real) y exige que la pregunta incluya el texto de lo que se registra.
+- **Ideas** (`ideas.ts` → `.cai/ideas.json`): funcionalidad/mejora (y aprender, opcional) desde el panorama o `cai ideas mas`; las descartadas no vuelven (filtro sin IA + van al prompt).
+- **Notas**: cada ítem de verificar/responder trae `funcion`; `repartir` manda lo de otra función o del archivo a la nota del archivo. La guía rápida marca lo que está después del cursor como "(ya escrito)" y se autoverifica con `yaEscrito`.
+- **Modo programar** (`programar.ts`): plan 3–5 pasos (más → auxiliar como tarea); paso dirigido (solo lo dicho; `falta` en vez de completar); PR por porciones contra tus casos (`validarContrato`: ≥ 2, literales, uno borde); probador con **marcas** insertadas por tree-sitter en una copia junto al original (se borra siempre): la entrada debe recorrer la porción (en una rama, su interior); lo esperado se compara ejecutando. Inserción solo desde la extensión (tu clic); `programada` en la nota; deuda de comprensión y prueba diferida. Repertorio personal (`repertorio.ts`): repo git fuera del proyecto (`CAI_REPERTORIO`), solo lo tuyo 🟢, búsqueda léxica sin IA, versión adaptada como diff.
+
 ## Estado
 | Fase | Contenido | Estado |
 |---|---|---|
@@ -338,6 +348,7 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 | 10 (v0.7) | Una nota por función, panel Nota, "¿quedó lista?", sugerencias rápidas, configuración, autoguardado | ✅ |
 | 11 (v0.8) | Modos programar/aprender por función, proceso abierto (~1 s), sin sesgo (a ciegas + otra mirada), qué hizo la IA, snippets con vista previa | ✅ |
 | 12 (v0.9) | Índice vivo, contexto común, decisiones con botones (retractables), impacto, chat del proyecto, revisión con veredicto y al salir, tests sin export (sandbox), hoy/deuda/sesión | ✅ |
+| 13 (v0.10) | Modos sugerir/aprender/programar, entender (proyecto, archivo, función), chat con conversaciones y modelo, tareas y correcciones desde el chat, Claude Code con confirmación por sus botones, ideas, notas con historial, modo programar (plan, tú diriges, PR por porciones con probador, repertorio) | ✅ |
 
 **Honcho:** el perfil y la memoria hoy son archivos locales legibles, que es lo que pide el principio de transparencia. Conectar Honcho, un servicio externo de modelado de usuario, requiere una cuenta y una API key tuyas, y envía datos de tu forma de programar a un tercero. Queda para cuando lo decidas.
 

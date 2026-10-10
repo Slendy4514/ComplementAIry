@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import picomatch from "picomatch";
+import { migrarModos } from "./modos.js";
 
 export interface Config {
   zonas: {
@@ -45,13 +46,21 @@ export interface Config {
     /** Con autoguardado: segundos sin editar antes de que el acompañante actúe (en VSCode). */
     esperaAutoguardado: number;
   };
-  /** Modo de trabajo del proyecto ("programar" o "aprender"); se puede cambiar por carpeta, archivo o función. */
-  modo: "programar" | "aprender";
+  /** Modo de trabajo del proyecto ("sugerir", "aprender" o "programar"); se puede cambiar por carpeta, archivo o función. */
+  modo: "sugerir" | "aprender" | "programar";
   /** porFuncion: "archivo:función" → modo (se guarda aquí, no en la nota: cambiar de modo no toca notas). */
   modos: { porCarpeta: Record<string, string>; porArchivo: Record<string, string>; porFuncion: Record<string, string> };
   /** Qué ayuda dar cuando preguntas sin pedir un escalón: "auto" (según tu nivel) o uno fijo. */
   ayuda: { porDefecto: "auto" | "pista" | "piezas" | "pseudo" | "ejemplo" };
   /** Sugerencias rápidas (texto gris al final de la línea, en VSCode). */
+  /** Chat del proyecto: qué IA responde por defecto en una conversación nueva (cada una puede cambiarla). */
+  chat: { modelo: "chico" | "mediano" | "grande" };
+  /** Ideas del panorama: además de funcionalidades y mejoras, "qué aprender" (apagado por defecto; se activa con el modo aprender). */
+  ideas: { aprender: boolean };
+  /** Repertorio personal (entre proyectos): guardar tus funciones 🟢 y usarlas en modo programar. */
+  repertorio: { guardar: boolean; usar: "siempre" | "preguntar" | "nunca" };
+  /** Modo programar: la prueba de cada porción (probador) es obligatoria; apagada, lo no probado queda como deuda. */
+  programar: { prediccionObligatoria: boolean };
   /** soloConNota: guiar solo en funciones con nota · maxHora: tope de sugerencias por hora (~US$0,002 c/u). */
   rapidas: { activas: boolean; esperaMs: number; procesoAbierto: boolean; soloConNota: boolean; maxHora: number };
   /**
@@ -152,8 +161,12 @@ export const DEFAULT_CONFIG: Config = {
   snapshot: { ignorar: [], maxBytes: 1024 * 1024 },
   snippets: { modo: "ganado", lenguajes: [] },
   acompanar: { nivel: "normal", intentos: 3, maxLlamadasHora: 20, revisar: true, porCarpeta: {}, verificar: true, esperaAutoguardado: 45 },
-  modo: "programar",
+  modo: "sugerir",
   modos: { porCarpeta: {}, porArchivo: {}, porFuncion: {} },
+  chat: { modelo: "mediano" },
+  ideas: { aprender: false },
+  repertorio: { guardar: true, usar: "preguntar" },
+  programar: { prediccionObligatoria: true },
   ayuda: { porDefecto: "auto" },
   rapidas: { activas: true, esperaMs: 1200, procesoAbierto: true, soloConNota: false, maxHora: 240 },
   practicas: { maxFuncionesArchivo: 12, maxLineasArchivo: 300, maxLineasFuncion: 40, maxAnidamiento: 3, maxParametros: 4 },
@@ -176,16 +189,20 @@ export function dataDir(root: string): string {
 export function loadConfig(root: string): Config {
   const file = path.join(dataDir(root), "config.json");
   if (!fs.existsSync(file)) return DEFAULT_CONFIG;
-  const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<Config>;
+  const raw = migrarModos(JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>) as Partial<Config>;
   return {
     zonas: { ...DEFAULT_CONFIG.zonas, ...raw.zonas },
     bash: { ...DEFAULT_CONFIG.bash, ...raw.bash },
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...raw.snapshot },
     snippets: { ...DEFAULT_CONFIG.snippets, ...raw.snippets },
     acompanar: { ...DEFAULT_CONFIG.acompanar, ...raw.acompanar },
-    modo: raw.modo === "aprender" ? "aprender" : "programar",
+    modo: raw.modo === "aprender" || raw.modo === "programar" ? raw.modo : "sugerir",
     modos: { porCarpeta: { ...raw.modos?.porCarpeta }, porArchivo: { ...raw.modos?.porArchivo }, porFuncion: { ...raw.modos?.porFuncion } },
     ayuda: { ...DEFAULT_CONFIG.ayuda, ...raw.ayuda },
+    chat: { ...DEFAULT_CONFIG.chat, ...raw.chat },
+    ideas: { ...DEFAULT_CONFIG.ideas, ...raw.ideas },
+    repertorio: { ...DEFAULT_CONFIG.repertorio, ...raw.repertorio },
+    programar: { ...DEFAULT_CONFIG.programar, ...raw.programar },
     rapidas: { ...DEFAULT_CONFIG.rapidas, ...raw.rapidas },
     ia: { ...DEFAULT_CONFIG.ia, ...raw.ia, modelos: { ...DEFAULT_CONFIG.ia.modelos, ...raw.ia?.modelos } },
     vista: raw.vista ?? (process.env.CAI_VISTA === "comentarios" || process.env.CAI_VISTA === "notas" ? process.env.CAI_VISTA : DEFAULT_CONFIG.vista),

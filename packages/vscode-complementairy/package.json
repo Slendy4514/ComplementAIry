@@ -2,7 +2,7 @@
   "name": "complementairy",
   "displayName": "ComplementAIry — tú programas, la IA te acompaña",
   "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "publisher": "complementairy",
   "license": "MIT",
   "engines": {
@@ -226,6 +226,23 @@
         "command": "cai.decision.retractar",
         "title": "Retractar decisión",
         "icon": "$(discard)"
+      },
+      {
+        "command": "cai.corregir.modulo",
+        "title": "ComplementAIry: corregir lo que entiende de este archivo",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "cai.ideas.mas",
+        "title": "ComplementAIry: más ideas para el proyecto"
+      },
+      {
+        "command": "cai.chat.entender",
+        "title": "ComplementAIry: entender el proyecto (objetivos)"
+      },
+      {
+        "command": "cai.objetivos.ver",
+        "title": "ComplementAIry: ver los objetivos del proyecto"
       }
     ],
     "keybindings": [
@@ -468,6 +485,10 @@
         {
           "command": "cai.decision.retractar",
           "when": "false"
+        },
+        {
+          "command": "cai.corregir.modulo",
+          "when": "false"
         }
       ],
       "comments/commentThread/context": [
@@ -569,6 +590,11 @@
         {
           "command": "cai.decision.retractar",
           "when": "view == cai.panel && viewItem == cai-decision-vigente",
+          "group": "inline"
+        },
+        {
+          "command": "cai.corregir.modulo",
+          "when": "view == cai.panel && (viewItem == cai-modulo || viewItem == cai-archivo-mapa)",
           "group": "inline"
         }
       ]

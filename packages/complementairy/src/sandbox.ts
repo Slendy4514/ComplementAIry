@@ -143,9 +143,9 @@ try {
 const _j = (v) => v === undefined ? "undefined" : typeof v === "function" ? "[función]" : typeof v === "number" && Number.isNaN(v) ? "NaN" : v === Infinity ? "Infinity" : v === -Infinity ? "-Infinity" : JSON.parse(JSON.stringify(v));
 try {
   const v = await vm.runInContext(${JSON.stringify(expresion)}, ctx, { timeout: 3000 });
-  salida({ ok: true, valor: _j(v) });
+  salida({ ok: true, valor: _j(v), marcas: [...(ctx.__caiHits ?? [])] });
 } catch (e) {
-  salida({ ok: false, error: (e && e.name ? e.name + ": " : "") + String(e && e.message || e) });
+  salida({ ok: false, error: (e && e.name ? e.name + ": " : "") + String(e && e.message || e), marcas: [...(ctx.__caiHits ?? [])] });
 }
 `;
 }

@@ -346,3 +346,56 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - cobertura de casos por función en la guía;
   - cola de revisiones visible en el panel.
 - Selftest: 178/178.
+
+## v0.10.0: entender, chat completo (y Claude Code igual), modo programar (2026-10-10)
+- **Pedido del usuario:**
+  - ideas en el panel a partir del panorama;
+  - que el chat cambie tareas según lo que planea, guarde varias conversaciones y deje elegir la IA;
+  - poder corregir lo que ComplementAIry entiende del proyecto;
+  - decisiones con vuelta atrás y "otra opción" en el chat, y feedback al agregar una tarea;
+  - que Claude Code haga lo mismo que el chat del plugin;
+  - que la guía no sugiera lo que ya está escrito más abajo;
+  - notas más ligeras (qué se pidió y cuándo), y que cada nota hable solo de su función;
+  - una etapa de entendimiento de objetivos, reabrible, en la que la IA dice cuándo cree que entendió y cuándo cree que el trabajo terminó;
+  - renombrar "programar" a "sugerir" y crear un modo "programar" en el que la IA ofrezca la solución sin que el usuario delegue a ciegas.
+- **Decisiones del usuario:**
+  - entendimiento en tres niveles (principal: proyecto); "terminó" = terminó de entender y terminó el trabajo;
+  - Claude Code confirma lo que es del humano con **sus botones** (AskUserQuestion) y un hook que registra la respuesta;
+  - varias conversaciones; ideas de funcionalidades y mejoras ("qué aprender", opcional y apagado);
+  - notas: **resumen arriba + historial**;
+  - modo programar **sin que parezca un juego** (rechazó las preguntas de opción múltiple): "tú diriges, la IA escribe" + "como un pull request", siempre en **porciones manejables**;
+  - plan de 3 a 5 pasos por idea; más de 5 → auxiliar trabajada **aparte, en su propia nota**;
+  - los pasos crecen con **lo ya hecho**, guardado en un repertorio personal tipo git entre proyectos, configurable;
+  - proponer **su versión** de una función ya armada, como diff. Todo entra al archivo solo con su clic.
+- **Investigación (modo programar):**
+  - Anthropic 2026: quien delegaba todo sacó menos de 40% en comprensión; quien pedía código con explicación y preguntaba, 65% o más;
+  - Bastani (PNAS 2025): +48% en práctica, −17% en examen sin salvaguardas;
+  - Kazemitabaar (IUI'25): Lead-and-Reveal (~1,8x tiempo) y Trace-and-Predict (~2,7x);
+  - Buçinca 2021 y Gajos 2022: pensar antes de ver la respuesta;
+  - habituación (Vance 2017/18): la gente aprende a hacer clic sin leer.
+  - Ninguna técnica tiene aún efecto significativo a largo plazo: por eso se mide (`cai programar estado`).
+- **Verificado con un hook real:** en PostToolUse, `tool_response.answers` trae la respuesta del humano (incluido el texto libre); en PreToolUse no hay respuestas.
+- **Prueba real** (copia de demo-ts, con IA):
+  - entender en 4 turnos: preguntó con opciones, aceptó la corrección "no hay bug", dijo "creo que entendí" y se confirmó;
+  - chat con la IA chica: propuso una corrección y ediciones de tareas con sus ids; la corrección sobrevivió al panorama (que además dio 5 ideas y evaluó 7 criterios de terminado);
+  - modo programar en TypeScript:
+    - plan de 5 pasos con la auxiliar separada;
+    - un paso dirigido que avisó "tu paso no dice cómo importar";
+    - un PR en 2 porciones, ya probado contra los casos (3/3);
+    - el probador rechazó una entrada que no recorría la porción y explicó un resultado distinto;
+    - al quedar 🟢, se guardó en el repertorio con su commit.
+  - El prompt del chat se ajustó porque la IA pedía permiso en vez de proponer las tareas.
+- **Revisión independiente:** encontró 12 problemas, corregidos con tests `[rev10]`. Los principales:
+  - **la IA podía aprobar porciones del probador** (las propuestas estaban en `.cai/cache`, que no vigilaba el snapshot). Ahora se vigilan, y lo que solo hace el humano se **rechaza antes de correr**;
+  - la forma de la pregunta podía cambiar lo que se registraba ("¿Mantienes…?" con "Sí" retractaba). Ahora: opciones exactas, sin multiSelect, texto completo, sin "sí";
+  - el modo programar no funcionaba en Python;
+  - las marcas cambiaban código sin `;`;
+  - un error con otro mensaje contaba como acierto;
+  - se podía insertar una propuesta distinta de la que viste;
+  - las posiciones de los mensajes del chat se corrían.
+- **Pendiente:**
+  - reescribir una función entera ya existente en modo programar (hoy son funciones nuevas o pasos);
+  - en JS, una entrada que solo evalúa la condición de un `else if` cuenta como que recorre la porción;
+  - cola de revisiones visible en el panel;
+  - completar el "?" de un test al decidir.
+- Selftest: 193/193.

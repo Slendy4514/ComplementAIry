@@ -4,7 +4,8 @@ import path from "node:path";
 import { checkBash } from "./bash.js";
 import { makeZoner, type Zoner } from "./config.js";
 import { langFor } from "./lang.js";
-import { checkLeftovers, checkSnapshot, takeSnapshot } from "./snapshot.js";
+import { registrarRespuestas, respuestasInventadas, validarPreguntaCai } from "./confirmar.js";
+import { checkLeftovers, checkSnapshot, soloHumano, takeSnapshot } from "./snapshot.js";
 import { snippetPolicy } from "./snippets.js";
 import { verifyCommentOnly } from "./verify.js";
 
@@ -13,6 +14,7 @@ export interface HookInput {
   hook_event_name: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
+  tool_response?: unknown;
   tool_use_id?: string;
   session_id?: string;
   cwd?: string;
@@ -162,10 +164,22 @@ export async function runHook(input: HookInput, root: string): Promise<HookOutpu
 
   if (input.hook_event_name === "PreToolUse") {
     if (["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(tool)) return preEdit(z, tool, ti);
+    // Lo que solo decides tú se registra con TU respuesta: una pregunta con respuestas ya puestas no vale.
+    if (tool === "AskUserQuestion") {
+      if (respuestasInventadas(ti)) return deny("la pregunta ya traía respuestas: las respuestas las da el humano con un clic.");
+      for (const q of (ti.questions ?? []) as { header?: string }[]) {
+        if (!/^cai:/i.test(q.header ?? "")) continue;
+        const malo = validarPreguntaCai(root, q);
+        if (malo) return deny(`pregunta ${q.header}: ${malo}.`);
+      }
+      return null;
+    }
     if (tool === "Bash") {
       const cmd = String(ti.command ?? "");
       const v = checkBash(cmd, z.config.bash.permitir);
       if (!v.ok) return deny(`comando bloqueado: ${v.why}. Si hace falta, sugerile al humano el comando y que lo corra él.`);
+      const humano = soloHumano(cmd);
+      if (humano) return deny(`${humano} lo decide el programador, no tú. Pregúntaselo con tus botones (AskUserQuestion, encabezado cai:…; ver la skill cai) o pídele que lo haga en VSCode.`);
       // Un comando anterior sin verificar (se interrumpió antes del PostToolUse): se verifica ahora.
       const pendientes = await checkLeftovers(z);
       takeSnapshot(z, input.tool_use_id ?? "bash", cmd);
@@ -174,6 +188,12 @@ export async function runHook(input: HookInput, root: string): Promise<HookOutpu
         : null;
     }
     return null;
+  }
+
+  // Tu respuesta en los botones de Claude Code (después de tu clic): se registra lo que decidiste.
+  if (input.hook_event_name === "PostToolUse" && tool === "AskUserQuestion") {
+    const hechos = registrarRespuestas(root, ti, input.tool_response);
+    return hechos.length ? { hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: `[cai] Registrado con la respuesta del humano:\n${hechos.map((h) => `- ${h}`).join("\n")}` } } : null;
   }
 
   if ((input.hook_event_name === "PostToolUse" || input.hook_event_name === "PostToolUseFailure") && tool === "Bash") {

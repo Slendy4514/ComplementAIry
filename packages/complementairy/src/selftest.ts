@@ -37,6 +37,14 @@ import { contextoComun } from "./contexto.js";
 import { cargarDecisiones, decidir, proponerDecisiones, retractar } from "./decisiones.js";
 import { actualizarConImpacto } from "./impacto.js";
 import { cargarChat, conversar as conversarProyecto } from "./chat.js";
+import { corregir } from "./correcciones.js";
+import { aplicarPropuesta, crearConversacion, cargarConversacion, listarConversaciones } from "./chat.js";
+import { confirmarObjetivos, leerObjetivos, objetivosHonestos } from "./entender.js";
+import { contextoIdeas, descartarIdea, registrarIdeas } from "./ideas.js";
+import { definirContrato, editarPlan, pasoDirigido, planFuncion, probarPorcion, propuestaPR, registrarInsercion, validarContrato } from "./programar.js";
+import { buscarEnRepertorio, cargarRepertorio } from "./repertorio.js";
+import { entenderFuncion, marcarObjetivo } from "./objetivoFuncion.js";
+
 import { leerVeredictos, revisarCompleto } from "./revisionCompleta.js";
 import { corta } from "./rapida.js";
 import { hoy, resumenSesion } from "./resumenSesion.js";
@@ -1072,7 +1080,9 @@ CASES.push(
     run: async (r) => {
       actualizarMemoria(r, (m) => m.abiertas.push({ p: "¿Moneda?", r: "" }));
       const antes = fs.readFileSync(path.join(r, ".cai/conocimiento.md"), "utf8");
-      await bash(r, "cai memoria responder 1 CLP", "m1");
+      // Desde v0.10 se rechaza antes de correr; si igual corriera (otra forma de invocarlo), se revierte.
+      const pre = await bash(r, "cai memoria responder 1 CLP", "m1");
+      if (JSON.stringify(pre).includes("deny")) return fs.readFileSync(path.join(r, ".cai/conocimiento.md"), "utf8") === antes;
       responderPregunta(r, 1, "CLP");
       const out = await postBash(r, "m1");
       return out !== null && fs.readFileSync(path.join(r, ".cai/conocimiento.md"), "utf8") === antes;
@@ -1604,7 +1614,7 @@ CASES.push(
       const p = calls[0]!.prompt;
       const rap = await rapida(r, "src/cuota.ts", 3);
       const cfg = (await import("./config.js")).loadConfig(r);
-      const base = { ...cfg, modo: "programar" as const, modos: { porCarpeta: { "src/**": "aprender", "src/legacy/": "programar" }, porArchivo: { "src/cuota.ts": "programar" }, porFuncion: { "src/cuota.ts:cuota": "aprender" } } };
+      const base = { ...cfg, modo: "sugerir" as const, modos: { porCarpeta: { "src/**": "aprender", "src/legacy/": "sugerir" }, porArchivo: { "src/cuota.ts": "sugerir" }, porFuncion: { "src/cuota.ts:cuota": "aprender" } } };
       const orden = [
         modoEfectivo(base, "src/otra.ts").origen,
         modoEfectivo(base, "src/cuota.ts").origen,
@@ -1612,7 +1622,7 @@ CASES.push(
         modoEfectivo(base, "lib/x.ts").modo,
         modoEfectivo(base, "src/legacy/v.ts").modo, // la carpeta más específica gana, aunque se haya agregado después
       ];
-      return p.includes("MODO ESCALERA") && p.includes("todavía no sugieras snippets") && rap.motivo!.startsWith("modo aprender") && !!nota && orden.join(",") === "carpeta,archivo,aprender,programar,programar";
+      return p.includes("MODO ESCALERA") && p.includes("todavía no sugieras snippets") && rap.motivo!.startsWith("modo aprender") && !!nota && orden.join(",") === "carpeta,archivo,aprender,sugerir,sugerir";
     },
   },
   {
@@ -1875,10 +1885,10 @@ CASES.push(
       conNotas(r);
       await actualizarIndice(r);
       const antes = sha(path.join(r, "src/cuota.ts"));
-      const calls = fakeLLM(() => ({ texto: "Sigue con validar.", decisiones: [{ pregunta: "¿Moneda con decimales?", opciones: [{ opcion: "sí", consecuencia: "" }, { opcion: "no", consecuencia: "" }], recomendada: "no" }], tareas: [{ titulo: "Validar meses", archivo: "src/cuota.ts", detalle: "" }] }));
+      const calls = fakeLLM(() => ({ texto: "Sigue con validar.", decisiones: [{ pregunta: "¿Moneda con decimales?", opciones: [{ opcion: "sí", consecuencia: "" }, { opcion: "no", consecuencia: "" }], recomendada: "no" }], cambiosTareas: [{ accion: "crear", id: "", titulo: "Validar meses", archivo: "src/cuota.ts", detalle: "" }], correcciones: [] }));
       const res = await conversarProyecto(r, "¿por dónde sigo?");
       const c = calls[0]!;
-      return !c.sinHerramientas && c.prompt.includes("cuota(monto: number") && res.decisiones.length === 1 && res.respuesta.tareas?.length === 1 && cargarChat(r).length === 2 && sha(path.join(r, "src/cuota.ts")) === antes;
+      return !c.sinHerramientas && c.prompt.includes("cuota(monto: number") && res.decisiones.length === 1 && res.respuesta.cambiosTareas?.length === 1 && cargarChat(r).length === 2 && sha(path.join(r, "src/cuota.ts")) === antes;
     },
   },
   {
@@ -2003,6 +2013,261 @@ CASES.push(
     },
   },
   {
+    name: "[0.10] modos: una configuración vieja con 'programar' se lee como 'sugerir' (nadie pasa al nuevo modo sin elegirlo)",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ modo: "programar", modos: { porArchivo: { "src/a.ts": "programar", "src/b.ts": "aprender" } } }));
+      const { loadConfig } = await import("./config.js");
+      const c1 = loadConfig(r);
+      const viejo = c1.modo === "sugerir" && modoEfectivo(c1, "src/a.ts").modo === "sugerir" && modoEfectivo(c1, "src/b.ts").modo === "aprender";
+      fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ modosVersion: 2, modo: "programar" }));
+      const c2 = loadConfig(r);
+      return viejo && c2.modo === "programar" && modoEfectivo(c2, "x.ts").c.proponerSolucion && !modoEfectivo(c1, "x.ts").c.proponerSolucion;
+    },
+  },
+  {
+    name: "[0.10] la guía no adelanta lo ya escrito: si lo que sugiere está en otra línea, pide lo que falta (y si insiste, nada)",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/g.ts"), "export function g(a: number) {\n  const b = a * 2;\n\n  return b;\n}\n");
+      let n = 0;
+      const calls = fakeLLM((o) => (o.kind === "rapida" ? (++n === 1 ? { texto: "devuelve b", yaEscrito: 4 } : { texto: "valida que a sea número", yaEscrito: 0 }) : respNota()));
+      const a = await rapida(r, "src/g.ts", 3, { aPedido: true });
+      n = 0;
+      fakeLLM((o) => (o.kind === "rapida" ? { texto: "devuelve b", yaEscrito: 4 } : respNota()));
+      fs.writeFileSync(path.join(r, "src/g.ts"), "export function g(a: number) {\n  const b = a * 3;\n\n  return b;\n}\n");
+      const b = await rapida(r, "src/g.ts", 3, { aPedido: true });
+      return a.texto === "valida que a sea número" && calls[0]!.prompt.includes("(ya escrito)") && b.texto === "";
+    },
+  },
+  {
+    name: "[0.10] cada comentario en su nota: lo que la IA dice de OTRA función va a la nota del archivo",
+    run: async (r) => {
+      conNotas(r, { tests: { avisarSinTests: false } });
+      fs.writeFileSync(path.join(r, "src/d.ts"), DOS);
+      fakeLLM((o) =>
+        o.kind === "verificar:plan-ciego" ? { pasos: ["p"], casos_borde: ["c"] } : { que_hace: "x", deberia: "y", estado: "casi", resumen: "ok", mejoras: [{ texto: "valida x = 0", funcion: "" }, { texto: "b no valida y", funcion: "b" }, { texto: "falta un README", funcion: "archivo" }], que_hacer: "", decisiones: [], otra_mirada: "" },
+      );
+      await verificar(r, "src/d.ts", { funcion: "a" });
+      const notas = cargarNotas(r, "src/d.ts");
+      const de = (k: string) => notas.filter((n) => n.ancla.funcion === k).flatMap((n) => n.hilo.map((m) => m.texto)).join("\n");
+      const arch = notas.filter((n) => n.alcance === "archivo").flatMap((n) => n.hilo.map((m) => m.texto)).join("\n");
+      return de("a").includes("valida x = 0") && !de("a").includes("b no valida") && arch.includes("Sobre `b`: b no valida y") && arch.includes("falta un README");
+    },
+  },
+  {
+    name: "[0.10] correcciones: lo que corriges del proyecto manda y el panorama no lo pisa; toda la IA lo recibe",
+    run: async (r) => {
+      conNotas(r);
+      fs.mkdirSync(path.join(r, ".cai/cache"), { recursive: true });
+      fs.writeFileSync(path.join(r, ".cai/cache/panorama.json"), JSON.stringify({ resumenes: { "src/cuota.ts": { hash: "x", resumen: "Una API REST de préstamos." } } }));
+      fs.writeFileSync(path.join(r, ".cai/estructura.json"), JSON.stringify({ resumen: "R", modulos: [{ archivo: "src/cuota.ts", responsabilidad: "servidor", funciones: [] }], orden: [] }));
+      corregir(r, { tipo: "modulo", archivo: "src/cuota.ts", despues: "Calcula la cuota de un préstamo (CLI, no API).", origen: "t" });
+      corregir(r, { tipo: "estructura", archivo: "src/cuota.ts", despues: "cálculo puro, sin red", origen: "t" });
+      actualizarMemoria(r, () => {});
+      const mem = fs.readFileSync(path.join(r, ".cai/conocimiento.md"), "utf8");
+      const est = JSON.parse(fs.readFileSync(path.join(r, ".cai/estructura.json"), "utf8")) as { modulos: { responsabilidad: string }[] };
+      const ctx = contextoComun(r, "src/cuota.ts");
+      return mem.includes("CLI, no API") && !mem.includes("API REST") && est.modulos[0]!.responsabilidad === "cálculo puro, sin red" && ctx.includes("MANDAN") && ctx.includes("CLI, no API");
+    },
+  },
+  {
+    name: "[0.10][seg] chat: varias conversaciones, eliges la IA, y las tareas/correcciones que propone se aplican SOLO con tu clic",
+    run: async (r) => {
+      conNotas(r);
+      agregarTareas(r, [{ titulo: "Validar meses", origen: "manual" }]);
+      const calls = fakeLLM(() => ({ texto: "Ok.", decisiones: [], cambiosTareas: [{ accion: "hecha", id: "t1", titulo: "Validar meses", archivo: "", detalle: "" }, { accion: "crear", id: "", titulo: "Agregar tabla", archivo: "src/cuota.ts", detalle: "" }], correcciones: [{ tipo: "proyecto", archivo: "", antes: "API", despues: "Es una CLI." }] }));
+      const c1 = await crearConversacion(r, { modelo: "chico" });
+      const res = await conversarProyecto(r, "ya terminé de validar; voy a hacer la tabla", { conversacion: c1.id });
+      const sinAplicar = cargarTareas(r).length === 1 && !cargarTareas(r)[0]!.hecha;
+      await aplicarPropuesta(r, c1.id, res.mensaje, "tarea", 0);
+      await aplicarPropuesta(r, c1.id, res.mensaje, "tarea", 1);
+      await aplicarPropuesta(r, c1.id, res.mensaje, "correccion", 0);
+      const otra = await crearConversacion(r);
+      const lista = listarConversaciones(r);
+      const marcado = cargarConversacion(r, c1.id).mensajes.find((x) => x.id === res.mensaje)!.cambiosTareas!.every((x) => !!x.aplicado);
+      const usoChico = calls[0]!.model === "claude-haiku-4-5";
+      return sinAplicar && cargarTareas(r).find((t) => t.id === "t1")!.hecha && cargarTareas(r).some((t) => t.titulo === "Agregar tabla") && contextoComun(r, "").includes("Es una CLI.") && marcado && lista.length === 2 && !!otra && usoChico && generadosPor(`cai chat --aplicar ${c1.id} 1 tarea 0`) === null;
+    },
+  },
+  {
+    name: "[0.10][seg] entender el proyecto: borrador → 'creo que entendí' → TÚ confirmas; la IA no puede confirmar ni tocar lo confirmado",
+    run: async (r) => {
+      conNotas(r);
+      fakeLLM(() => ({ texto: "Creo que ya entendí: …", preguntas: [], borrador: { resumen: "Calcular cuotas de préstamos para una cooperativa.", objetivos: ["cuota fija"], usuarios: "socios", criterios: ["cuota correcta al centavo", "tabla de amortización"], restricciones: [], fueraDeAlcance: ["pagos online"], dudas: [] }, creoQueEntendi: true }));
+      const r1 = await conversarProyecto(r, "es para la cooperativa", { tipo: "entender" });
+      const borrador = leerObjetivos(r);
+      const bufA = fs.readFileSync(path.join(r, ".cai/objetivos.json"));
+      confirmarObjetivos(r);
+      const bufB = fs.readFileSync(path.join(r, ".cai/objetivos.json"));
+      // Un comando de la IA no puede confirmar (de borrador a confirmado) ni tocar lo confirmado.
+      const honesto = objetivosHonestos(null, bufA) && !objetivosHonestos(bufA, bufB) && !objetivosHonestos(bufB, Buffer.from(bufB.toString().replace("socios", "todos")));
+      const ctx = contextoComun(r, "src/cuota.ts");
+      return r1.respuesta.creeEntendido === true && borrador.estado === "entendiendo" && leerObjetivos(r).estado === "entendido" && honesto && ctx.includes("confirmados por el programador") && ctx.includes("no lo propongas") && generadosPor("cai entender confirmar") === null;
+    },
+  },
+  {
+    name: "[0.10][seg] Claude Code: lo que solo decides tú se registra con TU respuesta (si ya trae respuestas, se rechaza; si el texto no coincide, no se registra)",
+    run: async (r) => {
+      conNotas(r);
+      const [d] = proponerDecisiones(r, [{ pregunta: "¿Un monto negativo lanza error?", opciones: [{ opcion: "Lanzar error", consecuencia: "" }, { opcion: "Devolver 0", consecuencia: "" }] }], {}, "t");
+      const q = { question: "¿Un monto negativo lanza error?", header: `cai:${d!.id}`, options: [{ label: "Lanzar error (Recomendado)" }, { label: "Devolver 0" }] };
+      const pre = await runHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [q], answers: { [q.question]: "Devolver 0" } } }, r);
+      const preOk = await runHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [q] } }, r);
+      // Texto engañoso (no incluye la decisión): no se registra.
+      const engano = { ...q, question: "¿Seguimos?" };
+      await runHook({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [engano] }, tool_response: { questions: [engano], answers: { "¿Seguimos?": "Devolver 0" } } }, r);
+      const sigue = cargarDecisiones(r)[0]!.estado === "pendiente";
+      const post = await runHook({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [q] }, tool_response: { questions: [q], answers: { [q.question]: "Lanzar error (Recomendado)" } } }, r);
+      const dd = cargarDecisiones(r)[0]!;
+      const ok = dd.estado === "vigente" && dd.eleccion === "Lanzar error";
+      // Retractar con su encabezado (opciones exactas).
+      const qr = { question: "¿Retracto '¿Un monto negativo lanza error?'?", header: `cai:-${d!.id}`, options: [{ label: "Retractar" }, { label: "Mantener" }] };
+      await runHook({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [qr] }, tool_response: { answers: { [qr.question]: "Retractar" } } }, r);
+      const init0 = fs.readFileSync(path.join(r, ".cai/config.json"), "utf8");
+      return JSON.stringify(pre).includes("deny") && preOk === null && sigue && ok && JSON.stringify(post).includes("decidiste") && cargarDecisiones(r)[0]!.estado === "retractada" && !!init0;
+    },
+  },
+  {
+    name: "[0.10] ideas: salen del panorama, las descartadas no vuelven, 'aprender' solo si lo activas",
+    run: async (r) => {
+      conNotas(r);
+      const a = registrarIdeas(r, [{ tipo: "funcionalidad", titulo: "Exportar a CSV", porque: "x", archivos: [] }, { tipo: "aprender", titulo: "Aprende redondeo bancario", porque: "y", archivos: [] }]);
+      descartarIdea(r, a[0]!.id);
+      const b = registrarIdeas(r, [{ tipo: "funcionalidad", titulo: "exportar a csv", porque: "x", archivos: [] }, { tipo: "mejora", titulo: "Tests de bordes", porque: "z", archivos: [] }]);
+      conNotas(r, { ideas: { aprender: true } });
+      const c = registrarIdeas(r, [{ tipo: "aprender", titulo: "Aprende redondeo bancario", porque: "y", archivos: [] }]);
+      return a.length === 1 && b.length === 1 && b[0]!.titulo === "Tests de bordes" && c.length === 1 && contextoIdeas(r).includes("DESCARTÓ") && generadosPor("cai ideas descartar i1") === null;
+    },
+  },
+  {
+    name: "[0.10] programar (PR): tus casos (con borde), propuesta probada contra ellos, y el probador exige que TU entrada recorra la porción",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/p.js"), "function cuota(m, n) {\n  return 0;\n}\n");
+      const sinBorde = validarContrato([{ llamada: "cuota(100, 2)", esperado: "50" }, { llamada: "cuota(90, 3)", esperado: "30" }], "cuota", "javascript");
+      await definirContrato(r, "src/p.js", "cuota", [{ llamada: "cuota(100, 2)", esperado: "50" }, { llamada: "cuota(100, 0)", esperado: "error: meses" }]);
+      const codigo = "function cuota(m, n) {\n  if (n <= 0) {\n    throw new Error('meses inválido: ' + n);\n  }\n  return m / n;\n}";
+      fakeLLM((o) => (o.kind === "programar:pr" ? { codigo, porciones: [{ desde: 2, hasta: 4, paso: 1, porque: "valida" }, { desde: 5, hasta: 5, paso: 2, porque: "divide" }], cambios: [] } : { texto: "explicación" }));
+      const antes = sha(path.join(r, "src/p.js"));
+      const p = await propuestaPR(r, "src/p.js", "cuota");
+      const contratoOk = p.contrato!.every((c) => c.pasa);
+      // Porción 1 (la validación, una rama): una entrada que no entra en el if no sirve.
+      const noToca = await probarPorcion(r, "src/p.js", "cuota", 0, "cuota(100, 2)", "50");
+      const toca = await probarPorcion(r, "src/p.js", "cuota", 0, "cuota(100, -1)", "error");
+      let bloqueado = false;
+      try {
+        await registrarInsercion(r, "src/p.js", "cuota");
+      } catch {
+        bloqueado = true; // falta probar la porción 2
+      }
+      const mal = await probarPorcion(r, "src/p.js", "cuota", 1, "cuota(9, 3)", "4");
+      const bien = await probarPorcion(r, "src/p.js", "cuota", 1, "cuota(9, 3)", "3");
+      const reg = await registrarInsercion(r, "src/p.js", "cuota");
+      return (
+        !!sinBorde && contratoOk && !noToca.prueba.toca && noToca.porcion.aprobada === false && toca.prueba.toca && toca.prueba.acierto && bloqueado &&
+        mal.prueba.toca && !mal.prueba.acierto && mal.prueba.explicacion === "explicación" && bien.prueba.acierto && reg.porciones === 2 && reg.sinProbar === 0 &&
+        sha(path.join(r, "src/p.js")) === antes && !fs.readdirSync(path.join(r, "src")).some((f) => f.startsWith(".cai-propuesta")) &&
+        generadosPor("cai programar probar src/p.js --funcion cuota --porcion 1 --entrada x --espero y") === null && generadosPor("cai programar contrato src/p.js --funcion cuota") === null
+      );
+    },
+  },
+  {
+    name: "[0.10] programar: plan de 3-5 pasos (más → auxiliar como tarea aparte), tú diriges un paso, y el repertorio guarda solo lo tuyo 🟢",
+    run: async (r) => {
+      conNotas(r, { autoria: { heredado: ["src/viejo/**"], terceros: [] } });
+      fs.writeFileSync(path.join(r, "src/p.js"), "function cuota(m, n) {\n  return 0;\n}\n");
+      fakeLLM((o) =>
+        o.kind === "programar:plan"
+          ? { pasos: [{ texto: "validar", repertorio: "" }, { texto: "usar validarEntradas", repertorio: "" }, { texto: "dividir", repertorio: "" }], separar: { nombre: "validarEntradas", proposito: "chequea m y n" } }
+          : o.kind === "programar:paso"
+            ? { codigo: "  if (n <= 0) throw new Error('n');", despues_de: "function cuota(m, n) {", falta: "no dice qué hacer si m es negativo", explicacion: "lanza si n no es positivo" }
+            : o.kind === "verificar:plan-ciego" ? { pasos: ["p"], casos_borde: ["c"] } : { que_hace: "x", deberia: "y", estado: "lista", resumen: "divide m en n cuotas", mejoras: [], que_hacer: "", decisiones: [], otra_mirada: "" },
+      );
+      const pl = await planFuncion(r, "src/p.js", "cuota");
+      let seis = "";
+      try {
+        await editarPlan(r, "src/p.js", "cuota", ["a", "b", "c", "d", "e", "f"]);
+      } catch (e) {
+        seis = String(e);
+      }
+      const paso = await pasoDirigido(r, "src/p.js", "cuota", 1, "si n no es positivo, lanza error");
+      await verificar(r, "src/p.js", { funcion: "cuota" });
+      fs.mkdirSync(path.join(r, "src/viejo"), { recursive: true });
+      fs.writeFileSync(path.join(r, "src/viejo/h.js"), "function heredada(x) {\n  return x;\n}\n");
+      await verificar(r, "src/viejo/h.js", { funcion: "heredada" });
+      const rep = cargarRepertorio();
+      return pl.plan.pasos.length === 3 && pl.tarea === "validarEntradas" && cargarTareas(r).some((t) => t.titulo.includes("validarEntradas")) && seis.includes("dos funciones") === false && seis.includes("Separa") && paso.falta!.includes("negativo") && paso.linea === 1 && rep.length === 1 && rep[0]!.nombre === "cuota" && buscarEnRepertorio(r, "cuota en cuotas").length === 1;
+    },
+  },
+  {
+    name: "[0.10] objetivo de una función: la IA arma criterios, tú confirmas, y '¿quedó lista?' propone darla por terminada (tu clic)",
+    run: async (r) => {
+      conNotas(r, { tests: { avisarSinTests: false } });
+      fs.writeFileSync(path.join(r, "src/d.ts"), DOS);
+      const calls = fakeLLM((o) =>
+        o.kind === "entender" ? { objetivo: "Divide 10 por x.", criterios: ["con x = 0 lanza error"], preguntas: [], creoQueEntendi: true } : o.kind === "verificar:plan-ciego" ? { pasos: ["p"], casos_borde: ["c"] } : { que_hace: "x", deberia: "y", estado: "lista", resumen: "ok", mejoras: [], que_hacer: "", decisiones: [], otra_mirada: "" },
+      );
+      const e = await entenderFuncion(r, "src/d.ts", "a", "que no divida por cero");
+      await marcarObjetivo(r, "src/d.ts", "a", "confirmar");
+      await verificar(r, "src/d.ts", { funcion: "a" });
+      const vp = calls.find((c) => c.kind === "verificar")!.prompt;
+      const n = cargarNotas(r, "src/d.ts").find((x) => x.ancla.funcion === "a")!;
+      await marcarObjetivo(r, "src/d.ts", "a", "terminado");
+      const n2 = cargarNotas(r, "src/d.ts").find((x) => x.ancla.funcion === "a")!;
+      return e.creoQueEntendi && vp.includes("Objetivo CONFIRMADO") && n.hilo.some((m) => m.texto.includes("Creo que cumple su objetivo")) && !!n2.objetivo?.terminada && generadosPor("cai entender terminado --funcion src/d.ts:a") === null;
+    },
+  },
+  {
+    name: "[rev10][seg] lo que solo hace el humano se rechaza ANTES de correr, y la IA no puede aprobar porciones del probador (ni por otra vía)",
+    run: async (r) => {
+      conNotas(r);
+      const pre = (command: string) => runHook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command }, tool_use_id: "x" }, r);
+      const bloqueados = await Promise.all(["cai programar probar src/a.js --funcion f --porcion 1 --entrada 'f(1)' --espero 1", "cai 'decisiones' decidir d1 a", "node dist/cli.js chat --aplicar c1 m1 tarea 0", "cai repertorio borrar x", "cai entender confirmar", "cai memoria corregir --proyecto --texto x"].map(pre));
+      const libre = await pre("cai programar pr src/a.js --funcion f");
+      const prop = (aprobada: boolean) => Buffer.from(JSON.stringify({ porciones: [{ aprobada, pruebas: aprobada ? [{}] : [] }] }));
+      const g = generadosPor("cai programar pr src/a.js --funcion f")!;
+      return bloqueados.every((b) => JSON.stringify(b).includes("deny")) && !JSON.stringify(libre).includes("deny") && g(".cai/cache/propuestas/x.json", null, prop(false)) && !g(".cai/cache/propuestas/x.json", prop(false), prop(true)) && generadosPor("cai programar probar a --funcion f") === null;
+    },
+  },
+  {
+    name: "[rev10][seg] AskUserQuestion: sin multiSelect, opciones exactas, texto completo; un 'Sí' ambiguo no registra nada",
+    run: async (r) => {
+      conNotas(r);
+      const [d] = proponerDecisiones(r, [{ pregunta: "¿Redondeo por fila?", opciones: [{ opcion: "Sí", consecuencia: "" }, { opcion: "No", consecuencia: "" }] }], {}, "t");
+      decidir(r, d!.id, "Sí");
+      const pre = (q: object) => runHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [q] } }, r);
+      const multi = await pre({ question: "¿Retracto «¿Redondeo por fila?»?", header: `cai:-${d!.id}`, multiSelect: true, options: [{ label: "Retractar" }, { label: "Mantener" }] });
+      const ambiguas = await pre({ question: "¿Mantienes «¿Redondeo por fila?»?", header: `cai:-${d!.id}`, options: [{ label: "Sí" }, { label: "No" }] });
+      const fin = await pre({ question: "¿Seguimos?", header: "cai:fin", options: [{ label: "Dar por terminado" }, { label: "Seguir" }] });
+      // Aunque llegara al PostToolUse (sin el Pre), un "Sí" no retracta.
+      const q = { question: "¿Mantienes «¿Redondeo por fila?»?", header: `cai:-${d!.id}`, options: [{ label: "Sí" }, { label: "No" }] };
+      await runHook({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [q] }, tool_response: { answers: { [q.question]: "Sí" } } }, r);
+      return [multi, ambiguas, fin].every((x) => JSON.stringify(x).includes("deny")) && cargarDecisiones(r).find((x) => x.id === d!.id)!.estado === "vigente";
+    },
+  },
+  {
+    name: "[rev10] probador: las marcas no cambian el código (sin ';', if sin llaves) y un error con OTRO mensaje no es acierto",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/m.js"), "function f(x) {\n  return 0\n}\n");
+      const js = 'function f(x) {\n  const y = x\n  if (y < 0) throw new Error("neg: " + y)\n  else if (y === 0) return "cero"\n  return y * 2\n}';
+      fakeLLM((o) => (o.kind === "programar:pr" ? { codigo: js, porciones: [{ desde: 2, hasta: 4, paso: 1, porque: "v" }, { desde: 5, hasta: 5, paso: 2, porque: "d" }], cambios: [] } : { texto: "x" }));
+      await definirContrato(r, "src/m.js", "f", [{ llamada: "f(2)", esperado: "4" }, { llamada: "f(-1)", esperado: "error: neg" }]);
+      const p = await propuestaPR(r, "src/m.js", "f");
+      const otro = await probarPorcion(r, "src/m.js", "f", 0, "f(-3)", "error: otra cosa");
+      const bien = await probarPorcion(r, "src/m.js", "f", 0, "f(-3)", "error: neg");
+      return p.contrato!.every((c) => c.pasa) && otro.prueba.toca && !otro.prueba.acierto && bien.prueba.acierto && !fs.readdirSync(path.join(r, "src")).some((f) => /cai_propuesta|__pycache__/.test(f));
+    },
+  },
+  {
+    name: "[rev10] Claude Code puede definir el objetivo de una función (cai entender --funcion), pero no confirmarlo",
+    run: async (r) => {
+      const n = (confirmado?: string) => Buffer.from(JSON.stringify({ notas: [{ id: "n1", objetivo: { texto: "x", criterios: [], ...(confirmado ? { confirmado } : {}) } }] }));
+      const g = generadosPor('cai entender --funcion src/a.ts:f --texto "que no divida por cero"')!;
+      return g(".cai/notas/src__a.ts.json", n(), n()) && !g(".cai/notas/src__a.ts.json", n(), n("2026-10-10")) && generadosPor("cai entender confirmar --funcion src/a.ts:f") === null;
+    },
+  },
+  {
     name: "[0.9] la guía no se corta a mitad de palabra; 'hoy' detecta lo que cambió y 'sesión' mide lo hecho",
     run: async (r) => {
       const larga = "valida que el destino no esté vacío y que la carpeta de destino exista antes de mover el archivo a su nuevo lugar";
@@ -2034,6 +2299,7 @@ export async function runSelftest(log: (s: string) => void = console.log): Promi
   for (const c of CASES) {
     const root = project();
     process.env.CAI_HOME = path.join(root, ".home");
+    process.env.CAI_REPERTORIO = path.join(root, ".home", "repertorio"); // nunca el repertorio real
     process.env.CAI_VISTA = "comentarios"; // los escenarios clásicos usan comentarios; los de notas lo declaran
     let pass = false;
     try {

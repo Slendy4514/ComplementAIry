@@ -27,6 +27,11 @@ if [ -n "$USUARIO" ] && [ "$USUARIO" != "root" ] && id "$USUARIO" >/dev/null 2>&
 fi
 
 mkdir -p "$DEST"
+
+# Repertorio personal (entre proyectos): un volumen de Docker se monta aquí (ver devcontainer-feature.json).
+# Un volumen nuevo copia el dueño de esta carpeta: queda escribible para el usuario del contenedor.
+mkdir -p /usr/local/share/complementairy/repertorio 2>/dev/null || true
+if [ -n "${USUARIO:-}" ] && [ "$USUARIO" != "root" ] && id "$USUARIO" >/dev/null 2>&1; then chown "$USUARIO" /usr/local/share/complementairy/repertorio 2>/dev/null || true; fi
 if [ "$EXTENSION" = "true" ] && [ -f "$DIR/complementairy.vsix" ]; then
   cp "$DIR/complementairy.vsix" "$DEST/complementairy.vsix"
 fi

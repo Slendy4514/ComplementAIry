@@ -13,7 +13,7 @@ export interface Mensaje {
   texto: string;
   fecha: string;
   /** De dónde salió (para saber qué pasó): tipo de pedido, modelo y costo. */
-  meta?: { kind?: string; modelo?: string; costo?: number };
+  meta?: { kind?: string; modelo?: string; costo?: number; pedido?: string };
 }
 
 export interface Snippet {
@@ -51,6 +51,14 @@ export interface Nota {
   turnos?: number;
   /** Varios @ia? pueden caer en la misma nota (una por función): turnos respondidos por cada uno. */
   fuentes?: Record<string, number>;
+  /** Modo programar: el plan de pasos de la función (3 a 5, por idea) que editas tú. */
+  plan?: { pasos: { texto: string; hecho?: boolean; repertorio?: string }[]; separar?: { nombre: string; proposito: string } | null; fecha: string };
+  /** Modo programar: los casos que definiste (el resultado esperado lo pones tú). */
+  contrato?: { llamada: string; esperado: string }[];
+  /** Se insertó desde una propuesta (modo programar): cómo se probó. */
+  programada?: { fecha: string; tipo: "dirigido" | "pr" | "adaptada"; porciones: number; pruebas: number; aciertosPrimera: number; sinProbar: number };
+  /** Objetivo de la función (etapa de entendimiento): qué debe hacer y cuándo está terminada. */
+  objetivo?: { texto: string; criterios: string[]; confirmado?: string; terminada?: string; preguntas?: string[] };
   /** Modo de ESTA función ("programar" / "aprender"); si no está, hereda del archivo, carpeta o proyecto. */
   modo?: string;
   /** Escalones de ayuda que ya se dieron en esta nota (para no volver a ofrecerlos). */

@@ -56,6 +56,7 @@ interface Deuda {
   testsApagados: number;
   sinTests: string[];
   decisionesPendientes: number;
+  sinEntender?: string[];
 }
 
 interface Hoy {
@@ -65,6 +66,25 @@ interface Hoy {
   empezaronAFallar: string[];
   decisionesPendientes: number;
   conviene: string[];
+  diferida?: { archivo: string; funcion: string } | null;
+  creeTerminado?: boolean;
+}
+
+interface Idea {
+  id: string;
+  tipo: "funcionalidad" | "mejora" | "aprender";
+  titulo: string;
+  porque: string;
+  archivos: string[];
+  tarea?: string;
+  descartada?: boolean;
+}
+
+interface Objetivos {
+  estado: string;
+  resumen: string;
+  criterios: { id: string; texto: string }[];
+  creeEntendido?: boolean;
 }
 
 interface Actividad {
@@ -104,7 +124,8 @@ interface Tarea {
 }
 
 type Nodo =
-  | { k: "grupo"; id: "pendientes" | "hechas" | "proyecto" | "estructura" | "preguntas" | "ia" | "actividad" | "decisiones" | "funciones" | "deuda" | "visita"; label: string }
+  | { k: "grupo"; id: "pendientes" | "hechas" | "proyecto" | "estructura" | "preguntas" | "ia" | "actividad" | "decisiones" | "funciones" | "deuda" | "visita" | "ideas" | "objetivos"; label: string }
+  | { k: "idea"; i: Idea }
   | { k: "decision"; d: Decision }
   | { k: "archivoFn"; rel: string; fns: FuncionIdx[] }
   | { k: "funcion"; f: FuncionIdx }
@@ -256,7 +277,7 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
       case "grupo": {
         const abierto = ["pendientes", "proyecto", "preguntas", "ia", "visita"].includes(n.id) || (n.id === "decisiones" && n.label.includes("por decidir"));
         const t = new vscode.TreeItem(n.label, abierto ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
-        t.iconPath = new vscode.ThemeIcon({ pendientes: "list-ordered", hechas: "pass", proyecto: "project", estructura: "type-hierarchy", preguntas: "question", ia: "sparkle", actividad: "history", decisiones: "law", funciones: "symbol-method", deuda: "checklist", visita: "bell" }[n.id]);
+        t.iconPath = new vscode.ThemeIcon({ pendientes: "list-ordered", hechas: "pass", proyecto: "project", estructura: "type-hierarchy", preguntas: "question", ia: "sparkle", actividad: "history", decisiones: "law", funciones: "symbol-method", deuda: "checklist", visita: "bell", ideas: "lightbulb", objetivos: "target" }[n.id]);
         if (n.id === "estructura" && this.estructura) {
           t.description = this.estructura.resumen;
           t.tooltip = new vscode.MarkdownString(`**Estructura propuesta**\n\n${this.estructura.resumen}\n\n**Por dónde empezar:**\n${this.estructura.orden.map((o, i) => `${i + 1}. ${o}`).join("\n")}`);
@@ -363,6 +384,7 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
       case "archivoFn": {
         const t = new vscode.TreeItem(n.rel, vscode.TreeItemCollapsibleState.Collapsed);
         t.id = `mapa:${n.rel}`;
+        t.contextValue = "cai-archivo-mapa";
         const c = (e: string) => n.fns.filter((f) => f.estado === e).length;
         t.description = `${n.fns.length} funciones · 🟢${c("lista")} 🟡${c("casi")} 🔴${c("falta")}`;
         t.iconPath = vscode.ThemeIcon.File;
@@ -378,6 +400,16 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
         t.command = { command: "cai.irA", title: "Ir", arguments: [cwd, f.archivo, f.linea] };
         return t;
       }
+      case "idea": {
+        const t = new vscode.TreeItem(n.i.titulo);
+        t.id = `idea:${n.i.id}`;
+        t.description = n.i.porque;
+        t.iconPath = new vscode.ThemeIcon(n.i.tipo === "funcionalidad" ? "rocket" : n.i.tipo === "mejora" ? "wrench" : "mortar-board");
+        t.tooltip = new vscode.MarkdownString(`**${n.i.titulo}** (${n.i.tipo})\n\n${n.i.porque}${n.i.archivos.length ? `\n\nArchivos: ${n.i.archivos.join(", ")}` : ""}\n\nClic: ➕ convertir en tarea o ✕ no me interesa`);
+        t.contextValue = "cai-idea";
+        t.command = { command: "cai.idea.elegir", title: "Elegir", arguments: [n.i] };
+        return t;
+      }
       case "vacio":
         return new vscode.TreeItem(n.label);
     }
@@ -390,6 +422,14 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
     if (tarea) return { command: "cai.notaPanel.tarea", title: "Ver", arguments: [tarea] };
     const crear = false;
     return { command: "cai.irA", title: "Ir", arguments: [cwd, p.archivo, p.linea, p.tipo === "tarea" ? undefined : p.ref, crear] };
+  }
+
+  private leerDato<T>(cwd: string, f: string): T | undefined {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(dataDir(cwd), f), "utf8")) as T;
+    } catch {
+      return undefined;
+    }
   }
 
   getChildren(n?: Nodo): Nodo[] {
@@ -428,6 +468,11 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
           out.push({ k: "accion", label: `Panorama desactualizado: ${this.desactualizado} archivo(s) cambiaron`, icono: "history", descripcion: "actualizar", comando: { command: "cai.panorama", title: "Actualizar" } });
         if (this.estructura) out.push({ k: "grupo", id: "estructura", label: "Estructura" });
         else out.push({ k: "accion", label: "Proponer la estructura del proyecto", icono: "type-hierarchy", descripcion: "carpetas, archivos y por dónde empezar", comando: { command: "cai.estructura", title: "Estructura" } });
+        // 🎯 Objetivos (la etapa de entendimiento) y 💡 Ideas (del panorama).
+        const ob = this.leerDato<Objetivos>(cwd, "objetivos.json");
+        out.unshift({ k: "grupo", id: "objetivos", label: `🎯 Objetivos${ob ? ` (${{ entendiendo: "borrador", entendido: "✓ confirmados", reabierto: "reabiertos", terminado: "🏁 terminado" }[ob.estado] ?? ob.estado})` : " (sin definir)"}` });
+        const ideas = (this.leerDato<{ ideas: Idea[] }>(cwd, "ideas.json")?.ideas ?? []).filter((i) => !i.descartada && !i.tarea);
+        out.push({ k: "grupo", id: "ideas", label: `💡 Ideas${ideas.length ? ` (${ideas.length})` : ""}` });
         out.push({ k: "grupo", id: "preguntas", label: `Preguntas para ti${this.preguntas.length ? ` (${this.preguntas.length})` : ""}` });
         const ds = leerDecisiones(cwd);
         const pend = ds.filter((d) => d.estado === "pendiente").length;
@@ -436,7 +481,7 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
         const nDeuda = Object.keys(this.deuda).length;
         if (nDeuda) out.push({ k: "grupo", id: "deuda", label: `Pendiente por archivo (${nDeuda})` });
         const h = this.hoy;
-        if (h && (h.cambiadas.length || h.nuevas.length || h.empezaronAFallar.length || h.decisionesPendientes || h.conviene.length)) out.unshift({ k: "grupo", id: "visita", label: "Desde tu última visita" });
+        if (h && (h.cambiadas.length || h.nuevas.length || h.empezaronAFallar.length || h.decisionesPendientes || h.conviene.length || h.diferida || h.creeTerminado)) out.unshift({ k: "grupo", id: "visita", label: "Desde tu última visita" });
         return out;
       }
       if (n.id === "estructura" && this.estructura) {
@@ -457,7 +502,31 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
           ...(h.nuevas.length ? [x(`Nuevas: ${h.nuevas.map((s) => s.split(":").pop()).join(", ")}`, "add")] : []),
           ...(h.decisionesPendientes ? [x(`❓ ${h.decisionesPendientes} decisión(es) por decidir`, "question")] : []),
           ...h.conviene.map((c) => x(c, "git-commit")),
+          ...(h.diferida ? [{ k: "accion" as const, label: `🎯 Prueba diferida: ${h.diferida.funcion.replace(/#\d+$/, "")}`, icono: "beaker", descripcion: "la insertaste desde una propuesta: ¿qué da con otra entrada?", comando: { command: "cai.programar.diferida", title: "Probar", arguments: [h.diferida] } }] : []),
+          ...(h.creeTerminado ? [{ k: "accion" as const, label: "🏁 El proyecto parece cumplir sus criterios de terminado", icono: "flag", comando: { command: "cai.objetivos.ver", title: "Ver" } }] : []),
         ];
+      }
+      if (n.id === "objetivos") {
+        const ob = this.leerDato<Objetivos>(cwd, "objetivos.json");
+        const ev = this.leerDato<{ criterios: { id: string; estado: string; evidencia: string }[]; creeTerminado: boolean }>(cwd, "cache/terminado.json");
+        const out: Nodo[] = [];
+        if (!ob || ob.estado === "sin empezar") out.push({ k: "accion", label: "Entender el proyecto (conversando)", icono: "comment-discussion", descripcion: "qué buscas, para quién, qué es 'terminado'", comando: { command: "cai.objetivos.entender", title: "Entender" } });
+        else {
+          out.push({ k: "accion", label: ob.resumen || "(sin resumen)", icono: ob.estado === "entendido" ? "pass" : ob.estado === "terminado" ? "flag" : "edit", tooltip: "Clic: ver objetivos.md", comando: { command: "cai.objetivos.ver", title: "Ver" } });
+          for (const c of ob.criterios) {
+            const e = ev?.criterios.find((x) => x.id === c.id);
+            out.push({ k: "accion", label: c.texto, icono: !e ? "circle-large-outline" : e.estado === "cumple" ? "pass-filled" : e.estado === "parcial" ? "circle-large-filled" : "error", ...(e ? { descripcion: e.estado, tooltip: e.evidencia } : {}), comando: { command: "cai.objetivos.ver", title: "Ver" } });
+          }
+          if (ob.estado !== "entendido" && ob.estado !== "terminado" && ob.creeEntendido) out.push({ k: "accion", label: "✓ Confirmar objetivos", icono: "check", descripcion: "la IA cree que ya entendió", comando: { command: "cai.objetivos.accion", title: "Confirmar", arguments: ["confirmar"] } });
+          if (ob.estado === "entendido" && ev?.creeTerminado) out.push({ k: "accion", label: "🏁 Dar el proyecto por terminado", icono: "flag", descripcion: "se cumplen todos los criterios", comando: { command: "cai.objetivos.accion", title: "Terminar", arguments: ["terminado"] } });
+          out.push({ k: "accion", label: ob.estado === "entendido" || ob.estado === "terminado" ? "Reabrir y seguir conversando" : "Seguir conversando (chat)", icono: "comment-discussion", comando: { command: "cai.objetivos.entender", title: "Entender", arguments: [ob.estado === "entendido" || ob.estado === "terminado"] } });
+        }
+        return out;
+      }
+      if (n.id === "ideas") {
+        const ideas = (this.leerDato<{ ideas: Idea[] }>(cwd, "ideas.json")?.ideas ?? []).filter((i) => !i.descartada && !i.tarea);
+        const orden = { funcionalidad: 0, mejora: 1, aprender: 2 };
+        return [...ideas.sort((a, b) => orden[a.tipo] - orden[b.tipo]).map((i): Nodo => ({ k: "idea", i })), { k: "accion", label: "🔄 Más ideas", icono: "sparkle", descripcion: ideas.length ? "" : "salen con el panorama, o pídelas aquí", comando: { command: "cai.ideas.mas", title: "Más ideas" } }];
       }
       if (n.id === "decisiones") {
         const ds = leerDecisiones(cwd).sort((a, b) => ({ pendiente: 0, vigente: 1, retractada: 2 })[a.estado] - ({ pendiente: 0, vigente: 1, retractada: 2 })[b.estado]);
@@ -478,7 +547,7 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
           k: "accion",
           label: rel,
           icono: d.bloqueantes ? "warning" : "checklist",
-          descripcion: [d.notasAbiertas ? `${d.notasAbiertas} nota(s)` : "", d.testsApagados ? `${d.testsApagados} test(s) por decidir` : "", d.sinTests.length ? `sin tests: ${d.sinTests.join(", ")}` : "", d.decisionesPendientes ? `${d.decisionesPendientes} decisión(es)` : ""].filter(Boolean).join(" · "),
+          descripcion: [d.notasAbiertas ? `${d.notasAbiertas} nota(s)` : "", d.testsApagados ? `${d.testsApagados} test(s) por decidir` : "", d.sinTests.length ? `sin tests: ${d.sinTests.join(", ")}` : "", d.decisionesPendientes ? `${d.decisionesPendientes} decisión(es)` : "", d.sinEntender?.length ? `⚠ sin entender: ${d.sinEntender.join(", ")}` : ""].filter(Boolean).join(" · "),
           comando: { command: "cai.irA", title: "Ir", arguments: [cwd, rel] },
         }));
       if (n.id === "actividad") return this.actividad.length ? this.actividad.map((a) => ({ k: "actividad", a })) : [{ k: "vacio", label: "Nada todavía" }];
@@ -495,7 +564,7 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
 
   registrar(ctx: vscode.ExtensionContext): void {
     this.vista = vscode.window.createTreeView("cai.panel", { treeDataProvider: this, showCollapseAll: true });
-    const w = vscode.workspace.createFileSystemWatcher("**/{.cai,.aicode}/{notas/*.json,tareas.json,conocimiento.md,estructura.json,indice.json,decisiones.json,cache/diagnosticos.json,cache/panorama.json}");
+    const w = vscode.workspace.createFileSystemWatcher("**/{.cai,.aicode}/{notas/*.json,tareas.json,conocimiento.md,estructura.json,indice.json,decisiones.json,ideas.json,objetivos.json,correcciones.json,cache/diagnosticos.json,cache/panorama.json,cache/terminado.json}");
     const r = () => this.refrescar();
     w.onDidChange(r);
     w.onDidCreate(r);
@@ -522,6 +591,73 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
       }),
       vscode.commands.registerCommand("cai.irA", (cwd: string, archivo?: string, linea?: number, notaId?: string, ofrecerCrear?: boolean) => irA(cwd, archivo, linea, notaId, !!ofrecerCrear)),
       vscode.commands.registerCommand("cai.panel.refrescar", () => this.refrescar(0)),
+      // 💡 Ideas: ➕ tarea o ✕ no me interesa (no vuelve a proponerse).
+      vscode.commands.registerCommand("cai.idea.elegir", async (i?: Idea | Nodo) => {
+        const cwd = root(vscode.window.activeTextEditor?.document);
+        const idea = i && "k" in i ? (i.k === "idea" ? i.i : undefined) : i;
+        if (!cwd || !idea) return;
+        const r = await vscode.window.showQuickPick([{ label: "$(add) Convertir en tarea", v: "tarea" }, { label: "$(close) No me interesa", description: "no se vuelve a proponer", v: "descartar" }], { placeHolder: `${idea.titulo} — ${idea.porque}` });
+        if (!r) return;
+        await correr(["ideas", r.v, idea.id], cwd).catch(mostrarError);
+        this.refrescar(0);
+      }),
+      vscode.commands.registerCommand("cai.ideas.mas", async () => {
+        const cwd = root(vscode.window.activeTextEditor?.document);
+        if (!cwd) return;
+        try {
+          await vscode.window.withProgress({ location: { viewId: "cai.panel" }, title: "Pensando ideas…" }, () => correr(["ideas", "mas"], cwd));
+        } catch (e) {
+          mostrarError(e);
+        }
+        this.refrescar(0);
+      }),
+      // 🎯 Objetivos: conversar (chat), confirmar / dar por terminado (tú), ver.
+      vscode.commands.registerCommand("cai.objetivos.entender", async (reabrir?: boolean) => {
+        const cwd = root(vscode.window.activeTextEditor?.document);
+        if (!cwd) return;
+        if (reabrir === true) await correr(["entender", "reabrir"], cwd).catch(mostrarError);
+        await vscode.commands.executeCommand("cai.chat.entender");
+      }),
+      vscode.commands.registerCommand("cai.objetivos.accion", async (accion: string) => {
+        const cwd = root(vscode.window.activeTextEditor?.document);
+        if (!cwd) return;
+        await correr(["entender", accion], cwd).catch(mostrarError);
+        this.refrescar(0);
+      }),
+      vscode.commands.registerCommand("cai.objetivos.ver", async () => {
+        const cwd = root(vscode.window.activeTextEditor?.document);
+        const f = cwd && path.join(dataDir(cwd), "objetivos.md");
+        if (f && fs.existsSync(f)) await vscode.commands.executeCommand("markdown.showPreview", vscode.Uri.file(f));
+      }),
+      // ✎ Corregir lo que ComplementAIry entiende de un archivo (manda sobre lo generado).
+      vscode.commands.registerCommand("cai.corregir.modulo", async (n?: Nodo) => {
+        const cwd = root(vscode.window.activeTextEditor?.document);
+        const archivo = n?.k === "modulo" ? n.archivo : n?.k === "archivoFn" ? n.rel : undefined;
+        if (!cwd || !archivo) return;
+        const tipo = n?.k === "modulo" ? "--estructura" : "--modulo";
+        const texto = await vscode.window.showInputBox({ prompt: `${tipo === "--estructura" ? "Para qué es" : "Qué hace"} ${archivo}, con tus palabras (manda sobre lo que generó la IA)`, value: n?.k === "modulo" ? n.resp : "" });
+        if (!texto?.trim()) return;
+        await correr(["memoria", "corregir", tipo, archivo, "--texto", texto.trim()], cwd).catch(mostrarError);
+        this.refrescar(0);
+      }),
+      // 🎯 Prueba diferida (modo programar): tu entrada y lo que esperas, comparado ejecutando.
+      vscode.commands.registerCommand("cai.programar.diferida", async (d: { archivo: string; funcion: string }) => {
+        const cwd = root(vscode.window.activeTextEditor?.document);
+        if (!cwd || !d) return;
+        const nombre = d.funcion.replace(/#\d+$/, "");
+        const entrada = await vscode.window.showInputBox({ prompt: `Prueba diferida de ${nombre}: una entrada (llamada) distinta a las de antes`, value: `${nombre}(` });
+        if (!entrada?.trim()) return;
+        const espero = await vscode.window.showInputBox({ prompt: `¿Qué esperas que dé ${entrada.trim()}? (antes de ejecutar)` });
+        if (!espero?.trim()) return;
+        try {
+          const r = JSON.parse(await correr(["programar", "diferida", d.archivo, "--funcion", d.funcion, "--entrada", entrada.trim(), "--espero", espero.trim(), "--json"], cwd)) as { acierto: boolean; obtenido: string };
+          void vscode.window.showInformationMessage(r.acierto ? `✓ Coincide (${r.obtenido}): la entiendes.` : `✗ Da ${r.obtenido}. Mira por qué en su nota antes de seguir.`);
+        } catch (e) {
+          mostrarError(e);
+        }
+        this.hoy = undefined;
+        this.refrescar(0);
+      }),
       vscode.commands.registerCommand("cai.decision.elegir", async (d?: Decision | Nodo) => {
         const dec = d && "k" in d ? (d.k === "decision" ? d.d : undefined) : d;
         const cwd = root(vscode.window.activeTextEditor?.document);

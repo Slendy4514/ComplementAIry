@@ -3,7 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { dataDir, makeZoner } from "./config.js";
 import { cargarDecisiones } from "./decisiones.js";
+import { leerEvaluacion, leerObjetivos } from "./entender.js";
 import { leerIndice } from "./indice.js";
+import { deudaComprension, pendienteDiferida } from "./programar.js";
 import { ask, leerUso } from "./llm.js";
 import { rutaTest } from "./metricas.js";
 import { todasLasNotas } from "./notas.js";
@@ -60,6 +62,10 @@ export interface Hoy {
   decisionesPendientes: number;
   lineasSinCommit: number;
   conviene: string[];
+  /** Modo programar: una función insertada hace más de un día, para probarla de nuevo (tú). */
+  diferida?: { archivo: string; funcion: string } | null;
+  /** Objetivos: si la IA cree que se cumplen todos los criterios de terminado. */
+  creeTerminado?: boolean;
 }
 
 export function hoy(root: string, marcar: boolean): Hoy {
@@ -81,6 +87,8 @@ export function hoy(root: string, marcar: boolean): Hoy {
     decisionesPendientes: cargarDecisiones(root).filter((d) => d.estado === "pendiente").length,
     lineasSinCommit: cambiosSinCommit(root),
     conviene: [],
+    diferida: pendienteDiferida(root),
+    creeTerminado: leerObjetivos(root).estado === "entendido" && !!leerEvaluacion(root)?.creeTerminado,
   };
   if (out.lineasSinCommit > 300) out.conviene.push(`llevas ${out.lineasSinCommit} líneas sin commit: conviene hacer uno (pasos chicos)`);
   if (marcar) {
@@ -95,6 +103,8 @@ export interface DeudaArchivo {
   bloqueantes: number;
   testsApagados: number;
   sinTests: string[];
+  /** Modo programar: funciones insertadas con porciones sin probar (deuda de comprensión). */
+  sinEntender?: string[];
   decisionesPendientes: number;
 }
 
@@ -104,6 +114,7 @@ export function deuda(root: string): Record<string, DeudaArchivo> {
   const idx = leerIndice(root);
   const notas = todasLasNotas(root).filter((n) => n.estado === "abierta");
   const decisiones = cargarDecisiones(root).filter((d) => d.estado === "pendiente");
+  const comprension = deudaComprension(root);
   const out: Record<string, DeudaArchivo> = {};
   for (const [rel, a] of Object.entries(idx.archivos)) {
     if (!a.funciones.length) continue;
@@ -115,8 +126,9 @@ export function deuda(root: string): Record<string, DeudaArchivo> {
       testsApagados: (testTxt.match(/snippet \[ \]:|test\.todo\(/g) ?? []).length,
       sinTests: a.funciones.filter((f) => f.exportada && !f.tests && !testTxt.includes(f.nombre)).map((f) => f.nombre),
       decisionesPendientes: decisiones.filter((x) => x.alcance.archivo === rel).length,
+      sinEntender: comprension.filter((x) => x.archivo === rel).map((x) => x.funcion.replace(/#\d+$/, "")),
     };
-    if (d.notasAbiertas || d.testsApagados || d.sinTests.length || d.decisionesPendientes) out[rel] = d;
+    if (d.notasAbiertas || d.testsApagados || d.sinTests.length || d.decisionesPendientes || d.sinEntender!.length) out[rel] = d;
   }
   return out;
 }

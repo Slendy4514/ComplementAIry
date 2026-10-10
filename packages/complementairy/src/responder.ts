@@ -11,7 +11,7 @@ import { langFor } from "./lang.js";
 import { ask } from "./llm.js";
 import { medir } from "./metricas.js";
 import { cargarNotas, guardarNotas, mensaje, type Nota } from "./notas.js";
-import { consolidar, funcionEn as funcionEnF, funcionPorClave, notaPara } from "./notasFuncion.js";
+import { CAMPO_FUNCION, consolidar, funcionEn as funcionEnF, funcionPorClave, notaPara, repartir } from "./notasFuncion.js";
 import { modoEfectivo } from "./modos.js";
 import { huella } from "./verificar.js";
 import type { Funcion } from "./metricas.js";
@@ -61,11 +61,12 @@ const schema = () => ({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["tipo", "texto", "links", "codigo"],
+        required: ["tipo", "texto", "links", "codigo", "funcion"],
         properties: {
           tipo: { type: "string", enum: [...TIPOS] },
           texto: { type: "string" },
           links: { type: "array", items: { type: "string" } },
+          funcion: CAMPO_FUNCION,
           codigo: { type: "string", description: 'Para "snippet": copia EXACTA de la línea DESPUÉS de la cual iría (dentro de la función). Para el resto: "".' },
         },
       },
@@ -119,7 +120,8 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
     const porDefecto = z.config.ayuda.porDefecto !== "auto" && !PIDE_MAS.test(p.texto ?? "") ? pedidoDe(z.config.ayuda.porDefecto) : undefined;
     const ped = pedidoDe(p.pedido) ?? (p.texto ? PEDIDOS.find((x) => x.re.test(p.texto!)) : undefined) ?? porDefecto;
     const humano = [p.texto?.trim(), ped && !p.texto ? `Pido: ${ped.que}.` : "", p.seleccion ? `Sobre esta parte:\n\`\`\`\n${p.seleccion.slice(0, 2000)}\n\`\`\`` : ""].filter(Boolean).join("\n\n");
-    if (humano) nota.hilo.push(mensaje("tu", humano));
+    // Qué pediste (un botón o una pregunta escrita): la nota lo muestra en su historial ("🙋 Piezas · 10:32").
+    if (humano) nota.hilo.push(mensaje("tu", humano, { pedido: p.pedido ?? (p.texto ? "pregunta" : "ayuda") }));
     nota.estado = "abierta";
     if (p.fuente) nota.fuentes = { ...nota.fuentes, [p.fuente]: p.turnos ?? 1 };
     let costo = 0;
@@ -250,6 +252,11 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
         }
       } finally {
         fs.rmSync(enVivo, { force: true }); // también si la IA falla: no queda texto viejo "en vivo"
+      }
+      // En la nota de una función, solo lo de esa función: lo de otra o del archivo va a la nota del archivo.
+      if (fnNota && nota.ancla.funcion && nota.alcance !== "archivo") {
+        const propios = repartir(notas, rel, funciones, src, { clave: nota.ancla.funcion, nombre: fnNota.nombre }, validas.filter((r) => r.tipo !== "snippet") as (Reply & { codigo: string; funcion?: string })[], "responder", (r) => r.texto);
+        validas = [...propios, ...validas.filter((r) => r.tipo === "snippet")];
       }
       // Dónde va cada snippet: la línea que dijo la IA, SOLO si está dentro de la función (sin IA).
       const snippets = validas

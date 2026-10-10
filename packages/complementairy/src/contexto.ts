@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { dataDir } from "./config.js";
 import { contextBlock, projectContext } from "./context.js";
+import { bloqueCorrecciones } from "./correcciones.js";
+import { bloqueObjetivos } from "./entender.js";
 import { vigentesPara } from "./decisiones.js";
 import { leerIndice, lineaIndice, vecinas } from "./indice.js";
 
@@ -15,6 +17,9 @@ import { leerIndice, lineaIndice, vecinas } from "./indice.js";
 export function contextoComun(root: string, rel: string, o: { funcion?: string | undefined; corto?: boolean } = {}): string {
   const partes: string[] = [];
   if (!o.corto) partes.push(contextBlock(projectContext(root, rel)));
+  // Los objetivos del proyecto (confirmados, o el borrador marcado como tal) y lo que el programador
+  // corrigió de lo que entendemos: mandan sobre todo lo demás.
+  if (!o.corto) partes.push(bloqueObjetivos(root), bloqueCorrecciones(root));
 
   const decisiones = vigentesPara(root, rel, o.funcion);
   if (decisiones.length)

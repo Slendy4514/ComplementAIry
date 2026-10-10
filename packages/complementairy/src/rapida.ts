@@ -37,8 +37,9 @@ function cargar(root: string): Cache {
 
 const SYSTEM = `Acompañas al programador MIENTRAS escribe una función, línea por línea. Da UNA indicación corta (MÁXIMO 70 caracteres) para lo que toca AHORA donde está el cursor (◀):
 - si la línea del cursor tiene un error o un caso sin cuidar, dilo ("ojo: si dest es '' esto falla");
-- si va bien, di el próximo paso concreto, siguiendo los pasos de su nota si los hay ("ahora busca el archivo en la bóveda");
+- si va bien, di el próximo paso que FALTA en toda la función, siguiendo los pasos de su nota si los hay ("ahora busca el archivo en la bóveda");
 - en una línea vacía, qué escribir ahí (en palabras).
+Las líneas marcadas "(ya escrito)" están DESPUÉS del cursor y ya existen: NO sugieras nada que ya esté ahí. En "yaEscrito" pon el número de línea donde ya está lo que ibas a sugerir (0 si no está escrito en ninguna parte); si lo está, busca otra cosa que falte o devuelve texto vacío.
 Nunca escribas código, expresiones ni la línea corregida (nada de "x === y"): solo la idea en palabras ("compara en vez de asignar"). Devuelve texto vacío solo si la función ya está completa. Español neutro con TUTEO ("valida", "usa", "revisa"), nunca voseo ("validá", "usá").`;
 
 /**
@@ -78,13 +79,18 @@ export async function rapida(root: string, rel: string, linea: number, o: { text
   fs.mkdirSync(path.dirname(archivo(root)), { recursive: true });
   fs.writeFileSync(archivo(root), JSON.stringify(c));
   const pedirGuia = (extra: string) =>
-    ask<{ texto: string }>({
+    ask<{ texto: string; yaEscrito?: number }>({
       kind: "rapida",
       ref: { archivo: rel, funcion: f.nombre },
       system: SYSTEM,
       cwd: root,
       sinHerramientas: true,
-      schema: { type: "object", additionalProperties: false, required: ["texto"], properties: { texto: { type: "string" } } },
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["texto", "yaEscrito"],
+        properties: { texto: { type: "string" }, yaEscrito: { type: "integer", description: "Línea donde YA está escrito lo que sugieres (0 si no está)." } },
+      },
       ...iaOpts(z.config, "chico"),
       effort: "low",
       sinRazonar: true, // una línea: sin razonamiento largo (más rápido y barato)
@@ -94,7 +100,8 @@ export async function rapida(root: string, rel: string, linea: number, o: { text
         pasosDeNota(nota) ? `Pasos que ya le diste:\n${pasosDeNota(nota)}` : "",
         contextoComun(root, rel, { funcion: claveFuncion(funciones, f), corto: true }),
         `Función ${f.nombre} (◀ = línea del cursor):`,
-        codigo.map((l, i) => `${l}${f.linea + i === linea ? "   ◀" : ""}`).join("\n"),
+        // Numeradas; lo de después del cursor, marcado: la guía no debe adelantar lo que ya está escrito.
+        codigo.map((l, i) => `${f.linea + i}: ${l}${f.linea + i === linea ? "   ◀" : f.linea + i > linea && l.trim() ? "   (ya escrito)" : ""}`).join("\n"),
         extra,
       ]
         .filter(Boolean)
@@ -103,6 +110,14 @@ export async function rapida(root: string, rel: string, linea: number, o: { text
   // Sin código en la guía (determinista): si trae expresiones o código, se pide de nuevo solo con palabras.
   const conCodigo = (t: string) => /`[^`]*[=(){};<>][^`]*`|[=!]==|=>|\b(return|const|let|var)\s+\w+\s*=/.test(t);
   let { data, costUsd } = await pedirGuia("");
+  // Autoverificación (determinista sobre lo que contesta): si lo que sugiere ya está escrito en otra
+  // línea de la función, se pide una vez lo que FALTA; si insiste, mejor nada que algo inútil.
+  const yaEsta = (d: { texto: string; yaEscrito?: number }) => !!d.texto?.trim() && !!d.yaEscrito && d.yaEscrito !== linea && d.yaEscrito >= f.linea && d.yaEscrito < f.linea + f.lineas && !!lineas[d.yaEscrito - 1]?.trim();
+  if (yaEsta(data)) {
+    const otra = await pedirGuia(`Lo que ibas a sugerir ("${data.texto}") ya está escrito en la línea ${data.yaEscrito}. ¿Qué FALTA? Si no falta nada, texto vacío.`);
+    costUsd += otra.costUsd;
+    data = yaEsta(otra.data) ? { texto: "" } : otra.data;
+  }
   let completo = (data.texto ?? "").replace(/\s+/g, " ").trim();
   let texto = corta(completo);
   // Se mira el texto COMPLETO (el hover y el panel lo muestran entero, no solo lo que cabe en la línea).

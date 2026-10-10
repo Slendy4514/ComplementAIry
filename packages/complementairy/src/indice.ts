@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parse } from "./comments.js";
 import { dataDir, makeZoner } from "./config.js";
+import { aplicarAResumenes } from "./correcciones.js";
 import { listFiles } from "./files.js";
 import { langFor } from "./lang.js";
 import { medir } from "./metricas.js";
@@ -88,7 +89,7 @@ function estadoDesdeNotas(root: string, rel: string, src: string): Map<string, P
 export function resumenesPanorama(root: string): Record<string, string> {
   try {
     const c = JSON.parse(fs.readFileSync(path.join(dataDir(root), "cache", "panorama.json"), "utf8")) as { resumenes?: Record<string, { resumen: string }> };
-    return Object.fromEntries(Object.entries(c.resumenes ?? {}).map(([k, v]) => [k, v.resumen]));
+    return Object.fromEntries(Object.entries(aplicarAResumenes(root, c.resumenes ?? {})).map(([k, v]) => [k, v.resumen]));
   } catch {
     return {};
   }
