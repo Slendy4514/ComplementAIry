@@ -1,9 +1,10 @@
 import { expect, test } from "vitest";
-import { runSelftest } from "../src/selftest.js";
+import { correrEscenario, escenarios } from "../src/selftest.js";
 
-test("todas las garantías de ComplementAIry se cumplen", async () => {
-  const lines: string[] = [];
-  const ok = await runSelftest((s) => lines.push(s));
-  expect(lines.filter((l) => l.startsWith("✗"))).toEqual([]);
-  expect(ok).toBe(true);
-}, 60_000);
+// Un test por escenario: vitest muestra cuál falló, por qué y cuánto tardó. Filtrar: CAI_SELFTEST="texto".
+for (const c of escenarios(process.env.CAI_SELFTEST))
+  test(c.name, async () => {
+    const r = await correrEscenario(c);
+    expect(r.error ?? "", "el escenario lanzó un error").toBe("");
+    expect(r.ok, "el escenario devolvió false (usa esperar() para decir qué se esperaba)").toBe(true);
+  }, 30_000);

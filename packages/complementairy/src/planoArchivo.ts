@@ -10,7 +10,8 @@ import { ask } from "./llm.js";
 import { medir } from "./metricas.js";
 import { publicar, type Aporte } from "./salida.js";
 import { agregarTareas } from "./siguiente.js";
-import { iaOpts, marcadores } from "./tutor.js";
+import { iaOpts } from "./llm.js";
+import { marcadores } from "./tutor.js";
 
 /**
  * Plano de un archivo, estructurado: un resumen corto arriba, una nota junto a cada función que
@@ -117,7 +118,7 @@ export async function planoArchivo(root: string, rel: string): Promise<{ costoUs
     root,
     data.funciones
       .filter((f) => !existentes.some((e) => e.nombre === f.nombre))
-      .map((f) => ({ titulo: `Crear ${f.nombre} en ${rel}: ${f.que_hace}`.slice(0, 120), archivo: rel, funcion: f.nombre, origen: "plano" as const })),
+      .map((f) => ({ titulo: `Crear ${f.nombre} en ${rel}: ${f.que_hace}`.slice(0, 120), archivo: rel, funcion: f.nombre, detalle: f.que_hace, origen: "plano" as const })),
   );
   // Cada parte va a la nota de SU función (o a la del archivo): sin notas duplicadas.
   const r = await publicar(root, rel, z.config.vista === "notas" ? aportes : aportes.slice(0, 1));

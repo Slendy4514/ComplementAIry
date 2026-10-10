@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { home } from "./profile.js";
+import type { Config } from "./config.js";
 
 /**
  * Única puerta hacia la IA. Cada llamada es independiente (sin historial compartido),
@@ -40,7 +40,14 @@ export type LLM = <T>(opts: AskOptions) => Promise<AskResult<T>>;
 
 export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"];
 
+/**
+ * El Agent SDK se carga recién al llamar a la IA: pesa ~160 ms y el hook de Claude Code (que corre en
+ * cada herramienta) nunca lo necesita.
+ */
+export const sdk = () => import("@anthropic-ai/claude-agent-sdk");
+
 const realLLM: LLM = async <T>(o: AskOptions): Promise<AskResult<T>> => {
+  const { query } = await sdk();
   const q = query({
     prompt: o.prompt,
     options: {
@@ -201,4 +208,18 @@ export function leerUso(dias = 30): (Uso & { fecha: string })[] {
   } catch {
     return [];
   }
+}
+
+/** Tamaño de la tarea: elige el modelo (chico = rápido y barato, grande = el mejor). */
+export type Tamano = "chico" | "mediano" | "grande";
+
+/**
+ * Opciones de IA según el tamaño de la tarea (.cai/config.json → ia.modelos):
+ * chico = una función, mediano = un archivo, grande = el proyecto. `true` (compatibilidad) = chico.
+ */
+export function iaOpts(c: Config, tamano: Tamano | boolean = "mediano"): { model?: string; context7?: boolean } {
+  const t: Tamano = tamano === true ? "chico" : tamano === false ? "mediano" : tamano;
+  const legado = t === "chico" ? c.ia.modeloRapido || c.ia.modelo : c.ia.modelo;
+  const model = c.ia.modelos?.[t] || legado;
+  return { ...(model ? { model } : {}), ...(c.ia.context7 && t !== "chico" ? { context7: true } : {}) };
 }

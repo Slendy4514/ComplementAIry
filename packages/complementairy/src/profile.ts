@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { escribirJson, leerJson } from "./almacen.js";
 
 /**
  * Perfil del programador: cuánto domina cada tema (lenguaje, librería).
@@ -43,16 +44,12 @@ export function nivelDe(puntaje: number): Nivel {
 }
 
 export function loadPerfil(): Perfil {
-  try {
-    return JSON.parse(fs.readFileSync(file(), "utf8")) as Perfil;
-  } catch {
-    return { version: 1, temas: {} };
-  }
+  const p = leerJson<Partial<Perfil>>(file(), () => ({}));
+  return { version: 1, ...p, temas: p.temas ?? {} } as Perfil;
 }
 
 function save(p: Perfil): void {
-  fs.mkdirSync(home(), { recursive: true });
-  fs.writeFileSync(file(), JSON.stringify(p, null, 2) + "\n");
+  escribirJson(file(), p, { final: "\n" });
 }
 
 export function puntaje(p: Perfil, tema: string): number {

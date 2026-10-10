@@ -749,8 +749,8 @@ export class Panel implements vscode.TreeDataProvider<Nodo> {
         });
         if (desc === undefined) return;
         try {
-          await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: proponiendo la estructura del proyecto…" }, () =>
-            correr(["plano", ...(desc.trim() ? [desc.trim()] : [])], cwd),
+          await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: proponiendo la estructura del proyecto…", cancellable: true }, (_p, t) =>
+            correr(["plano", ...(desc.trim() ? [desc.trim()] : [])], cwd, { cancelar: t }),
           );
           this.refrescar(0);
           await vscode.commands.executeCommand("cai.verEstructura");

@@ -24,7 +24,7 @@ En este proyecto el programador escribe el código y tú lo acompañas. Desde el
 | "eso no es así" (corrige lo que entiendes del proyecto) | `cai memoria proponer --modulo <archivo> \| --estructura <archivo> \| --proyecto --texto "…"` | luego pregúntale con header `cai:<id>` y el texto exacto; si responde "Aplicar", queda |
 | ideas para el proyecto | `cai ideas`, `cai ideas mas`, `cai ideas tarea <id>` | descartar una idea es suyo |
 | una decisión que depende de él | `cai decisiones proponer "<pregunta>" --opcion "a" --opcion "b"` | y pregúntale con AskUserQuestion, header `cai:<id>`: su respuesta queda registrada |
-| modo programar (si está activo) | `cai programar plan\|paso\|pr <archivo> --funcion <f> …` | propuestas; el código entra SOLO con su clic en VSCode; sus casos y el probador son suyos |
+| construir juntos (modos programar / programar-aprender) | `cai programar construir <archivo> --funcion <f>` (otra forma: `otra --paso N`); `cai programar casos …` | ofreces en palabras cómo hacer los pasos que faltan (y revisas su código previo); las ÓRDENES (`orden`), su idea, quitar/dejar, deshacer, predecir y editar casos son SUYOS (no los corras; si dice "dale, haz eso", pídele que lo diga con sus palabras); el código entra SOLO con su clic en VSCode |
 | "¿está listo el archivo?" | `cai revisar <archivo> --completo` | revisión + "¿quedó lista?" de cada función + tests + veredicto 🟢/🟡/🔴 |
 | tests de una función | `cai tests <archivo> <función> --probar` | propone y EJECUTA casos (también sin export); guardarlos lo decide él |
 | decisiones tomadas | `cai decisiones` | respétalas; decidir/retractar es suyo |

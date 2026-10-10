@@ -17,5 +17,11 @@
   "ia": {
     "modelo": "",
     "context7": false
+  },
+  "modosVersion": 2,
+  "modos": {
+    "porArchivo": {
+      "examples/obsidian-files/Files.js": "programar"
+    }
   }
 }

@@ -2,6 +2,7 @@
 node_modules/
 packages/complementairy/dist/
 packages/vscode-complementairy/out/
+packages/vscode-complementairy/src/compartido.ts
 *.vsix
 dist/
 *.tgz

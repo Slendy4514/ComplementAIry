@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { dataDir } from "./config.js";
+import { escribirJson, leerJson } from "./almacen.js";
 
 /**
  * Etapa de entendimiento: qué busca el proyecto, para quién, qué es "terminado", restricciones y qué
@@ -50,18 +51,11 @@ const archivoEvaluacion = (root: string) => path.join(dataDir(root), "cache", "t
 export const VACIO: Objetivos = { version: 1, estado: "sin empezar", resumen: "", objetivos: [], usuarios: "", criterios: [], restricciones: [], fueraDeAlcance: [], historial: [] };
 
 export function leerObjetivos(root: string): Objetivos {
-  try {
-    return { ...VACIO, ...(JSON.parse(fs.readFileSync(archivo(root), "utf8")) as Partial<Objetivos>) };
-  } catch {
-    return { ...VACIO, historial: [] };
-  }
+  return { ...VACIO, historial: [], ...leerJson<Partial<Objetivos>>(archivo(root), () => ({})) };
 }
 
 function guardar(root: string, o: Objetivos): void {
-  fs.mkdirSync(path.dirname(archivo(root)), { recursive: true });
-  const tmp = `${archivo(root)}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(o, null, 2));
-  fs.renameSync(tmp, archivo(root));
+  escribirJson(archivo(root), o);
   fs.writeFileSync(path.join(dataDir(root), "objetivos.md"), objetivosMd(o));
 }
 

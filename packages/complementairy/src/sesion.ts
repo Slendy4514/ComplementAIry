@@ -1,6 +1,6 @@
-import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import path from "node:path";
-import { registrarUso, type AskOptions, type LLM } from "./llm.js";
+import { registrarUso, sdk, type AskOptions, type LLM } from "./llm.js";
 
 /**
  * Proceso de Claude Code ABIERTO para respuestas cortas (sugerencias rápidas): el arranque se paga
@@ -26,8 +26,9 @@ export type Fabrica = (
   abortar: AbortController,
 ) => AsyncIterable<{ type: string; subtype?: string; result?: string; total_cost_usd?: number; is_error?: boolean }>;
 
-const fabricaReal: Fabrica = (prompt, modelo, abortar) =>
-  query({
+const fabricaReal: Fabrica = async function* (prompt, modelo, abortar) {
+  const { query } = await sdk();
+  yield* query({
     prompt,
     options: {
       ...(modelo ? { model: modelo } : {}),
@@ -43,6 +44,7 @@ const fabricaReal: Fabrica = (prompt, modelo, abortar) =>
       env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: "false", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1", CLAUDE_AGENT_SDK_CLIENT_APP: "cai/servir" },
     },
   }) as AsyncIterable<{ type: string; subtype?: string; result?: string; total_cost_usd?: number; is_error?: boolean }>;
+};
 
 /**
  * Una "generación" del proceso: su propia cola, lo enviado y el costo acumulado. Al reiniciar, la

@@ -411,3 +411,60 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - sin iniciar, nada automático (acompañante, guía, revisión al salir, panel) corre ni gasta IA.
 - Mensajes de `cai init` con tuteo (tenían voseo).
 - Selftest: 193/193.
+
+## v0.11: seguridad, IAs integradas, modos en dos ejes y construir juntos (2026-10-10)
+- **Pedido del usuario:** "investiga el proyecto y propón mejoras". Eligió: **seguridad y datos, mantenibilidad, higiene y docs**; que la IA implemente (código delegado); Files.js a `examples/`. Además reportó dos problemas:
+  - las IAs no se integran entre funciones: en `exists` pedía manejar errores en línea en vez de "usa `normalize`" y, en la nota de `normalize`, "mejórala";
+  - el modo programar confunde: pedía casos en la barra de arriba (hasta 16 cajas) antes de dar nada; "parece un modo peor que sugerir". ¿Y si pongo casos sin sentido?
+- **Decisiones del usuario:**
+  - **modos en dos ejes** (idea suya): quién escribe (tú / la IA) × cuánta ayuda (sugerir / aprender);
+  - programar = **construir juntos**, porción a porción, **sin un botón "Aceptar" pelado** ("caemos en aceptar y no entender; investiga");
+  - **una predicción por función** antes de insertar;
+  - casos raros: "revisa lo que dije antes" → la IA avisa, no fuerza y pregunta (lo que ya había decidido: "si hay duda, pregunta", "respeta mis decisiones", "lo importante es determinista").
+- **Investigación:** auto-explicación (Bisra et al. 2018, 64 estudios, g = 0,55: el efecto viene de generarla, no de un juez); verificación activa (Qiao et al. 2025: revisar/probar lo generado predijo la comprensión, r = 0,96, N=15); decidir antes de ver (Buçinca 2021: reduce la sobreconfianza pero gusta menos); habituación y reversión de la pericia (no pedir lo mismo siempre).
+- **Hecho:**
+  - **Seguridad y datos:** la extensión corre la CLI sin shell y `cai.comando` es solo de máquina (un repo clonado podía ejecutar cualquier comando); sin carpetas no confiables; pedidos con tope y cancelables; "Silenciar" apaga también los tests al guardar; sin doble cobro de sugerencias. `almacen.ts`: un JSON dañado ya no se trata como vacío (antes el siguiente guardado pisaba decisiones, tareas o notas). Candados con pid del dueño.
+  - **Mantenibilidad:** `cli.ts` mínimo (el hook cargaba el SDK de la IA en cada herramienta: **~210 → ~85 ms**); `args.ts` (código 64 para errores de uso, "¿quisiste decir…?"); `cai selftest <filtro>` y un test de vitest por escenario con mensajes de por qué falló; `prompts.ts`; `compartido.ts` (modos, una sola fuente para CLI y extensión); tuteo en todos los mensajes.
+  - **Las funciones se conocen:** mapa del archivo (firma, propósito, ⬜ vacía o prevista) con reserva en el contexto; regla de reutilizar; lo que le toca a otra función va a **su** nota. Prueba real con Files.js: "reutiliza normalize, pero normalize está vacía (⬜)", y en la nota de `normalize`: "Desde `exists`: implementa normalize…" (US$0,05).
+  - **Construir juntos:** ver `docs/design.md` (v0.11). Prueba real con `slugNota` (5 porciones, US$0,13): las entradas sugeridas recorrían cada porción; "✎ cámbiala así" conservó las 4 explicadas; los casos según la intención detectaron solos que "el comentario y el plan se contradicen"; la predicción coincidió.
+  - **Ajustes tras la prueba real:** una explicación sin sentido ("responde la Constitución…") se incluía con un 🤔 → ahora no se incluye si no coincide (salvo "Incluir igual", que queda como deuda); la IA no veía el comentario encima de la función (su especificación) → ahora sí.
+  - **Higiene:** Files.js en `examples/obsidian-files/`; design.md y README al día (vista notas por defecto, 8 atajos, TS por paquete, tuteo); `.dockerignore` sin `.claude-backup`.
+- **No hecho (anotado):** dividir `comandos.ts` en archivos por área (hoy es el mismo switch, con parser común y carga perezosa); lo de otra función en **otro archivo** sigue yendo a la nota del archivo; detectar porciones "ya en tu repertorio" para no pedir explicarlas.
+- **Recomendación pendiente (no elegida esta vez):** simplificar la superficie (≈55 comandos de VSCode, ≈50 conceptos en CLAUDE.md) y probar con 2–3 personas antes de más funcionalidades, sobre todo pensando en usuarios no técnicos.
+- **Para el usuario:** marcar las carpetas delegadas en `.cai/config.json`; correr `cai init --solo-claude` (CLAUDE.md v0.11 y la skill `cai` que faltaba) en la raíz y en `examples/demo-ts`; descartar la tarea de Files.js (`cai tareas descartar t1`).
+- Selftest: 207/207 al cerrar la primera parte; 208/208 al final de la sesión.
+
+### v0.11 (misma sesión): notas de una sola función y "construir juntos" con tu orden
+- **Pedido del usuario:**
+  - que la nota de una función no traiga correcciones de otras ni se repitan; a lo más "ve a mirar la nota de X, aún no está lista";
+  - ¿las propuestas de la IA son sin sesgo? (respuesta: arma la función sola desde objetivo, plan y comentario; los casos salen de la intención; se ancla si la función ya tenía código, y el juez de la explicación veía el porqué de la propia IA — ese juez ya no existe con el flujo nuevo);
+  - en vez de aceptar una idea, que la IA diga "puedo hacerlo así" y, para que lo haga, que tú le des la orden ("haz…"), filtrando "dale, haz eso que dijiste" o "haz la función y lo demás también".
+- **Decisiones del usuario:** de otra función, **solo el aviso** (nada se anota en su nota); **idea primero → tu orden → código**; la orden **con tus palabras** (lo copiado de la propuesta se rechaza).
+- **Hecho:**
+  - `dependenciasPendientes` → `nota.dependencias` (sin IA, se reemplaza): "⏳ Usa normalize: aún no está lista · Ver su nota". `repartir` descarta lo de otras funciones; lo general del archivo no se repite (`yaDicho`).
+  - `construir.ts` rehecho: `ofrecer` (en palabras; si trae expresiones se pide de nuevo), `ideaPaso` (aprender), `ordenar` (filtro `ordenValida` sin IA; la IA escribe solo las líneas del paso, al final de lo hecho; `falta` honesto; `--rehacer`), `deshacer`, ajuste por orden (`repartirAjuste`). Ya no hay "explicar para incluir".
+  - Seguridad: `orden`, `idea`, `deshacer`, `predecir`, `caso` son solo del humano; en construir, ningún comando de la IA puede agregar un paso escrito (ni sin orden).
+- **Prueba real** (`slugNota`): la oferta en palabras con 2 alternativas; "dale, haz eso que dijiste" y "haz el paso 1 y lo demás también" rechazadas; la copia de la oferta rechazada; "si no me pasan un texto, que tire un TypeError diciendo qué llegó" escribió solo el paso 1 y avisó lo que la orden no decía; el paso 2 salió en una línea. Ajustes tras la prueba: el "si" condicional se tomaba como "sí" (falso positivo), el `\b` no funciona tras una "á", la oferta traía expresiones de código, y "quedó fuera" se llenaba sin que la orden pidiera otros pasos.
+
+### v0.11 (misma sesión): tu código previo, varios pasos a la vez y un verificador chico
+- **Pedido del usuario:** que la IA pueda mejorar o cuestionar el código que ya escribió el usuario (no anclarse; si prefiere dejarlo, bien); ir agregando pasos hasta la función completa sin que se sienta línea por línea; una IA más chica que verifique lo que se hace en programar.
+- **Decisiones del usuario:** **varios pasos en un formulario** (una orden tuya por paso; en aprender sigue de a uno); el verificador **solo avisa** (Quitarlo / Dejarlo); tu código previo se revisa **al empezar**.
+- **Hecho:** `ofrecer` para todos los pasos que faltan + revisión del código previo (`previo`); `ordenarPasos` (de corrido, una llamada); `verificarFiel` (Haiku); `resolverAgregado`, `dejarSugerencia`, `quitarPrevio`; panel con formulario de pasos, sugerencias sobre tu código y avisos del verificador. `quitar` y `dejar` son solo del humano.
+- **Prueba real** (`slugNota` con un `return` ya escrito): la revisión del código previo dio 3 preguntas útiles sin anclarse; las ofertas de 5 pasos llegaron en palabras; tres órdenes en un formulario escribieron tres pasos en una llamada. Ajustes tras la prueba: los pasos se agregaban después del `return` previo (nunca se ejecutarían) → control sin IA + 🗑 reemplazar; "Sobre tu idea" aparecía sin idea; el verificador daba falsos positivos (marcaba como agregado lo que la orden pedía con otras palabras, y como falta lo que ya hacía un paso anterior) → ve lo escrito antes y solo cuenta comportamientos nuevos.
+
+### v0.11 (misma sesión): el panel de programar, por páginas
+- **Pedido del usuario:** el panel mostraba propuestas, plan y órdenes todo junto (había que subir y bajar); que sea por pasos. Probar escribiendo `nombre(…)` a mano "es raro".
+- **Hecho:** "construir juntos" como asistente: chips arriba (Plan · 1 · 2 · 3 · Casos, con ✓ / ⚠ / ○), una página a la vez, la propuesta de cada paso junto a su caja de orden, ◀ / ▶, "✍ Escribir los pasos 2–3" (de corrido hasta donde llegaste), y se abre solo lo recién escrito para revisarlo. Probar y agregar casos con un campo por parámetro (la llamada la arma el panel; texto sin comillas = texto). La prueba de humo revisa además la sintaxis del script del panel y las funciones que arman la llamada.
+
+
+## Plan v1.0: reestructurar según el Manifiesto (2026-10-10)
+- **Pedido del usuario:** reestructurar todo ComplementAIry para que implemente y haga cumplir cada punto de `Manifiesto.md` ("No Vibe Coding"). Que puedas bajar a tocar código o pedirle a la IA, con el máximo determinismo, y que diga qué código no revisó un humano y ayude a construir el modelo mental (en proyectos propios y heredados). Pidió tres planes: uno viendo el proyecto, otro desde cero y uno mezclado, más la comparación. A mitad de la sesión actualizó el manifiesto: agregó I.6 (Regla de Oro del Aprendiz) y la sección II (psicología) y renumeró el resto.
+- **Decisiones del usuario:**
+  - "tev/jev" = las dos cosas: proveedores de IA intercambiables y baratos (también locales) + marcos de decisión estructurados;
+  - exigencia **siempre estricta**;
+  - **romper compatibilidad**, con migrador (`cai migrar`);
+  - la IA **sigue sugiriendo y ayudando** (también cuando escribes algo mal o se te pasa algo), pero como alguien que sigue el manifiesto.
+- **Cómo se hizo:** dos agentes independientes; A leyó el código y B solo el manifiesto. Los dos llegaron al mismo esqueleto: tarea con estados, procedencia por línea, reglas en capas, compuertas deterministas y evidencia generativa. C toma el núcleo probado de A y las ideas nuevas de B (linter de prompts, tester ciego, tarjetas que caducan, MCP propio, señales de habituación), y agrega I.6 y II: licencias por construcción + kata a mano, calibración, guía solo a pedido, bitácora de logros propios e intención aprender/producir.
+- **Documentos:** [planes/plan-C-mezclado.md](planes/plan-C-mezclado.md) (incluye la tabla de cada punto: qué te pide, cómo sugiere la IA y cómo se hace cumplir; casos límite; ejemplos de uso; por qué es más rápido sin deteriorarte), [planes/plan-A-con-proyecto.md](planes/plan-A-con-proyecto.md), [planes/plan-B-desde-cero.md](planes/plan-B-desde-cero.md) y [planes/comparacion.md](planes/comparacion.md).
+- **Crítica dejada por escrito:** abrir la escritura a la IA va contra la investigación del propio proyecto (delegar baja la comprensión). La sostienen las licencias (I.6) y la evidencia por tramo. Hay una puerta dura tras F5: probar con 2–3 personas antes de seguir.
+- **Siguiente paso:** F0 (rama `v1`, selftest partido en vitest por módulo, test de arquitectura).

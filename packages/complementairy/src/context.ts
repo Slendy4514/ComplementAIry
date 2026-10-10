@@ -40,9 +40,7 @@ export interface ProjectContext {
 }
 
 /** Reglas comunes a todos los prompts: no anclarse y preguntar cuando falta contexto. */
-export const CRITERIO = `Criterio:
-- No te ancles a cómo está hecho ahora: si hay un diseño o enfoque claramente mejor, propónlo con su porqué (aunque implique cambiar lo que el programador ya hizo), sin imponerlo.
-- Si te falta contexto para aconsejar bien (qué quiere lograr, restricciones, convenciones), haz una pregunta concreta (tipo "pregunta") en vez de suponer.`;
+export { CRITERIO } from "./prompts.js";
 
 export function projectContext(root: string, rel: string): ProjectContext {
   const dir = path.join(dataDir(root));

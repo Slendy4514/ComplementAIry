@@ -12,12 +12,13 @@ import { biblioteca, paraLenguaje, parseLlamada, type Snippet } from "./bibliote
 import { makeZoner, notaOrigen, origenDe, type Config } from "./config.js";
 import { fileIdentifiers, guardReplies } from "./guard.js";
 import { langFor } from "./lang.js";
-import { ask } from "./llm.js";
+import { ask, iaOpts } from "./llm.js";
 import { loadPerfil, nivelDe, puntaje, registrar, temasDe, type Nivel } from "./profile.js";
 import { indentAt, insertBelow, renderReply, type Reply } from "./render.js";
 import { deleteHilo, getHilo, hilosDe, loadEstado, saveEstado, setHilo, type Estado } from "./state.js";
 import { findThreads, nextThreadId, regionOf, type Thread } from "./threads.js";
 import { verifyCommentOnly } from "./verify.js";
+import { REUTILIZAR } from "./prompts.js";
 
 export const TIPOS = ["pista", "pieza", "plano", "snippet", "pregunta", "revision", "ejemplo"] as const;
 
@@ -65,24 +66,15 @@ Reglas:
 - Links: solo documentación oficial que conozcas con certeza. Si dudas de una URL, no la pongas.
 - No cites números de línea. Puedes leer el proyecto con Read/Grep/Glob. No intentes modificar nada.
 
+${REUTILIZAR}
+
 ${CRITERIO}`;
 
 export const NIVEL_BASE: Record<Nivel, number> = { aprendiz: 1, intermedio: 1, experto: 2 };
 /** Ajuste del perfil cuando un hilo se resuelve (desaparece del archivo), según el nivel que hizo falta. */
 const DELTA_RESUELTO = [0, 0.08, 0.04, 0, -0.04];
 
-export type Tamano = "chico" | "mediano" | "grande";
-
-/**
- * Opciones de IA según el tamaño de la tarea (.cai/config.json → ia.modelos):
- * chico = una función, mediano = un archivo, grande = el proyecto. `true` (compatibilidad) = chico.
- */
-export function iaOpts(c: Config, tamano: Tamano | boolean = "mediano"): { model?: string; context7?: boolean } {
-  const t: Tamano = tamano === true ? "chico" : tamano === false ? "mediano" : tamano;
-  const legado = t === "chico" ? c.ia.modeloRapido || c.ia.modelo : c.ia.modelo;
-  const model = c.ia.modelos?.[t] || legado;
-  return { ...(model ? { model } : {}), ...(c.ia.context7 && t !== "chico" ? { context7: true } : {}) };
-}
+export { iaOpts, type Tamano } from "./llm.js";
 
 /** Escalones y formatos que el humano puede pedir directamente en un @ia?. */
 export const PEDIDOS: { re: RegExp; nivel: number; tipo: string; que: string }[] = [
@@ -282,7 +274,7 @@ export async function runGuia(root: string, rel: string, log: (s: string) => voi
           "Conversación del hilo:",
           conversation,
           "",
-          subs.length > 1 ? `Respondé SOLO esta parte (${i + 1}/${subs.length}): ${sub}` : `Respondé al último mensaje del programador.`,
+          subs.length > 1 ? `Responde SOLO esta parte (${i + 1}/${subs.length}): ${sub}` : `Responde al último mensaje del programador.`,
           "",
           "Código (◀ HILO marca dónde está la conversación):",
           fileView,

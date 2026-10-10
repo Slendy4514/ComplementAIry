@@ -66,7 +66,7 @@ function applyEdits(content: string, edits: EditSpec[]): string | null {
 
 const NO_SIMULABLE =
   "no se pudo simular la edición con exactitud (old_string no coincide con el archivo). " +
-  "Releé el archivo y usá un old_string idéntico; por seguridad, lo que no se puede verificar se bloquea.";
+  "Relee el archivo y usa un old_string idéntico; por seguridad, lo que no se puede verificar se bloquea.";
 
 /** Tamaño máximo que se verifica dentro del tiempo del hook; más grande se bloquea (nunca se deja pasar sin verificar). */
 const MAX_VERIFY_BYTES = 2 * 1024 * 1024;

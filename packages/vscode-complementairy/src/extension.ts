@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import * as vscode from "vscode";
 import { Acciones, insertarSnippet, revisarConEdiciones } from "./acciones";
 import { Lentes } from "./codelens";
@@ -20,10 +19,9 @@ import { Panel } from "./panel";
  * garantías) están en la CLI; la extensión la invoca y muestra lo que deja en .cai/.
  */
 
-const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
-
 // `check` sale con 1 cuando alguna predicción no coincidió: es un resultado, no un error.
-const run = (args: string[], cwd: string, _titulo?: string): Promise<string> => correr(args, cwd, args[0] === "check" ? { aceptar: [1] } : {});
+const run = (args: string[], cwd: string, _titulo?: string, cancelar?: vscode.CancellationToken): Promise<string> =>
+  correr(args, cwd, { ...(args[0] === "check" ? { aceptar: [1] } : {}), ...(cancelar ? { cancelar } : {}) });
 
 async function onFile(cmd: string, titulo: string, extra: string[] = []): Promise<void> {
   const ed = vscode.window.activeTextEditor;
@@ -33,8 +31,8 @@ async function onFile(cmd: string, titulo: string, extra: string[] = []): Promis
   await guardar(ed.document);
   try {
     const out = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: `ComplementAIry: ${titulo}…`, cancellable: false },
-      () => run([cmd, ed.document.uri.fsPath, ...extra], cwd, titulo),
+      { location: vscode.ProgressLocation.Notification, title: `ComplementAIry: ${titulo}…`, cancellable: true },
+      (_p, token) => run([cmd, ed.document.uri.fsPath, ...extra], cwd, titulo, token),
     );
     const resumen = out.split("\n").filter((l) => /^[✓✗!]/.test(l.trim())).slice(-2).join(" · ");
     vscode.window.setStatusBarMessage(`ComplementAIry: ${resumen || "listo"}`, 6000);
@@ -201,7 +199,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     if (!doc || !cwd) return;
     await guardar(doc);
     try {
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: armando el plano del archivo…" }, () => run(["plano", "--archivo", doc.uri.fsPath], cwd));
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: armando el plano del archivo…", cancellable: true }, (_p, t) => run(["plano", "--archivo", doc.uri.fsPath], cwd, undefined, t));
       vscode.window.setStatusBarMessage("ComplementAIry: plano listo (resumen arriba del archivo, notas en cada función y tareas en el panel)", 8000);
     } catch (e) {
       mostrarError(e);
@@ -245,7 +243,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const cwd = root(ed?.document);
     if (!sel || !cwd) return;
     try {
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: explicando…" }, () => run(["explica", "--", sel], cwd, "explicando"));
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: explicando…", cancellable: true }, (_p, t) => run(["explica", "--", sel], cwd, "explicando", t));
       output.show(true);
     } catch (e) {
       mostrarError(e);
@@ -341,17 +339,15 @@ export function activate(ctx: vscode.ExtensionContext): void {
     // Proyecto sin iniciar: nada automático (ni gasto de IA): primero se inicia (panel → 🚀 Iniciar).
     const raiz = root(doc);
     if (!raiz || !tieneCai(raiz)) return;
-    probarAlGuardar(doc);
+    // "Silenciar" apaga todo lo automático al guardar, también probar los casos (ejecuta tu código).
+    if (!silenciado()) probarAlGuardar(doc);
     {
       if (!vscode.workspace.getConfiguration("cai").get<boolean>("acompanar", true) || silenciado()) return;
       const cwd = root(doc);
       const file = doc.uri.fsPath;
       if (!cwd || doc.uri.scheme !== "file" || /[\\/](\.cai|\.aicode|\.claude|node_modules|\.git)[\\/]/.test(file)) return;
-      execFile("sh", ["-c", `${cli()} acompanar ${shq(file)} --json --motivo ${motivo}`], { cwd, maxBuffer: 16 << 20, env: { ...process.env, CLAUDE_PROJECT_DIR: cwd } }, (err, stdout, stderr) => {
-        if (err) {
-          output.appendLine(`acompañante: ${stderr || err.message}`);
-          return;
-        }
+      void correr(["acompanar", file, "--json", "--motivo", motivo], cwd, { silencioso: true }).then(
+        (stdout) => {
         try {
           const r = JSON.parse(stdout) as { acciones: { tipo: string; detalle: string }[]; pendiente?: boolean };
           if (r.pendiente) return void vscode.window.setStatusBarMessage("ComplementAIry: sigo con lo anterior; reviso este guardado al terminar", 5000);
@@ -380,7 +376,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
         } catch {
           output.appendLine(`acompañante: salida inesperada: ${stdout.slice(0, 200)}`);
         }
-      });
+        },
+        (e: unknown) => output.appendLine(`acompañante: ${e instanceof Error ? e.message : String(e)}`),
+      );
     }
   }
 
@@ -421,7 +419,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const cwd = root(vscode.window.activeTextEditor?.document);
     if (!cwd) return;
     try {
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: mirando el proyecto completo…" }, () => run(["panorama"], cwd, "panorama"));
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: mirando el proyecto completo…", cancellable: true }, (_p, t) => run(["panorama"], cwd, "panorama", t));
       await abrir(cwd, "panorama.md");
     } catch (e) {
       mostrarError(e);
@@ -440,8 +438,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const m = [...antes.matchAll(/(?:function\s+|const\s+|def\s+)([A-Za-z_$][\w$]*)/g)].pop();
     await guardar(ed.document);
     try {
-      const out = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: proponiendo casos de prueba…" }, () =>
-        run(["tests", ed.document.uri.fsPath, ...(m ? [m[1]!] : [])], cwd, "tests"),
+      const out = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: proponiendo casos de prueba…", cancellable: true }, (_p, t) =>
+        run(["tests", ed.document.uri.fsPath, ...(m ? [m[1]!] : [])], cwd, "tests", t),
       );
       const archivo = /en (\S+\.(?:test\.\w+|py))/.exec(out)?.[1];
       if (archivo) await vscode.window.showTextDocument(vscode.Uri.joinPath(vscode.Uri.file(cwd), archivo), { preview: false });

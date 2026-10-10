@@ -12,11 +12,11 @@ import { eolOf, renderReply } from "./render.js";
 import { sonLiterales } from "./literales.js";
 import { cargarNotas, guardarNotas, mensaje, nuevaNota } from "./notas.js";
 import { guiaId, nextThreadId } from "./threads.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 import { verifyCommentOnly } from "./verify.js";
 
 /**
- * Trace-and-Predict: la IA propone llamadas a TUS funciones y vos predecís el resultado.
+ * Trace-and-Predict: la IA propone llamadas a TUS funciones y tú predices el resultado.
  * La comparación no la hace la IA: se ejecuta tu código y se compara. Determinista.
  */
 

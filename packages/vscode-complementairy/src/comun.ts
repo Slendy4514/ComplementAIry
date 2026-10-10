@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import * as vscode from "vscode";
+import { migrarModos } from "./compartido";
 
 /**
  * Lo que comparten los módulos de la extensión: llamar a la CLI `cai`, ubicar el proyecto y
@@ -15,14 +16,27 @@ export function cli(): string {
   return vscode.workspace.getConfiguration("cai").get<string>("comando", "cai");
 }
 
+/**
+ * El comando de la CLI separado en palabras (p. ej. "node /ruta/dist/cli.js"). Se ejecuta SIN shell:
+ * nada de lo que haya en el ajuste (`;`, `$(…)`, `|`) se interpreta como otro comando.
+ */
+export function comandoCli(): { exe: string; base: string[] } {
+  const partes = cli().trim().split(/\s+/).filter(Boolean);
+  return { exe: partes[0] ?? "cai", base: partes.slice(1) };
+}
+
+/** Variables de entorno con las que corre la CLI (el proyecto, para los hooks y las rutas). */
+export const entornoCli = (cwd: string): NodeJS.ProcessEnv => ({ ...process.env, CLAUDE_PROJECT_DIR: cwd });
+
+/** Tope por defecto de un pedido a la CLI: las revisiones completas tardan, pero no tanto. */
+const TOPE_MS = 10 * 60_000;
+
 export function root(doc?: vscode.TextDocument): string | undefined {
   const folder = doc ? vscode.workspace.getWorkspaceFolder(doc.uri) : vscode.workspace.workspaceFolders?.[0];
   return folder?.uri.fsPath;
 }
 
 export const relDe = (cwd: string, fsPath: string) => path.relative(cwd, fsPath).split(path.sep).join("/");
-
-const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
 
 /** La CLI respondió que ya hay otro pedido en curso sobre ese archivo (código 3). */
 export class OcupadoError extends Error {}
@@ -31,10 +45,19 @@ export class OcupadoError extends Error {}
  * Corre `cai ...`. Devuelve stdout. Si sale con 3 lanza OcupadoError; con otro código distinto de 0
  * (salvo los de `aceptar`, p. ej. el 1 de `check` = "alguna predicción no coincidió") lanza un error.
  */
-export function correr(args: string[], cwd: string, o: { silencioso?: boolean; aceptar?: number[] } = {}): Promise<string> {
+export function correr(args: string[], cwd: string, o: { silencioso?: boolean; aceptar?: number[]; cancelar?: vscode.CancellationToken; topeMs?: number } = {}): Promise<string> {
   if (!o.silencioso) output.appendLine(`$ ${cli()} ${args.join(" ")}`);
-  return new Promise((resolve, reject) => {
-    execFile("sh", ["-c", `${cli()} ${args.map(shq).join(" ")}`], { cwd, maxBuffer: 16 << 20, env: { ...process.env, CLAUDE_PROJECT_DIR: cwd } }, (err, stdout, stderr) => {
+  const { exe, base } = comandoCli();
+  const corte = new AbortController();
+  const sub = o.cancelar?.onCancellationRequested(() => corte.abort());
+  const tope = o.topeMs ?? TOPE_MS;
+  return new Promise<string>((resolve, reject) => {
+    execFile(exe, [...base, ...args], { cwd, maxBuffer: 16 << 20, env: entornoCli(cwd), signal: corte.signal, timeout: tope, killSignal: "SIGTERM" }, (err, stdout, stderr) => {
+      if (err && (err as { name?: string }).name === "AbortError") return reject(new Error("cancelado: detuve el pedido a pedido tuyo"));
+      if (err && (err as { killed?: boolean }).killed && !corte.signal.aborted)
+        return reject(new Error(`la CLI tardó más de ${Math.round(tope / 60_000)} min y la detuve; revisa "Ver salida" o prueba de nuevo`));
+      if (err && (err as { code?: unknown }).code === "ENOENT")
+        return reject(new Error(`no encuentro el comando "${exe}" (ajuste cai.comando): ¿está instalada la CLI de ComplementAIry?`));
       if (!o.silencioso) {
         output.append(stdout.length > 4000 ? `${stdout.slice(0, 4000)}…\n` : stdout);
         if (stderr) output.append(stderr);
@@ -54,7 +77,7 @@ export function correr(args: string[], cwd: string, o: { silencioso?: boolean; a
         reject(new Error(detalle));
       } else resolve(stdout.trim());
     });
-  });
+  }).finally(() => sub?.dispose());
 }
 
 export const dataDir = (cwd: string) => (fs.existsSync(path.join(cwd, ".aicode")) && !fs.existsSync(path.join(cwd, ".cai")) ? path.join(cwd, ".aicode") : path.join(cwd, ".cai"));
@@ -122,18 +145,20 @@ export interface Nota {
   explicacion?: { texto: string; coincide: boolean; comentario: string };
   testsProbados?: { funcion: string; fecha: string; archivo?: string };
   impacto?: { funcion: string; archivo: string; fecha: string }[];
+  /** Funciones que esta usa y aún no están listas (lo calcula la CLI sin IA; se reemplaza en cada verificación). */
+  dependencias?: { funcion: string; archivo: string; estado: string }[];
   ultimaPrueba?: { fecha: string; pasan: number; fallan: number; detalle: { descripcion: string; estado: string; obtenido?: string; esperado: string; llamada: string }[] };
   /** Modo programar (ver la CLI, programar.ts). */
   plan?: { pasos: { texto: string; hecho?: boolean; repertorio?: string }[]; separar?: { nombre: string; proposito: string } | null; fecha: string };
   contrato?: { llamada: string; esperado: string }[];
-  programada?: { fecha: string; tipo: string; porciones: number; pruebas: number; aciertosPrimera: number; sinProbar: number };
+  programada?: { fecha: string; tipo: string; porciones: number; pruebas: number; aciertosPrimera: number; sinProbar: number; ordenes?: number; prediccion?: { acierto: boolean } };
   objetivo?: { texto: string; criterios: string[]; confirmado?: string; terminada?: string };
   actualizada: string;
 }
 
 /** Una propuesta del modo programar (en preparación; nunca en tu archivo hasta tu clic). */
 export interface Propuesta {
-  tipo: "dirigido" | "pr" | "adaptada";
+  tipo: "dirigido" | "pr" | "adaptada" | "construir";
   fecha: string;
   archivo: string;
   funcion: string;
@@ -144,11 +169,127 @@ export interface Propuesta {
   linea?: number;
   falta?: string;
   explicacion?: string;
-  porciones?: { desde: number; hasta: number; paso: number; porque: string; aprobada: boolean; pruebas: { entrada: string; espero: string; obtenido: string; toca: boolean; acierto: boolean; explicacion?: string }[] }[];
+  porciones?: {
+    desde: number;
+    hasta: number;
+    paso: number;
+    porque: string;
+    aprobada: boolean;
+    pruebas: { entrada: string; espero: string; obtenido: string; toca: boolean; acierto: boolean; explicacion?: string }[];
+    /** Construir juntos (ver la CLI, construir.ts). */
+    entrada?: string;
+    incluida?: boolean;
+    codigo?: string;
+    tipo?: "ya-estaba" | "ajuste";
+    orden?: string;
+    idea?: string;
+    falta?: string;
+    explicacion?: string;
+    /** La IA chica (a ciegas): lo que agregó sin que lo pidieras, o lo que tu orden pedía y no hizo. */
+    verificacion?: { agregado: string[]; falta: string[]; dejado?: boolean };
+  }[];
   contrato?: { llamada: string; esperado: string; obtenido: string; pasa: boolean }[];
   original?: { id: string; codigo: string; proyecto: string };
   cambios?: { que: string; porque: string }[];
+  construir?: {
+    ayuda: "sugerir" | "aprender";
+    pasosPlan?: number;
+    /** La firma y el cierre de la función (para los campos de cada parámetro al probar). */
+    base?: { cabecera: string[]; cierre: string[]; sangria: string };
+    /** Los pasos recién escritos (0 = un ajuste): el panel abre ahí. */
+    escritos?: number[];
+    /** "pedido" (programar: la función entera con lo que pides) o "pasos" (programar · aprender). */
+    forma?: "pedido" | "pasos";
+    separar?: { pedido: string; motivo: string; auxiliares: { nombre: string; firma: string; proposito: string }[] };
+    pedidoPendiente?: string;
+    larga?: { lineas: number; max: number; pedido: string };
+    historial?: unknown[];
+    auditoria?: { estado: "lista" | "casi" | "falta"; resumen: string; casos?: { llamada: string; comentario: string }[]; queHacer?: string[]; hallazgos: { texto: string; porque: string }[]; ideal?: { descripcion: string; codigo: string }; codigo: string; fecha: string };
+    /** Lo que la IA ofrece en palabras para los pasos que faltan (cada uno espera tu orden). */
+    ofertas?: { paso: number; idea: string; alternativas: string[]; ideaTuya?: string; sobreTuIdea?: string }[];
+    /** Sugerencias de la IA sobre el código que la función ya tenía (las decides tú). */
+    previo?: { texto: string; porque: string; estado: "pendiente" | "dejado" | "aplicado" }[];
+    casos?: { descripcion: string; llamada: string; esperado: string; obtenido?: string; pasa?: boolean; duda?: string; tuyo?: boolean; raro?: string; ajustar?: boolean }[];
+    prediccion?: { llamada: string; espero?: string; obtenido?: string; acierto?: boolean; explicacion?: string };
+    trampas?: string[];
+  };
 }
+
+// --- Probar sin escribir llamadas: un campo por parámetro ---------------------------------------------
+
+/** Separa por comas de primer nivel (fuera de paréntesis, corchetes, llaves y textos). */
+function partirComas(t: string): string[] {
+  const out: string[] = [];
+  let prof = 0;
+  let cita = "";
+  let actual = "";
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i]!;
+    if (cita) {
+      actual += ch;
+      if (ch === "\\") actual += t[++i] ?? "";
+      else if (ch === cita) cita = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") cita = ch;
+    else if ("([{".includes(ch)) prof++;
+    else if (")]}".includes(ch)) prof--;
+    else if (ch === "," && prof === 0) {
+      out.push(actual.trim());
+      actual = "";
+      continue;
+    }
+    actual += ch;
+  }
+  if (actual.trim()) out.push(actual.trim());
+  return out;
+}
+
+/** Lo de adentro del primer paréntesis (respetando anidados). */
+function entreParentesis(t: string): string {
+  const i = t.indexOf("(");
+  if (i < 0) return "";
+  let prof = 0;
+  for (let j = i; j < t.length; j++) {
+    if (t[j] === "(") prof++;
+    else if (t[j] === ")" && --prof === 0) return t.slice(i + 1, j);
+  }
+  return t.slice(i + 1);
+}
+
+/** Los nombres de los parámetros de una firma (sin tipos, valores por defecto ni `self`). */
+export function parametrosDe(firma: string): string[] {
+  return partirComas(entreParentesis(firma))
+    .map((x) => x.replace(/^\.\.\./, "…").replace(/\s*=.*$/s, "").replace(/\?\s*:.*$/s, "").replace(/\s*:.*$/s, "").trim())
+    .filter((x) => x && x !== "self" && x !== "this");
+}
+
+/** Los argumentos de una llamada sugerida ("f(1, 'a')" → ["1", "'a'"]). */
+export const argumentosDe = (llamada: string): string[] => partirComas(entreParentesis(llamada));
+
+/**
+ * Lo que escribes en un campo, como valor: números, true/false/null, listas, objetos o textos entre
+ * comillas quedan tal cual; lo demás se toma como TEXTO (no hace falta poner comillas).
+ */
+export function aLiteral(v: string, python = false): string {
+  const t = v.trim();
+  if (!t) return python ? "None" : "undefined";
+  if (/^(-?\d+(\.\d+)?(e-?\d+)?|true|false|null|undefined|NaN|-?Infinity|None|True|False)$/.test(t) || /^["'`\[{(]/.test(t)) return t;
+  return JSON.stringify(t);
+}
+
+/** Lo que esperas: "error: …" tal cual; lo demás como valor (texto sin comillas = texto). */
+export const esperadoLiteral = (v: string, python = false) => (/^\s*error\b/i.test(v) ? v.trim() : aLiteral(v, python));
+
+/** Arma la llamada con los valores de los campos (los vacíos del final se omiten). */
+export function armarLlamada(nombre: string, valores: string[], python = false): string {
+  const vs = [...valores];
+  while (vs.length && !vs[vs.length - 1]!.trim()) vs.pop();
+  return `${nombre}(${vs.map((v) => aLiteral(v, python)).join(", ")})`;
+}
+
+/** Para mostrar un argumento sugerido en un campo: un texto simple sin sus comillas. */
+export const valorDeCampo = (arg: string) => (/^"([^"\\]*)"$/.test(arg) || /^'([^'\\]*)'$/.test(arg) ? arg.slice(1, -1) : arg);
 
 export function leerPropuesta(cwd: string, rel: string, funcion: string): Propuesta | null {
   try {
@@ -253,6 +394,32 @@ function vivo(pid: number): boolean {
   }
 }
 
+/**
+ * ¿El pid sigue siendo un proceso de la CLI? Un pid de un archivo de caché puede haberse reusado para
+ * otro programa: antes de detenerlo se mira su línea de comando (en Linux, /proc). Sin /proc, se confía
+ * en que el registro tiene menos de 15 min.
+ */
+export function esProcesoCai(pid: number): boolean {
+  if (!vivo(pid)) return false;
+  try {
+    const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+    return /\bcai\b|complementairy|aicode|cli\.js/.test(cmd);
+  } catch {
+    return process.platform !== "linux";
+  }
+}
+
+/** Detiene un pedido en curso de la CLI (solo si el pid sigue siendo de la CLI). */
+export function detenerPedido(pid: number): boolean {
+  if (!esProcesoCai(pid)) return false;
+  try {
+    process.kill(pid, "SIGTERM");
+    return true;
+  } catch {
+    return false; // ya terminó
+  }
+}
+
 export function enCurso(cwd: string): Ocupacion[] {
   const d = path.join(dataDir(cwd), "cache", "ocupado");
   if (!fs.existsSync(d)) return [];
@@ -314,58 +481,9 @@ export function leerConfig(cwd: string, estricto = false): ConfigProyecto {
   }
 }
 
-// --- Modos (igual que la CLI, modos.ts): función > archivo > carpeta > proyecto -------------------
+// --- Modos: la misma lógica que la CLI (compartido.ts se copia al compilar) ------------------------
 
-export type Modo = "sugerir" | "aprender" | "programar";
-export const MODOS: Record<Modo, { etiqueta: string; icono: string; explicar: boolean; predecir: boolean; rapidas: boolean; proponerSolucion: boolean; descripcion: string }> = {
-  sugerir: { etiqueta: "sugerir", icono: "lightbulb", explicar: false, predecir: false, rapidas: true, proponerSolucion: false, descripcion: "ayuda directa, snippets, sugerencias rápidas; el código lo escribes tú" },
-  aprender: { etiqueta: "aprender", icono: "mortar-board", explicar: true, predecir: true, rapidas: false, proponerSolucion: false, descripcion: "ayuda gradual, predecir, explicar con tus palabras" },
-  programar: { etiqueta: "programar", icono: "rocket", explicar: false, predecir: false, rapidas: true, proponerSolucion: true, descripcion: "la IA escribe por pasos que diriges tú (o como un PR por porciones); entra con tu clic" },
-};
-
-/** Igual que la CLI (modos.ts → migrarModos): antes de v0.10 "programar" era lo que hoy es "sugerir". */
-export function migrarModos<T extends ConfigProyecto>(c: T): T {
-  if (c.modosVersion === 2) return c;
-  if (c.modo === "programar") c.modo = "sugerir";
-  for (const g of Object.values(c.modos ?? {})) for (const [k, v] of Object.entries(g ?? {})) if (v === "programar") g![k] = "sugerir";
-  c.modosVersion = 2;
-  return c;
-}
-const esModo = (m: unknown): m is Modo => typeof m === "string" && m in MODOS;
-
-// Glob a RegExp: "**" + "/" = cero o más carpetas (como picomatch); "*" = dentro de una carpeta.
-function glob(g: string): RegExp {
-  const re = g
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*\//g, "\u0001")
-    .replace(/\*\*/g, "\u0000")
-    .replace(/\*/g, "[^/]*")
-    .replace(/\?/g, "[^/]")
-    .replace(/\u0001/g, "(?:.*/)?")
-    .replace(/\u0000/g, ".*");
-  return new RegExp(`^${re}$`);
-}
-
-/** ¿La carpeta (prefijo "src/legacy/" o glob) incluye la ruta? y cuán específica es (igual que la CLI). */
-function carpetaIncluye(clave: string, rel: string): number {
-  if (/[*?]/.test(clave)) return glob(clave).test(rel) ? clave.replace(/[*?].*$/, "").length : -1;
-  const pref = clave.endsWith("/") ? clave : `${clave}/`;
-  return rel.startsWith(pref) ? pref.length : -1;
-}
-
-/** Función ("nombre" o "nombre#k") > archivo > carpeta (la más específica) > proyecto. Igual que la CLI (modos.ts). */
-export function modoEfectivo(cfg: ConfigProyecto, rel: string, funcion?: string): { modo: Modo; origen: "funcion" | "archivo" | "carpeta" | "proyecto" } {
-  const f = funcion ? cfg.modos?.porFuncion?.[`${rel}:${funcion}`] : undefined;
-  if (esModo(f)) return { modo: f, origen: "funcion" };
-  const a = cfg.modos?.porArchivo?.[rel];
-  if (esModo(a)) return { modo: a, origen: "archivo" };
-  const c = Object.entries(cfg.modos?.porCarpeta ?? {})
-    .map(([g, m]) => ({ m, n: esModo(m) ? carpetaIncluye(g, rel) : -1 }))
-    .filter((x) => x.n >= 0)
-    .sort((x, y) => y.n - x.n)[0];
-  if (c) return { modo: c.m as Modo, origen: "carpeta" };
-  return { modo: esModo(cfg.modo) ? cfg.modo : "sugerir", origen: "proyecto" };
-}
+export { esModo, MODOS, migrarModos, modoDe, modoEfectivo, type Ayuda, type Escribe, type Modo } from "./compartido";
 
 // --- Decisiones (.cai/decisiones.json; decidir y retractar pasan por la CLI) --------------------------
 

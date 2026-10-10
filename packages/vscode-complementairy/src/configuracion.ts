@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as vscode from "vscode";
-import { dataDir, leerConfig, mostrarError, root, type ConfigProyecto } from "./comun";
+import { dataDir, leerConfig, mostrarError, root, type ConfigProyecto, esModo } from "./comun";
 
 /**
  * Configuración en una pantalla: qué ayuda dar por defecto, sugerencias rápidas, el acompañante
@@ -95,7 +95,7 @@ async function guardar(cwd: string, d: Record<string, string | boolean>): Promis
   };
   const texto = (k: string) => String(d[k] ?? "").trim();
   poner(["vista"], "vista", texto("vista") === "comentarios" ? "comentarios" : "notas");
-  poner(["modo"], "modo", ["aprender", "programar"].includes(texto("modo")) ? texto("modo") : "sugerir");
+  poner(["modo"], "modo", esModo(texto("modo")) ? texto("modo") : "sugerir");
   poner(["rapidas", "procesoAbierto"], "procesoAbierto", d.procesoAbierto === true);
   poner(["ayuda", "porDefecto"], "ayuda", texto("ayuda") || "auto");
   poner(["rapidas", "activas"], "rapidas", d.rapidas === true);
@@ -153,10 +153,10 @@ button{font:inherit;background:var(--vscode-button-background);color:var(--vscod
 <h1>ComplementAIry: configuración</h1>
 <div class="ayuda">Se guarda en <code>.cai/config.json</code> de este proyecto (lo demás de ese archivo se conserva).</div>
 <h2>Modo</h2>
-${fila("Modo del proyecto", sel("modo", c.modo ?? "sugerir", [["sugerir", "💡 Sugerir: ayuda directa, snippets, sugerencias rápidas (el código lo escribes tú)"], ["aprender", "🎓 Aprender: ayuda gradual, predecir, explicar con tus palabras"], ["programar", "🚀 Programar: la IA escribe por pasos que diriges tú (o como un PR por porciones); entra con tu clic"]]), "Se puede cambiar por carpeta, archivo o función desde la barra de estado o el panel Nota (gana el más específico). Cambiar de modo no toca lo ya hecho: notas, tareas, estructura y panorama quedan igual.")}
+${fila("Modo del proyecto", sel("modo", c.modo ?? "sugerir", [["sugerir", "✍ Tú escribes · 💡 sugerir: ayuda directa, snippets, sugerencias rápidas"], ["aprender", "✍ Tú escribes · 🎓 aprender: ayuda gradual, predecir, explicar con tus palabras"], ["programar", "🤖 La IA propone (construir juntos) · 💡 sugerir: tú das la orden con tus palabras y predices la función"], ["programar-aprender", "🤖 La IA propone (construir juntos) · 🎓 aprender: además dices cómo lo harías antes y pruebas cada paso"]]), "Dos ejes: quién escribe (tú, o la IA con tus órdenes, paso a paso y con tu clic) y cuánta ayuda (sugerir o aprender). Se puede cambiar por carpeta, archivo o función desde la barra de estado o el panel Nota (gana el más específico). Cambiar de modo no toca lo ya hecho.")}
 ${fila("Ideas: qué aprender", chk("ideasAprender", c.ideas?.aprender === true), "Además de funcionalidades y mejoras, el panel sugiere conceptos o técnicas para aprender (pensado para el modo aprender). Apagado por defecto.")}
 <h2>Modo programar</h2>
-${fila("Probar cada porción (obligatorio)", chk("prediccionObligatoria", c.programar?.prediccionObligatoria !== false), "En una propuesta \"como un PR\", para avanzar pruebas cada porción con tu entrada y lo que esperas. Apagado: puedes insertar sin probar, y queda como deuda de comprensión.")}
+${fila("Predecir antes de insertar (obligatorio)", chk("prediccionObligatoria", c.programar?.prediccionObligatoria !== false), "Construir juntos: antes de insertar la función, pides los casos y predices qué da uno de ellos (sin ver el resultado). En programar · aprender siempre se pide, y además se prueba cada porción.")}
 ${fila("Repertorio: guardar", chk("repGuardar", c.repertorio?.guardar !== false), "Tus funciones 🟢 de este proyecto se guardan en tu repertorio personal (repo git en ~/.complementairy/repertorio, entre proyectos). Apágalo en proyectos de clientes. Nunca guarda lo heredado ni de terceros.")}
 ${fila("Repertorio: usar", sel("repUsar", c.repertorio?.usar ?? "preguntar", [["preguntar", "Preguntar (te muestra lo parecido y eliges)"], ["siempre", "Siempre (lo que ya hiciste va en pasos más grandes)"], ["nunca", "Nunca"]]), "En modo programar, lo que ya hiciste antes va en pasos más grandes y se puede proponer tu versión adaptada (como diff).")}
 <h2>Ayuda</h2>

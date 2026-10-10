@@ -21,7 +21,9 @@ import { loadPerfil, nivelDe, puntaje, registrar } from "./profile.js";
 import { separarListas, type Reply } from "./render.js";
 import { markdown } from "./salida.js";
 import { noProbable, probarCasos, proponerTests } from "./tests.js";
-import { iaOpts, marcadores, NIVEL_BASE, PEDIDOS, SYSTEM, TIPOS } from "./tutor.js";
+import { iaOpts } from "./llm.js";
+import { marcadores, NIVEL_BASE, PEDIDOS, SYSTEM, TIPOS } from "./tutor.js";
+import { actualizarIndice, dependenciasPendientes, leerIndice } from "./indice.js";
 
 /**
  * Conversación dentro de una nota (o una nota nueva desde una línea o una selección).
@@ -199,16 +201,21 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
       const libreria = paraLenguaje(biblioteca(root), lang.id);
       const libTexto = libreria.map((s) => `- ${s.nombre}: ${s.descripcion}${marcadores(s).length ? ` (marcadores: ${marcadores(s).join(", ")})` : ""}`).join("\n");
       const entero = nota.alcance === "archivo";
-      // Una nota de función solo ve ESA función (y las firmas de las otras, para no comentarlas).
+      // Una nota de función ve ESA función; las otras van en el mapa del archivo (contexto común), para reutilizarlas.
       const fn = entero ? undefined : ((nota.ancla.funcion ? funcionPorClave(funciones, nota.ancla.funcion) : undefined) ?? funcionEn(nota.ancla.linea));
       const marca = entero || fn ? -1 : nota.ancla.linea - 1;
       const desde = fn ? fn.linea - 1 : entero || lineas.length <= 400 ? 0 : Math.max(0, marca - 80);
       const hasta = fn ? fn.linea - 1 + fn.lineas : entero ? Math.min(lineas.length, 600) : lineas.length <= 400 ? lineas.length : marca + 80;
+      await actualizarIndice(root, [rel]).catch(() => undefined); // el mapa del archivo (contexto) sale del índice
+      if (nota.ancla.funcion) {
+        const deps = dependenciasPendientes(leerIndice(root), rel, nota.ancla.funcion);
+        if (deps.length) nota.dependencias = deps;
+        else delete nota.dependencias;
+      }
       const vista = lineas
         .slice(desde, hasta)
         .map((l, i) => `${String(desde + i + 1).padStart(4)}| ${l}${desde + i === marca ? "   ◀ NOTA" : ""}`)
         .join("\n");
-      const otras = fn ? funciones.filter((f) => f !== fn && !(f.linea >= fn.linea && f.linea < fn.linea + fn.lineas)).map((f) => `${f.linea}| ${(lineas[f.linea - 1] ?? "").trim()}`) : [];
       const prompt = [
         `Archivo: ${rel} (${lang.id})${critical ? " — ZONA CRÍTICA" : ""}. Programador: ${nivelProg} en ${lang.id}.`,
         notaOrigen(origenDe(z.config, rel)),
@@ -217,7 +224,7 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
         ped ? `El programador pidió explícitamente: ${ped.que}. Responde con eso (tipo "${ped.tipo}").` : "",
         p.pedido === "explica" ? "El programador pidió que le expliques esta parte: qué hace, por qué y qué cuidar. Sin reescribirla." : "",
         entero ? "La pregunta es sobre el ARCHIVO COMPLETO (su organización, qué funciones tiene o le faltan, cómo encaja en el proyecto), no sobre una función puntual." : "",
-        fn ? `Esta nota es SOLO de la función \`${fn.nombre}\`. Habla únicamente de ella: no comentes ni sugieras cambios en otras funciones (cada una tiene su propia nota).` : "",
+        fn ? `Esta nota es SOLO de la función \`${fn.nombre}\`. De las otras funciones, como mucho di que esta las use; nunca qué les falta ni cómo deberían ser (cada una tiene su propia nota).` : "",
         contextoComun(root, rel, { funcion: nota.ancla.funcion }),
         libTexto && !sinSnippets ? `BIBLIOTECA DE SNIPPETS (${lang.id}):\n${libTexto}` : "",
         sinSnippets ? "MODO APRENDER: todavía no sugieras snippets; primero que lo intente." : "",
@@ -226,7 +233,6 @@ export async function responderNota(root: string, p: PedidoNota, log: (s: string
         nota.hilo.slice(-12).map((m) => `${m.quien === "ia" ? "TUTOR" : "PROGRAMADOR"}: ${m.texto.slice(0, 1500)}`).join("\n"),
         entero ? "Código del archivo:" : fn ? `Código de \`${fn.nombre}\`:` : "Código (◀ NOTA marca dónde está la nota):",
         vista,
-        otras.length ? `Otras funciones del archivo (solo firmas, NO hables de ellas):\n${otras.join("\n")}` : "",
       ]
         .filter(Boolean)
         .join("\n");

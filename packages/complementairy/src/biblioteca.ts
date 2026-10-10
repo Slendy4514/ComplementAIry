@@ -9,9 +9,9 @@ import { stripJsonc } from "./snippets.js";
 
 /**
  * Biblioteca de snippets: el único código que entra a tus archivos "desde la IA" es código
- * que ya existe y que vos aprobaste (tus snippets o la base de estructuras muy conocidas).
+ * que ya existe y que tú aprobaste (tus snippets o la base de estructuras muy conocidas).
  * La IA solo sugiere CUÁL usar (`@guia[..] snippet: nombre arg=valor`); la expansión es
- * determinista y la disparás vos.
+ * determinista y la disparas tú.
  */
 
 export interface Snippet {

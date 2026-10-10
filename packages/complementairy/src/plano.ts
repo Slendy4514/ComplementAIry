@@ -8,8 +8,9 @@ import { ask } from "./llm.js";
 import { loadPerfil, nivelDe } from "./profile.js";
 import { sobreElCodigo } from "./memoria.js";
 import { actualizarMemoria, agregarPreguntas, unaLinea } from "./panorama.js";
-import { agregarTareas, cargarTareas, guardarTareas, rutasDe } from "./siguiente.js";
-import { iaOpts } from "./tutor.js";
+import { agregarTareas, cargarTareas, guardarTareas, rutasDe, tareasFile } from "./siguiente.js";
+import { conCandadoSync } from "./ocupado.js";
+import { iaOpts } from "./llm.js";
 import { sanitizeGuia } from "./verify.js";
 import { aplicarAEstructura, bloqueCorrecciones } from "./correcciones.js";
 import { bloqueObjetivos } from "./entender.js";
@@ -152,7 +153,7 @@ export async function planoProyecto(root: string, descripcion?: string): Promise
   };
   // Una propuesta nueva reemplaza a la anterior: los "Crear X" pendientes que ya no están, se quitan.
   const propuestos = new Set(data.modulos.map((m) => m.archivo));
-  guardarTareas(root, cargarTareas(root).filter((t) => t.origen !== "estructura" || t.hecha || propuestos.has(t.archivo ?? "")));
+  conCandadoSync(tareasFile(root), () => guardarTareas(root, cargarTareas(root).filter((t) => t.origen !== "estructura" || t.hecha || propuestos.has(t.archivo ?? ""))));
   const tareas = agregarTareas(
     root,
     [...data.modulos]

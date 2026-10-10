@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import picomatch from "picomatch";
 import { migrarModos } from "./modos.js";
+import { esModo, type Modo } from "./compartido.js";
 
 export interface Config {
   zonas: {
@@ -46,8 +47,8 @@ export interface Config {
     /** Con autoguardado: segundos sin editar antes de que el acompañante actúe (en VSCode). */
     esperaAutoguardado: number;
   };
-  /** Modo de trabajo del proyecto ("sugerir", "aprender" o "programar"); se puede cambiar por carpeta, archivo o función. */
-  modo: "sugerir" | "aprender" | "programar";
+  /** Modo de trabajo del proyecto (sugerir, aprender, programar o programar-aprender); se puede cambiar por carpeta, archivo o función. */
+  modo: Modo;
   /** porFuncion: "archivo:función" → modo (se guarda aquí, no en la nota: cambiar de modo no toca notas). */
   modos: { porCarpeta: Record<string, string>; porArchivo: Record<string, string>; porFuncion: Record<string, string> };
   /** Qué ayuda dar cuando preguntas sin pedir un escalón: "auto" (según tu nivel) o uno fijo. */
@@ -59,8 +60,11 @@ export interface Config {
   ideas: { aprender: boolean };
   /** Repertorio personal (entre proyectos): guardar tus funciones 🟢 y usarlas en modo programar. */
   repertorio: { guardar: boolean; usar: "siempre" | "preguntar" | "nunca" };
-  /** Modo programar: la prueba de cada porción (probador) es obligatoria; apagada, lo no probado queda como deuda. */
-  programar: { prediccionObligatoria: boolean };
+  /**
+   * Modo programar: predecir antes de insertar es obligatorio; `modeloPedidos` = la IA que escribe tus
+   * pedidos (el ida y vuelta: "chico" por defecto, rápido); `modeloAuditoria` = la que audita al final.
+   */
+  programar: { prediccionObligatoria: boolean; modeloPedidos: "chico" | "mediano" | "grande"; modeloAuditoria: "chico" | "mediano" | "grande" };
   /** soloConNota: guiar solo en funciones con nota · maxHora: tope de sugerencias por hora (~US$0,002 c/u). */
   rapidas: { activas: boolean; esperaMs: number; procesoAbierto: boolean; soloConNota: boolean; maxHora: number };
   /**
@@ -81,7 +85,7 @@ export interface Config {
     maxParametros: number | null;
   };
   /**
-   * Quién escribió qué. "heredado": código del proyecto que no escribiste vos (la IA no te lo atribuye,
+   * Quién escribió qué. "heredado": código del proyecto que no escribiste tú (la IA no te lo atribuye,
    * no cuenta en tu perfil y el acompañante no comenta salvo que lo pidas). "terceros": librerías
    * copiadas, código generado (se ignora en revisiones y panorama). El resto es "propio".
    */
@@ -166,7 +170,7 @@ export const DEFAULT_CONFIG: Config = {
   chat: { modelo: "mediano" },
   ideas: { aprender: false },
   repertorio: { guardar: true, usar: "preguntar" },
-  programar: { prediccionObligatoria: true },
+  programar: { prediccionObligatoria: true, modeloPedidos: "chico", modeloAuditoria: "mediano" },
   ayuda: { porDefecto: "auto" },
   rapidas: { activas: true, esperaMs: 1200, procesoAbierto: true, soloConNota: false, maxHora: 240 },
   practicas: { maxFuncionesArchivo: 12, maxLineasArchivo: 300, maxLineasFuncion: 40, maxAnidamiento: 3, maxParametros: 4 },
@@ -196,7 +200,7 @@ export function loadConfig(root: string): Config {
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...raw.snapshot },
     snippets: { ...DEFAULT_CONFIG.snippets, ...raw.snippets },
     acompanar: { ...DEFAULT_CONFIG.acompanar, ...raw.acompanar },
-    modo: raw.modo === "aprender" || raw.modo === "programar" ? raw.modo : "sugerir",
+    modo: esModo(raw.modo) ? raw.modo : "sugerir",
     modos: { porCarpeta: { ...raw.modos?.porCarpeta }, porArchivo: { ...raw.modos?.porArchivo }, porFuncion: { ...raw.modos?.porFuncion } },
     ayuda: { ...DEFAULT_CONFIG.ayuda, ...raw.ayuda },
     chat: { ...DEFAULT_CONFIG.chat, ...raw.chat },

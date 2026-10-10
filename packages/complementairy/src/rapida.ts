@@ -6,7 +6,7 @@ import { langFor } from "./lang.js";
 import { ask, evitada } from "./llm.js";
 import { cargarNotas, type Nota } from "./notas.js";
 import { claveFuncion, funcionEn, funcionesDe } from "./notasFuncion.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 import { huella } from "./verificar.js";
 import { modoEfectivo } from "./modos.js";
 
@@ -40,6 +40,7 @@ const SYSTEM = `Acompañas al programador MIENTRAS escribe una función, línea 
 - si va bien, di el próximo paso que FALTA en toda la función, siguiendo los pasos de su nota si los hay ("ahora busca el archivo en la bóveda");
 - en una línea vacía, qué escribir ahí (en palabras).
 Las líneas marcadas "(ya escrito)" están DESPUÉS del cursor y ya existen: NO sugieras nada que ya esté ahí. En "yaEscrito" pon el número de línea donde ya está lo que ibas a sugerir (0 si no está escrito en ninguna parte); si lo está, busca otra cosa que falte o devuelve texto vacío.
+Si otra función del MAPA DEL ARCHIVO ya hace (o debería hacer) eso, dilo ("usa normalize para limpiar la ruta") en vez de pedir que se escriba aquí.
 Nunca escribas código, expresiones ni la línea corregida (nada de "x === y"): solo la idea en palabras ("compara en vez de asignar"). Devuelve texto vacío solo si la función ya está completa. Español neutro con TUTEO ("valida", "usa", "revisa"), nunca voseo ("validá", "usá").`;
 
 /**

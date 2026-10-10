@@ -1,7 +1,9 @@
 # ComplementAIry: tú programas, la IA te acompaña
 
+> **v1.0 en planificación:** reestructuración completa para hacer cumplir el [Manifiesto](../Manifiesto.md) ("No Vibe Coding"). Plan aprobado: [planes/plan-C-mezclado.md](planes/plan-C-mezclado.md). Este documento describe v0.11.
+
 ## La idea en simple
-**Tú escribes tu código. La IA te acompaña:** te da el plano de lo que vas a construir, te dice qué funciones o piezas sirven, te sugiere snippets y te ayuda cuando ve que te trabas. Todo con **comentarios** dentro del código. La IA **no puede escribir tu código**, y eso no depende de que "se porte bien": lo impiden reglas automáticas (hooks) que bloquean y revierten cualquier intento.
+**Tú escribes tu código. La IA te acompaña:** te da el plano de lo que vas a construir, te dice qué funciones o piezas sirven, te sugiere snippets y te ayuda cuando ve que te trabas. Todo con **notas** al lado del código (vista por defecto en VSCode; la vista **comentarios** `@guia` dentro del archivo es la alternativa para cualquier editor). Las secciones 1 a 7 de abajo muestran la vista comentarios; la vista notas está en [Notas](#notas-lo-que-dice-la-ia-fuera-del-código-v05). La IA **no puede escribir tu código**, y eso no depende de que "se porte bien": lo impiden reglas automáticas (hooks) que bloquean y revierten cualquier intento.
 
 El único código que entra rápido a tus archivos son **snippets**: código que ya existe y que tú apruebas. Pueden ser tuyos o de una base de estructuras muy conocidas. La IA solo puede *sugerirlos apagados* (`[ ]`); **los activas tú** (`[x]`).
 
@@ -149,8 +151,8 @@ En la prueba real, de 3 casos activados pasaron 2 y falló 1, que era justo el b
 
 Las opiniones de la IA **no bloquean**. Lo que bloquea son las verificaciones deterministas (pre-commit y CI).
 
-### 5. Comprobar que entendés tu código (sin juez IA)
-`cai predecir archivo.ts` agrega preguntas del tipo *"Sin ejecutarlo: ¿qué devuelve `calcularCuota(1000, 0.1, 1)`?"*. Respondés con `@yo: 1100` y corrés `cai check archivo.ts`: **se ejecuta tu código** y se compara.
+### 5. Comprobar que entiendes tu código (sin juez IA)
+`cai predecir archivo.ts` agrega preguntas del tipo *"Sin ejecutarlo: ¿qué devuelve `calcularCuota(1000, 0.1, 1)`?"*. Respondes con `@yo: 1100` y corres `cai check archivo.ts`: **se ejecuta tu código** y se compara.
 ```ts
 // @yo: 1100
 // @guia[p2.2] revision: praise: ✓ Correcto, calcularCuota(1000, 0.1, 1) devuelve 1099.999999999999.
@@ -160,7 +162,7 @@ Hay dos controles:
 - Si la explicación de la pregunta revelaba el resultado, se elimina.
 
 ### 6. Quién puede crear snippets
-Seleccionás código que repetís y apretás **`Ctrl+Alt+S`**: se convierte en un snippet tuyo (`.vscode/cai.code-snippets`), donde marcás los huecos (`${1:nombre}`). Después lo usás escribiendo el prefijo y Tab, **sin IA**.
+Seleccionas código que repites y presionas **`Ctrl+Alt+S`**: se convierte en un snippet tuyo (`.vscode/cai.code-snippets`), donde marcas los huecos (`${1:nombre}`). Después lo usas escribiendo el prefijo y Tab, **sin IA**.
 
 ¿Puede la IA redactar snippets? Depende de `snippets.modo` en `.cai/config.json`, y el hook lo hace cumplir:
 
@@ -176,26 +178,26 @@ Seleccionás código que repetís y apretás **`Ctrl+Alt+S`**: se convierte en u
 |---|---|
 | `cai explica -- git rebase -i HEAD~3` | explica cada parte y sus riesgos. Los riesgos conocidos (`rm -rf`, `curl \| sh`, `reset --hard`...) se detectan sin IA. **No ejecuta** |
 | `cai pregunta "¿cómo veo los logs de un contenedor?"` | misma escalera de pistas; `--mas` sube un escalón, `--intente "..."` cuenta lo que probaste |
-| `cai corre -- pnpm test` y luego `cai error` | corre tu comando; si falla, te ayuda a entender el error (no lo arregla por vos) |
+| `cai corre -- pnpm test` y luego `cai error` | corre tu comando; si falla, te ayuda a entender el error (no lo arregla por ti) |
 | `cai shell` | atajos para tu `~/.bashrc`: `ia`, `iamas`, `ex`, `c` |
 | `cai plano "API de préstamos"` | propone la arquitectura del proyecto (carpetas, módulos, orden, reglas verificables) en `docs/ESTRUCTURA.md` |
-| `cai arquitectura "cómo representar el dinero"` | crea `docs/adr/NNNN-....md` con preguntas y opciones (pros, contras, cuándo conviene) como comentarios. **Decidís y escribís vos** |
+| `cai arquitectura "cómo representar el dinero"` | crea `docs/adr/NNNN-....md` con preguntas y opciones (pros, contras, cuándo conviene) como comentarios. **Decides y escribes tú** |
 | `cai adr nuevo "título"` | ADR vacío con la estructura |
 
 Las decisiones que se pueden expresar como regla (por ejemplo, "el dominio no importa infraestructura") se escriben con dependency-cruiser o import-linter y pasan a ser verificaciones deterministas.
 
 ---
 
-## Lo que vos le decís al sistema (memoria y reglas)
+## Lo que tú le dices al sistema (memoria y reglas)
 | Archivo | Qué es | Quién lo escribe |
 |---|---|---|
-| `.cai/proyecto.md` | qué busca el proyecto, para quién es, qué es lo más importante, qué querés aprender | vos |
-| `.cai/reglas.md` | tu "código de conducta" de cómo escribir código, en lenguaje natural; la revisión lo usa (revisor de convenciones) | vos |
-| `.cai/reglas/*.md` | reglas por carpeta (`paths:` en el frontmatter) | vos |
-| `.cai/reglas.json` | reglas **mecánicas** (regex por línea), verificadas sin IA | vos |
-| `.cai/config.json` | zonas críticas o delegadas, modo de snippets, comandos de Bash permitidos, modelo, Context7 | vos |
-| `docs/adr/` | decisiones de arquitectura | vos (con guía) |
-| `~/.cai/perfil.json` | tu nivel por tema (lenguajes y librerías) | declarado por vos y ajustado por evidencia |
+| `.cai/proyecto.md` | qué busca el proyecto, para quién es, qué es lo más importante, qué quieres aprender | tú |
+| `.cai/reglas.md` | tu "código de conducta" de cómo escribir código, en lenguaje natural; la revisión lo usa (revisor de convenciones) | tú |
+| `.cai/reglas/*.md` | reglas por carpeta (`paths:` en el frontmatter) | tú |
+| `.cai/reglas.json` | reglas **mecánicas** (regex por línea), verificadas sin IA | tú |
+| `.cai/config.json` | zonas críticas o delegadas, modo de snippets, comandos de Bash permitidos, modelo, Context7 | tú |
+| `docs/adr/` | decisiones de arquitectura | tú (con guía) |
+| `~/.cai/perfil.json` | tu nivel por tema (lenguajes y librerías) | declarado por ti y ajustado por evidencia |
 | `~/.cai/eventos.jsonl` | cada ajuste del perfil, con su motivo | el sistema |
 | `~/.cai/patrones.json` | tus errores frecuentes; la guía insiste en ellos ("esto ya te pasó antes") | el sistema |
 
@@ -242,9 +244,9 @@ cai init .            # hooks, config, plantillas, pre-commit, tareas de VSCode,
 cai perfil set typescript intermedio
 cai doctor            # qué falta y cómo arreglarlo (doctor --instalar instala las herramientas del stack)
 ```
-Después completá `.cai/proyecto.md` y `.cai/reglas.md`.
+Después completa `.cai/proyecto.md` y `.cai/reglas.md`.
 
-**Extensión de VSCode** (`packages/vscode-complementairy`): atajos `Ctrl+Alt+G` (guía), `Ctrl+Alt+R` (revisar), `Ctrl+Alt+E` (expandir snippet o elegir de la biblioteca) y `Ctrl+Alt+S` (snippet desde la selección); el acompañante corre al guardar, más resaltado de comentarios: azul para `@guia`, ámbar para `@ia?`/`@yo:` y un borde rojo en lo bloqueante. En este devcontainer se instala sola.
+**Extensión de VSCode** (`packages/vscode-complementairy`): atajos `Ctrl+Alt+G` (responder tus `@ia?` del archivo), `Ctrl+Alt+R` (revisar), `Ctrl+Alt+L` (¿quedó lista esta función?), `Ctrl+Alt+N` (siguiente paso), `Ctrl+Alt+P` (panorama), `Ctrl+Alt+Espacio` (sugerencia rápida ahora), `Ctrl+Alt+E` (expandir snippet o elegir de la biblioteca) y `Ctrl+Alt+S` (snippet desde la selección); el acompañante corre al guardar, más resaltado de comentarios: azul para `@guia`, ámbar para `@ia?`/`@yo:` y un borde rojo en lo bloqueante. En este devcontainer se instala sola.
 
 **Stacks:**
 - **TypeScript/JavaScript:** tsc, ESLint, Vitest, Stryker, dependency-cruiser y tsx.
@@ -254,8 +256,8 @@ Agregar un stack es agregar una entrada en `packages/complementairy/src/adapters
 
 **Requisitos y límites conocidos:**
 - Stryker necesita Node 22, por eso el devcontainer usa `javascript-node:22`.
-- typescript-eslint aún no soporta TypeScript 7, por eso se usa `typescript@^6`.
-- CI necesita el paquete `cai` publicado, o un tarball (`pnpm pack`) en la variable `CAI_PKG`.
+- typescript-eslint aún no soporta TypeScript 7: la extensión y `examples/demo-ts` usan `typescript@^6` (con ESLint); la CLI, que no usa typescript-eslint, usa `typescript@^7`.
+- El workflow de CI que `cai init` instala en **tu** proyecto (`kit/github`) necesita el paquete `cai` publicado, o un tarball (`pnpm pack`) en la variable `CAI_PKG`. El CI de este repo compila y prueba desde el código.
 - Costo aproximado por uso: guía US$0,02–0,05 por pregunta; revisión completa US$0,25–0,30.
 
 ## Componentes
@@ -333,6 +335,14 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 - **Notas**: cada ítem de verificar/responder trae `funcion`; `repartir` manda lo de otra función o del archivo a la nota del archivo. La guía rápida marca lo que está después del cursor como "(ya escrito)" y se autoverifica con `yaEscrito`.
 - **Modo programar** (`programar.ts`): plan 3–5 pasos (más → auxiliar como tarea); paso dirigido (solo lo dicho; `falta` en vez de completar); PR por porciones contra tus casos (`validarContrato`: ≥ 2, literales, uno borde); probador con **marcas** insertadas por tree-sitter en una copia junto al original (se borra siempre): la entrada debe recorrer la porción (en una rama, su interior); lo esperado se compara ejecutando. Inserción solo desde la extensión (tu clic); `programada` en la nota; deuda de comprensión y prueba diferida. Repertorio personal (`repertorio.ts`): repo git fuera del proyecto (`CAI_REPERTORIO`), solo lo tuyo 🟢, búsqueda léxica sin IA, versión adaptada como diff.
 
+## Seguridad, IAs integradas y construir juntos (v0.11)
+- **Modos en dos ejes** (`compartido.ts`, copiado a la extensión al compilar): quién escribe (tú / la IA) × cuánta ayuda (sugerir / aprender) → `sugerir`, `aprender`, `programar`, `programar-aprender`. Sin migración: el cuarto modo es nuevo. El panel Nota muestra dos selectores.
+- **Construir juntos** (`construir.ts`): **la idea primero, tus órdenes después, el código al final.** `ofrecer`: la IA ofrece en palabras **todos los pasos que faltan** (en aprender, de a uno y después de tu idea; si trae expresiones de código se pide de nuevo, `conExpresiones`) y, si la función ya tenía código, lo revisa sin anclarse (`previo`: hasta 3 sugerencias → "Dejarlo así" / tu orden / 🗑 `quitarPrevio`). `ordenarPasos`: tus órdenes de varios pasos **de corrido** en un formulario (`ordenValida` sin IA: rechaza lo vago, lo de más de un paso y lo copiado) → una sola llamada escribe SOLO las líneas de cada paso, al final del cuerpo (`partesDeFuncion` + `armar`; nada después de un `return` previo) → **verificador chico** (Haiku, `verificarFiel`: tu orden + el código del paso + lo escrito antes, sin las explicaciones de la otra IA) avisa lo agregado (Quitarlo / Dejarlo, `resolverAgregado`) y lo que falta → ▶ probar con una entrada que recorre el paso → ✎ rehacer / ↶ deshacer. En `programar-aprender`, además, probar cada paso antes del siguiente. Al final: casos según la intención con uno oculto para tu predicción; ajustes con tu orden (`repartirAjuste`); casos raros → decisión; `trampas()`. Insertar con tu clic (`insertado --comprobar` antes). Desde el chat, la IA puede ofrecer y pedir casos, pero no dar órdenes, la idea, quitar/dejar, deshacer, predecir ni editar casos. En el panel: **una página a la vez** (chips Plan · pasos · Casos; `data-inicial` abre lo que pide atención: lo recién escrito, `construir.escritos`, el paso que toca o los casos; ◀ / ▶ y lo escrito en los campos se conservan); probar y agregar casos con **un campo por parámetro** (`parametrosDe`, `armarLlamada`: texto sin comillas = texto; la entrada sugerida llena los campos).
+- **Las funciones se conocen** (`indice.ts → mapaArchivo`): cada IA que trabaja en una función recibe el mapa del archivo (firma, propósito, estado, ⬜ si está vacía o prevista por el plano) con reserva fija en el contexto (`ajustarATope`: se recorta primero la memoria), y puede decir "usa X". Pero la nota de una función habla **solo de ella**: de las otras, únicamente un aviso sin IA (`dependenciasPendientes` → `nota.dependencias`, que se reemplaza, no se acumula): "usa normalize · aún no está lista · Ver su nota". Las correcciones sobre otra función no se anotan en ninguna parte (`repartir` las descarta; las dirá la revisión de esa función) y lo general del archivo no se repite (`yaDicho`).
+- **Datos que no se pierden** (`almacen.ts`): un JSON del programador dañado no se trata como vacío: copia `.danado-<huella>` y error explicativo. Escrituras atómicas; `conCandadoSync` (con pid del dueño) en decisiones, tareas, ideas y correcciones; el candado de "ocupado" se crea completo (enlace duro).
+- **Extensión**: la CLI se ejecuta **sin shell** (`comandoCli`), `cai.comando` solo a nivel de máquina y sin carpetas no confiables; pedidos con tope y cancelables; "Silenciar" también apaga los tests al guardar; `servir` avisa `empezado` para no cobrar dos veces una sugerencia.
+- **CLI**: `cli.ts` es una entrada mínima (el hook ya no carga la IA ni el resto: ~210 → ~85 ms por herramienta); `args.ts` (un flag con valor no acepta otro flag; errores de uso con código 64 y "¿quisiste decir…?"); `cai selftest <filtro>` y un test de vitest por escenario con `esperar()` para saber por qué falló; `sinSoluciones` quita el código escrito de verificar, revisar, chat y panorama fuera del modo programar; tuteo en todos los mensajes.
+
 ## Estado
 | Fase | Contenido | Estado |
 |---|---|---|
@@ -349,6 +359,8 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 | 11 (v0.8) | Modos programar/aprender por función, proceso abierto (~1 s), sin sesgo (a ciegas + otra mirada), qué hizo la IA, snippets con vista previa | ✅ |
 | 12 (v0.9) | Índice vivo, contexto común, decisiones con botones (retractables), impacto, chat del proyecto, revisión con veredicto y al salir, tests sin export (sandbox), hoy/deuda/sesión | ✅ |
 | 13 (v0.10) | Modos sugerir/aprender/programar, entender (proyecto, archivo, función), chat con conversaciones y modelo, tareas y correcciones desde el chat, Claude Code con confirmación por sus botones, ideas, notas con historial, modo programar (plan, tú diriges, PR por porciones con probador, repertorio) | ✅ |
+| 14 (v0.11) | Seguridad y datos (sin shell, JSON dañado no se pisa, candados), CLI mantenible (entrada mínima, args, selftest filtrable), las funciones se conocen (mapa del archivo, reutilizar, nota correcta), modos en dos ejes y construir juntos | ✅ |
+| 15 (v1.0) | Reestructuración según el Manifiesto: tareas con estados, procedencia por línea, licencias (I.6), decisiones con matriz/EV, proveedores por rol, pull the plug, modelo mental, reconstrucción semanal | 📝 plan aprobado ([planes/](planes/)) |
 
 **Honcho:** el perfil y la memoria hoy son archivos locales legibles, que es lo que pide el principio de transparencia. Conectar Honcho, un servicio externo de modelado de usuario, requiere una cuenta y una API key tuyas, y envía datos de tu forma de programar a un tercero. Queda para cuando lo decidas.
 

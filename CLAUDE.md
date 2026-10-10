@@ -2,18 +2,18 @@
 
 Este proyecto corre dentro de un Dev Container (Docker).
 
-- Si necesitás instalar algo de SISTEMA (apt-get, ffmpeg, librerías de compilación, etc.), NO lo instales directamente en la terminal — se pierde al reconstruir el contenedor.
-- En su lugar: agregá la línea RUN apt-get install -y <paquete> en .devcontainer/Dockerfile, y avisame que hace falta correr "Rebuild Container" en VSCode para que tome efecto.
-- Paquetes de Node (pnpm add algo) SÍ persisten normalmente. Esos instalalos sin pedir permiso, no hace falta avisar.
+- Si necesitas instalar algo de SISTEMA (apt-get, ffmpeg, librerías de compilación, etc.), NO lo instales directamente en la terminal — se pierde al reconstruir el contenedor.
+- En su lugar: agrega la línea RUN apt-get install -y <paquete> en .devcontainer/Dockerfile, y avísame que hace falta correr "Rebuild Container" en VSCode para que tome efecto.
+- Paquetes de Node (pnpm add algo) SÍ persisten normalmente. Esos instálalos sin pedir permiso, no hace falta avisar.
 
 # Proyecto ComplementAIry
 
-- Antes de trabajar, leé `docs/historial.md` (decisiones y preferencias del usuario) y `docs/design.md` (diseño y estado de cada fase).
+- Antes de trabajar, lee `docs/historial.md` (decisiones y preferencias del usuario) y `docs/design.md` (diseño y estado de cada fase).
 - El código de la CLI está en `packages/complementairy`. Para verificar: `pnpm build && pnpm test && node dist/cli.js selftest`.
-- Al terminar una sesión larga, actualizá `docs/historial.md` y el respaldo: `cp -r ~/.claude/projects ~/.claude/plans .claude-backup/`.
+- Al terminar una sesión larga, actualiza `docs/historial.md` y el respaldo: `cp -r ~/.claude/projects ~/.claude/plans .claude-backup/`.
 
 <!-- cai:inicio -->
-<!-- cai:version 0.10 -->
+<!-- cai:version 0.11 -->
 ## ComplementAIry: el humano programa, la IA acompaña
 
 El código lo escribe el humano. Tu rol es **acompañar**: dar ideas, estructura, piezas y revisión.
@@ -41,7 +41,8 @@ El código lo escribe el humano. Tu rol es **acompañar**: dar ideas, estructura
   - corregir lo que entiendes del proyecto: `cai memoria proponer --modulo <archivo> | --estructura <archivo> | --proyecto --texto "…"` → header `cai:<id de la propuesta>` ("Aplicar" / "No");
   - confirmar los objetivos → header `cai:obj` con el resumen completo en la pregunta ("Confirmar" / "Reabrir"); dar el proyecto por terminado → `cai:fin` (ídem; "Dar por terminado" / "Seguir").
   - Una sola opción por pregunta (sin multiSelect) y las opciones EXACTAS indicadas (las de la decisión, o las de arriba); si no, el hook la rechaza.
-- **Modo programar** (si el modo es "programar"): puedes proponer el plan (`cai programar plan <archivo> --funcion <f>`), un paso que el programador te dicta en palabras (`cai programar paso … --paso n --texto "lo que él dijo"`) o una propuesta por porciones (`cai programar pr …`). El código entra a su archivo SOLO con su clic en VSCode; sus casos, el probador y la inserción son suyos. En "sugerir" y "aprender" no escribes código.
+- **Modos en dos ejes:** quién escribe (el programador, o la IA "construyendo juntos") × cuánta ayuda (sugerir / aprender): `sugerir`, `aprender`, `programar`, `programar-aprender`. En "sugerir" y "aprender" no escribes código.
+- **Construir juntos** (modos "programar" y "programar-aprender"): puedes ofrecer en palabras cómo hacer los pasos que faltan (`cai programar construir <archivo> --funcion <f>`, `otra --paso N`). Las ÓRDENES que hacen escribir el código son SUYAS, con sus palabras (`cai programar orden`): no las des por él, ni corras `idea`, `quitar`, `dejar`, `deshacer`, `predecir` o `caso`. Si te dice "dale, haz eso", pídele que diga qué hacer con sus palabras. El código entra a su archivo SOLO con su clic en VSCode.
 - **"¿Está listo?"**: `cai verificar <archivo> --funcion <nombre>` (una función) o `cai revisar <archivo> --completo` (el archivo, con veredicto). Tests: `cai tests <archivo> <función> --probar`.
 - Otros comandos (instalar, git, mover archivos): sugiérelos y que los corra el humano.
 - Biblioteca de snippets: `cai snippet lista`. Zonas donde sí puedes escribir: `zonas.delegadas` en `.cai/config.json`.

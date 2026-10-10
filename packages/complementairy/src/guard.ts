@@ -105,3 +105,21 @@ export function guardReplies(replies: Reply[], level: number, userIds: Set<strin
   }
   return res;
 }
+
+/**
+ * Para las IAs que responden texto libre (verificar, revisar, chat, panorama): quita lo que sería la
+ * solución escrita (bloques de código y fragmentos en línea con más de una expresión) y deja la idea en
+ * palabras. Las piezas sueltas (`Number.isInteger(x)`) se conservan. `permitir` deja pasar bloques de
+ * esos lenguajes (p. ej. comandos de terminal en el chat).
+ */
+export function sinSoluciones(texto: string, o: { permitir?: string[] } = {}): string {
+  if (!texto) return texto;
+  const permitidos = new Set((o.permitir ?? []).map((x) => x.toLowerCase()));
+  let out = texto.replace(/```([\w+-]*)[^\n]*\n[\s\S]*?```/g, (bloque, lang: string) =>
+    permitidos.has(lang.toLowerCase()) ? bloque : "*(quité un bloque de código: la idea va en palabras, el código lo escribes tú)*",
+  );
+  for (const code of inlineSolutions(out)) out = out.replace(`\`${code}\``, "*(código omitido)*");
+  // Una línea lista para pegar ("`return !!x.get(p)`", "`if (!x) …`") también es la solución escrita.
+  out = out.replace(/`((?:return|throw|if|for|while|const|let|var|raise|def)\b[^`]*)`/g, "*(código omitido: dilo con tus palabras)*");
+  return out;
+}

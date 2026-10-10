@@ -233,7 +233,7 @@ document.addEventListener("change", (e) => {
         const op = await vscode.window.showInformationMessage("Objetivos confirmados ✓. ¿Propongo la estructura del proyecto (carpetas, archivos y por dónde empezar) a partir de ellos?", "Proponer la estructura", "Más tarde");
         if (op === "Proponer la estructura")
           try {
-            await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: proponiendo la estructura del proyecto…" }, () => correr(["plano"], cwd));
+            await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: proponiendo la estructura del proyecto…", cancellable: true }, (_p, t) => correr(["plano"], cwd, { cancelar: t }));
             refrescarPanel();
             await vscode.commands.executeCommand("cai.verEstructura");
           } catch (e) {

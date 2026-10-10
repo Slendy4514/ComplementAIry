@@ -8,7 +8,7 @@ import { listFiles } from "./files.js";
 import { langFor } from "./lang.js";
 import { ask } from "./llm.js";
 import { actualizarMemoria } from "./panorama.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 
 /**
  * `cai conocer`: para arrancar con un proyecto que ya existe. Escanea (sin IA) qué hay y quién
@@ -54,7 +54,7 @@ export function sugerirAutoria(root: string, archivos: string[]): { autoria: Aut
   if (!yo || ![...todos].some(esMio)) {
     return { autoria: out, resumen: todos.size ? `hay ${todos.size} autor(es) en git y ninguno coincide con tu correo (${yo || "sin configurar"}): no se sugiere autoría` : "el repositorio no tiene commits" };
   }
-  // Por carpeta (hasta 2 niveles): si casi nada lo tocaste vos, es candidato a heredado.
+  // Por carpeta (hasta 2 niveles): si casi nada lo tocaste tú, es candidato a heredado.
   const porDir = new Map<string, { total: number; ajenos: number }>();
   for (const f of archivos) {
     if (!autores.has(f) || TERCEROS.test(f)) continue;
@@ -70,7 +70,7 @@ export function sugerirAutoria(root: string, archivos: string[]): { autoria: Aut
   // Quedarse con la carpeta más alta (si src/ entera es ajena, no listar src/x y src/y).
   for (const [dir, e] of candidatos) {
     if (candidatos.some(([otro]) => otro !== dir && dir.startsWith(otro + "/"))) continue;
-    out.push({ glob: `${dir}/**`, tipo: "heredado", motivo: `${e.ajenos} de ${e.total} archivos nunca los modificaste vos (según git)` });
+    out.push({ glob: `${dir}/**`, tipo: "heredado", motivo: `${e.ajenos} de ${e.total} archivos nunca los modificaste tú (según git)` });
   }
   return { autoria: out, resumen: `${todos.size} autor(es) en el historial` };
 }
@@ -187,7 +187,7 @@ export async function conocer(
   // Autoría: solo se aplica lo que confirmes (en modo no interactivo, solo se sugiere).
   if (o.preguntar) {
     for (const a of autoria) {
-      const r = (await o.preguntar(`\n¿${a.glob} es ${a.tipo === "heredado" ? "código que NO escribiste vos (heredado)" : "de terceros (librería/generado)"}? ${a.motivo}. [S/n] `)).trim().toLowerCase();
+      const r = (await o.preguntar(`\n¿${a.glob} es ${a.tipo === "heredado" ? "código que NO escribiste tú (heredado)" : "de terceros (librería/generado)"}? ${a.motivo}. [S/n] `)).trim().toLowerCase();
       if (r === "" || r.startsWith("s")) res.autoriaAplicada.push(a);
     }
   }

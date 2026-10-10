@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "tareas": [
+    {
+      "titulo": "Crear selfTest en Files.js: Prueba de humo dentro de Obsidian: crea una carpeta temporal, mueve una nota de prueba, comp",
+      "archivo": "Files.js",
+      "funcion": "selfTest",
+      "origen": "plano",
+      "id": "t1",
+      "hecha": true,
+      "creada": "2026-10-08T04:16:35.126Z",
+      "archivada": true,
+      "hechaEn": "2026-10-09T01:58:21.764Z"
+    },
+    {
+      "titulo": "Pasar el switch de cli.ts a un registro de comandos",
+      "detalle": "`ejecutar` tiene 519 líneas y 5 niveles de anidamiento. Cada comando nuevo hace crecer el mismo bloque, y no puedes probar un comando sin pasar por el parseo de argumentos. Es el archivo con más riesgo de que un cambio rompa otro comando. Cómo: Cada comando (init, revisar, tests, plano, acompanar, conocer, doctor…) se describe como un objeto con su nombre, su ayuda, las opciones que acepta y una función que lo ejecuta, y vive junto al módulo que ya implementa esa lógica. cli.ts solo lee los argumentos, busca el comando en una tabla y lo ejecuta. También arma la ayuda automáticamente a partir de esa tabla. Los errores de argumentos se lanzan con mensajes que explican qué se esperaba, como piden tus reglas.",
+      "archivo": "packages/complementairy/src/cli.ts",
+      "origen": "panorama",
+      "id": "t2",
+      "hecha": true,
+      "creada": "2026-10-08T04:34:14.524Z",
+      "archivada": true,
+      "hechaEn": "2026-10-09T01:58:23.457Z"
+    },
+    {
+      "titulo": "Separar los comandos de cli.ts en un registro de comandos",
+      "detalle": "`ejecutar` tiene 712 líneas y 5 niveles de anidamiento, y cli.ts depende de unos 30 módulos. Cada comando nuevo hace crecer un solo bloque, cualquier cambio puede romper otro comando y no hay forma de probar un comando aislado. Cómo: Crea una carpeta `commands/` con un archivo por comando (o por familia: notas, revisión, tests, setup). Cada archivo exporta su nombre, su ayuda, sus opciones y una función `run(args, root)`. cli.ts queda en unas 50 líneas: lee argv, busca el comando en el registro, valida las opciones (y si faltan, lanza un error que explique cuál falta) y lo ejecuta. Las utilidades `opt`, `log`, `preguntar` y `fmt` pasan a un `cli/io.ts` compartido.",
+      "archivo": "packages/complementairy/src/cli.ts",
+      "origen": "panorama",
+      "id": "t3",
+      "hecha": false,
+      "creada": "2026-10-09T02:23:07.109Z"
+    },
+    {
+      "titulo": "Un solo dueño para el formato de .cai (notas, config, modos)",
+      "detalle": "comun.ts de la extensión reimplementa `archivoNotas`, `lineaDeDefinicion`, `reanclar`, `todasLasNotas`, `dataDir`, `esModo` y `leerConfig`, y notaView.ts repite `funcionesDe`/`funcionEn`. Si cambias el formato de las notas en la CLI, la extensión lee mal sin avisar, y es justo el dato que el usuario no quiere perder. Cómo: Saca a un paquete `packages/core` (o a un entry `complementairy/core` sin dependencias de IA) los tipos de Nota/Config y las funciones puras de lectura y reanclado. La CLI y la extensión importan desde ahí. Agrega un campo `version` a cada archivo de notas y a config.json para poder migrarlos más adelante.",
+      "archivo": "packages/vscode-complementairy/src/comun.ts",
+      "origen": "panorama",
+      "id": "t4",
+      "hecha": false,
+      "creada": "2026-10-09T02:23:07.109Z"
+    },
+    {
+      "titulo": "Mover selftest.ts a test/ y partirlo por garantía",
+      "detalle": "Son 1774 líneas y 188 funciones dentro de src/, así que probablemente se empaqueta en el .tgz. La mayoría de las funciones exportadas no tiene un test propio, y cuando algo falla cuesta saber qué garantía se rompió. Tu memoria de errores incluye 'tests de casos borde', y esto es lo que más te ayudaría. Cómo: Crea un archivo de test por módulo crítico: verify, hook, snapshot, bash, guard, notas/reanclar, comments.scanComments y config.zoneOf. Las utilidades `project`, `edit`, `write`, `bash` y `denied` pasan a un `test/helpers.ts`. Empieza por los casos borde de las garantías: comentarios al final de línea, CRLF, archivos nuevos, rutas fuera del proyecto y comandos encadenados con `&&` o `;`. Lo que decidas sobre el comando `cai selftest` puede reutilizar estos mismos casos.",
+      "archivo": "packages/complementairy/src/selftest.ts",
+      "origen": "panorama",
+      "id": "t5",
+      "hecha": false,
+      "creada": "2026-10-09T02:23:07.109Z"
+    },
+    {
+      "titulo": "Partir los orquestadores largos en etapas con nombre",
+      "detalle": "`runGuia` (225 líneas), `runReview` (218), `panorama` (213), `responderNota` (209), `verificar` (125) y `activate` (310) mezclan cuatro cosas: leer el estado, decidir sin IA, llamar a la IA y escribir el resultado. Por eso no puedes probar las decisiones deterministas sin pasar por el LLM. Cómo: Divide cada una en tres pasos: (1) `recolectar` el contexto, una función pura sobre lo que hay en disco; (2) `decidir`, que es determinista y devuelve qué pedir; (3) `pedir` a la IA y `publicar` por salida.ts. Así los pasos 1 y 2 se prueban sin IA. En la extensión, `activate` solo debería llamar a `registrarX(context)` de cada módulo.",
+      "archivo": "packages/complementairy/src/tutor.ts",
+      "origen": "panorama",
+      "id": "t6",
+      "hecha": false,
+      "creada": "2026-10-09T02:23:07.109Z"
+    },
+    {
+      "titulo": "Aclarar nombres que chocan: verify/verificar y los dos estados",
+      "detalle": "verify.ts (la garantía de que solo se tocan comentarios) y verificar.ts (comprobar si una función cumple su objetivo) hacen cosas sin relación pero tienen casi el mismo nombre. Además, acompanante.ts y state.ts exportan los dos `loadEstado` y `saveEstado`, y `funcionEn` está en responder.ts, notasFuncion.ts y notaView.ts. Eso provoca imports equivocados. Cómo: Renombra verify.ts a algo como `soloComentarios.ts` y deja un solo `funcionEn` (en notasFuncion o en core). Renombra el estado del acompañante (por ejemplo, `estadoAcompanante`) o júntalo con state.ts en un único módulo de persistencia con escritura atómica.",
+      "archivo": "packages/complementairy/src/verify.ts",
+      "origen": "panorama",
+      "id": "t7",
+      "hecha": false,
+      "creada": "2026-10-09T02:23:07.109Z"
+    },
+    {
+      "titulo": "Activar reglas de lint para promesas sueltas y validar la config",
+      "detalle": "Ya caíste dos veces en el error de 'async faltante', y la extensión dispara muchos subprocesos y temporizadores donde una promesa sin `await` se pierde sin avisar. Además, config.json y los JSON de .cai se leen sin validar, y tu regla es que los errores expliquen qué pasó. Cómo: Aplica en ambos paquetes la misma configuración de typescript-eslint estricta que ya usas en examples/demo-ts, con `no-floating-promises` y `no-misused-promises`. En `loadConfig` y en la carga de notas, valida la forma de los datos con un esquema y lanza un error que diga el archivo, el campo y el valor esperado, en vez de fallar más adelante.",
+      "archivo": "packages/complementairy/src/config.ts",
+      "origen": "panorama",
+      "id": "t8",
+      "hecha": false,
+      "creada": "2026-10-09T02:23:07.109Z"
+    },
+    {
+      "titulo": "Crear packages/complementairy/test/arquitectura.test.ts",
+      "detalle": "Lee los imports de cada archivo de src/ y falla si alguno rompe una regla de capas. Usa vitest, que ya tienes, sin sumar dependency-cruiser.",
+      "archivo": "packages/complementairy/test/arquitectura.test.ts",
+      "crear": true,
+      "origen": "estructura",
+      "id": "t9",
+      "hecha": false,
+      "creada": "2026-10-09T21:46:32.161Z"
+    },
+    {
+      "titulo": "Crear packages/complementairy/src/nucleo/soloComentarios.ts",
+      "detalle": "Nuevo nombre de verify.ts: decide si entre el antes y el después solo cambiaron comentarios @guia. Es la regla central del producto.",
+      "archivo": "packages/complementairy/src/nucleo/soloComentarios.ts",
+      "crear": true,
+      "origen": "estructura",
+      "id": "t10",
+      "hecha": false,
+      "creada": "2026-10-09T21:46:32.162Z"
+    },
+    {
+      "titulo": "Crear packages/complementairy/src/flujos/comprension.ts",
+      "detalle": "Nuevo nombre de verificar.ts: comprueba que entiendes tu código (cegar, sinAprobaciones). Así no se confunde con soloComentarios.",
+      "archivo": "packages/complementairy/src/flujos/comprension.ts",
+      "crear": true,
+      "origen": "estructura",
+      "id": "t11",
+      "hecha": false,
+      "creada": "2026-10-09T21:46:32.162Z"
+    },
+    {
+      "titulo": "Crear packages/complementairy/src/flujos/acompananteDecisiones.ts",
+      "detalle": "Se separa de acompanante.ts: solo la parte determinista (errores persistentes, archivo vacío, falta plano, trabado) sin fs ni IA, para testearla con datos.",
+      "archivo": "packages/complementairy/src/flujos/acompananteDecisiones.ts",
+      "crear": true,
+      "origen": "estructura",
+      "id": "t12",
+      "hecha": false,
+      "creada": "2026-10-09T21:46:32.162Z"
+    },
+    {
+      "titulo": "Crear packages/complementairy/src/cli/comandos.ts",
+      "detalle": "Tabla de comandos (nombre, ayuda, función del flujo) que reemplaza el switch largo de cli.ts. Agregar un comando pasa a ser agregar una fila. (lo creaste en packages/complementairy/src/comandos.ts)",
+      "archivo": "packages/complementairy/src/cli/comandos.ts",
+      "crear": true,
+      "origen": "estructura",
+      "id": "t13",
+      "hecha": true,
+      "creada": "2026-10-09T21:46:32.162Z",
+      "hechaEn": "2026-10-10T17:48:42.415Z"
+    },
+    {
+      "titulo": "Crear packages/complementairy/src/cli/cli.ts",
+      "detalle": "Punto de entrada del bin: parsea argv, busca el comando y muestra los errores de forma legible. (lo creaste en packages/complementairy/src/cli.ts)",
+      "archivo": "packages/complementairy/src/cli/cli.ts",
+      "crear": true,
+      "origen": "estructura",
+      "id": "t14",
+      "hecha": true,
+      "creada": "2026-10-09T21:46:32.162Z",
+      "hechaEn": "2026-10-09T21:46:33.923Z"
+    },
+    {
+      "titulo": "Crear packages/complementairy/src/ia/llm.ts",
+      "detalle": "Único punto que importa @anthropic-ai/claude-agent-sdk. Expone una interfaz LLM que los flujos reciben por parámetro, para poder testearlos con un falso. (lo creaste en packages/complementairy/src/llm.ts)",
+      "archivo": "packages/complementairy/src/ia/llm.ts",
+      "crear": true,
+      "origen": "estructura",
+      "id": "t15",
+      "hecha": true,
+      "creada": "2026-10-09T21:46:32.162Z",
+      "hechaEn": "2026-10-09T21:46:33.923Z"
+    },
+    {
+      "titulo": "Crear packages/complementairy/src/flujos/acompanante.ts",
+      "detalle": "Se queda solo como orquestador: carga el estado, pide las decisiones, delega la redacción a ia/ y publica la salida. (lo creaste en packages/complementairy/src/acompanante.ts)",
+      "archivo": "packages/complementairy/src/flujos/acompanante.ts",
+      "crear": true,
+      "origen": "estructura",
+      "id": "t16",
+      "hecha": true,
+      "creada": "2026-10-09T21:46:32.162Z",
+      "hechaEn": "2026-10-09T21:46:33.923Z"
+    },
+    {
+      "titulo": "Crear packages/complementairy/src/garantias/hook.ts",
+      "detalle": "Hook PreToolUse/PostToolUse. Solo usa nucleo/, proyecto/ y garantias/ para que una caída de la IA nunca abra un hueco. (lo creaste en packages/complementairy/src/hook.ts)",
+      "archivo": "packages/complementairy/src/garantias/hook.ts",
+      "crear": true,
+      "origen": "estructura",
+      "id": "t17",
+      "hecha": true,
+      "creada": "2026-10-09T21:46:32.162Z",
+      "hechaEn": "2026-10-09T21:46:33.923Z"
+    }
+  ]
+}

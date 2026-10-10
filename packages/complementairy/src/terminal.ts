@@ -5,7 +5,7 @@ import { loadConfig } from "./config.js";
 import { contextBlock, projectContext } from "./context.js";
 import { ask } from "./llm.js";
 import { home, loadPerfil, nivelDe, puntaje, registrar } from "./profile.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 
 /**
  * La guía también en la terminal: explicar un comando antes de correrlo, responder preguntas
@@ -49,7 +49,7 @@ const EXPLICA_SCHEMA = {
   },
 };
 
-const BASE = `Sos el tutor de terminal de ComplementAIry. Explicás; nunca ejecutás nada ni proponés ejecutarlo por el usuario.
+const BASE = `Eres el tutor de terminal de ComplementAIry. Explicas; nunca ejecutas nada ni propones ejecutarlo por el usuario.
 Español neutro con tuteo, concreto y CORTO: máximo ~120 palabras por respuesta (en "explica": resumen de 2 oraciones, una oración por parte, máximo 4 riesgos). Adaptate al nivel: aprendiz = explicá cada término; experto = mínimo.
 Links solo a documentación oficial que conozcas con certeza (man pages, docs.docker.com, git-scm.com, docs del paquete).`;
 
@@ -63,7 +63,7 @@ export async function explica(root: string, cmd: string): Promise<string> {
     cwd: root,
     schema: EXPLICA_SCHEMA,
     ...iaOpts(loadConfig(root), "mediano"),
-    prompt: `Explicá qué hace este comando, parte por parte, y qué riesgos tiene. Programador: ${nivel} en ${tema}.\nDirectorio: ${root}\nComando: ${cmd}`,
+    prompt: `Explica qué hace este comando, parte por parte, y qué riesgos tiene. Programador: ${nivel} en ${tema}.\nDirectorio: ${root}\nComando: ${cmd}`,
   });
   const out = [`\n${data.resumen}\n`];
   for (const p of data.partes) out.push(`  ${p.fragmento.padEnd(24)} ${p.significado}`);
@@ -188,7 +188,7 @@ export async function error(root: string): Promise<string> {
   try {
     e = JSON.parse(fs.readFileSync(errFile(), "utf8")) as typeof e;
   } catch {
-    throw new Error("no hay errores guardados. Corré tus comandos con: cai corre -- <comando>");
+    throw new Error("no hay errores guardados. Corre tus comandos con: cai corre -- <comando>");
   }
   const tema = temaDe(e.cmd);
   return responder(root, {

@@ -10,6 +10,8 @@ import { conCandado } from "./ocupado.js";
 import { cargarNotas } from "./notas.js";
 import { claveFuncion } from "./notasFuncion.js";
 import { huella } from "./verificar.js";
+import { escribirJson, leerCache } from "./almacen.js";
+import { cargarTareas } from "./siguiente.js";
 
 /**
  * Índice vivo del proyecto (sin IA): cada función con su firma, quién la llama y a quién llama, el
@@ -35,6 +37,10 @@ export interface EntradaIndice {
   estado: "sin nota" | "abierta" | "lista" | "casi" | "falta";
   tests?: { pasan: number; fallan: number; casos: number };
   resumen: string;
+  /** Para qué es (su objetivo, o lo que decía el plano del archivo al proponerla). */
+  proposito?: string;
+  /** Está declarada pero vacía (sin cuerpo, solo comentarios, `pass`, `TODO`…): planeada, por hacer. */
+  porHacer?: boolean;
   huella: string;
 }
 
@@ -53,11 +59,8 @@ const archivo = (root: string) => path.join(dataDir(root), "indice.json");
 const CLAVES_LENGUAJE = new Set(["if", "for", "while", "switch", "catch", "function", "return", "typeof", "new", "super", "await", "async", "elif", "print", "def", "class", "with", "not", "and", "or"]);
 
 export function leerIndice(root: string): Indice {
-  try {
-    return JSON.parse(fs.readFileSync(archivo(root), "utf8")) as Indice;
-  } catch {
-    return { version: 1, actualizado: "", archivos: {} };
-  }
+  // Se regenera desde el código: dañado o ausente, se arma de nuevo.
+  return leerCache<Indice>(archivo(root), () => ({ version: 1, actualizado: "", archivos: {} }));
 }
 
 /** Nombres de lo que se llama dentro de un código (`x(`, `this.x(`, `obj.x(`), sin palabras del lenguaje. */
@@ -68,8 +71,8 @@ export function llamadasEn(codigo: string): string[] {
 }
 
 /** Estado, tests y resumen de cada función, según sus notas (lo más reciente). */
-function estadoDesdeNotas(root: string, rel: string, src: string): Map<string, Pick<EntradaIndice, "estado" | "tests" | "resumen">> {
-  const out = new Map<string, Pick<EntradaIndice, "estado" | "tests" | "resumen">>();
+function estadoDesdeNotas(root: string, rel: string, src: string): Map<string, Pick<EntradaIndice, "estado" | "tests" | "resumen" | "proposito">> {
+  const out = new Map<string, Pick<EntradaIndice, "estado" | "tests" | "resumen" | "proposito">>();
   const notas = cargarNotas(root, rel, src).sort((a, b) => a.actualizada.localeCompare(b.actualizada));
   for (const n of notas) {
     const k = n.ancla.funcion;
@@ -80,8 +83,56 @@ function estadoDesdeNotas(root: string, rel: string, src: string): Map<string, P
       estado: n.estado === "abierta" && !n.verificacion ? "abierta" : estado,
       ...(n.ultimaPrueba ? { tests: { pasan: n.ultimaPrueba.pasan, fallan: n.ultimaPrueba.fallan, casos: n.ultimaPrueba.detalle.length } } : previo?.tests ? { tests: previo.tests } : {}),
       resumen: n.verificacion?.resumen || n.accion || previo?.resumen || "",
+      ...propositoDe(n, previo?.proposito),
     });
   }
+  return out;
+}
+
+/** El propósito según su nota: el objetivo (si lo hay) o lo que decía el plano del archivo. */
+function propositoDe(n: ReturnType<typeof cargarNotas>[number], previo?: string): { proposito?: string } {
+  const plano = n.origen === "plano" && n.titulo.includes(": ") ? n.titulo.slice(n.titulo.indexOf(": ") + 2) : "";
+  const p = n.objetivo?.texto || plano || previo;
+  return p ? { proposito: p } : {};
+}
+
+/**
+ * ¿La función está vacía (planeada, por hacer)? Sin cuerpo, o solo comentarios, `pass`, `...`, `TODO`,
+ * un `return` pelado o un "no implementado". Sin IA: la IA la ve como ⬜ y puede decir "usa X" y
+ * dejar lo que le falta a X en su propia nota.
+ */
+export function esPorHacer(codigo: string, langId: string): boolean {
+  const py = langId === "python";
+  let s = codigo.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+  if (py) s = s.replace(/#.*$/gm, "").replace(/("""|''')[\s\S]*?\1/g, "");
+  let cuerpo: string;
+  if (py) {
+    const dosPuntos = s.indexOf(":", s.indexOf(")") + 1);
+    if (dosPuntos < 0) return false;
+    cuerpo = s.slice(dosPuntos + 1);
+  } else {
+    const llave = s.indexOf("{");
+    if (llave < 0 || !s.trimEnd().endsWith("}")) return false; // flecha con expresión: tiene cuerpo
+    cuerpo = s.slice(llave + 1, s.lastIndexOf("}"));
+  }
+  const resto = cuerpo.replace(/[\s;]+/g, " ").trim();
+  return resto === "" || /^(pass|\.\.\.|return|todo|throw new Error\(.*\)|raise NotImplementedError(\(.*\))?|unimplemented!\(\)|todo!\(\))$/i.test(resto);
+}
+
+/** El propósito que el plano del archivo le dio a cada función ("Crear X en a.ts: qué hace"). */
+function propositosDelPlano(root: string, rel: string): Map<string, string> {
+  const out = new Map<string, string>();
+  let tareas: ReturnType<typeof cargarTareas> = [];
+  try {
+    tareas = cargarTareas(root);
+  } catch {
+    return out; // tareas.json dañado: el índice sigue (el error lo verás al usar las tareas)
+  }
+  for (const t of tareas)
+    if (t.archivo === rel && t.funcion && !t.descartada) {
+      const p = t.detalle || (t.titulo.includes(": ") ? t.titulo.slice(t.titulo.indexOf(": ") + 2) : "");
+      if (p) out.set(t.funcion, p);
+    }
   return out;
 }
 
@@ -125,9 +176,14 @@ async function actualizarYa(root: string, archivos?: string[]): Promise<Indice> 
     const src = fs.readFileSync(abs, "utf8");
     const h = huella(src);
     const estados = estadoDesdeNotas(root, rel, src);
+    const delPlano = propositosDelPlano(root, rel);
     const previo = idx.archivos[rel];
     if (previo && previo.huella === h) {
-      for (const f of previo.funciones) Object.assign(f, estados.get(f.clave) ?? { estado: "sin nota", resumen: f.resumen });
+      for (const f of previo.funciones) {
+        Object.assign(f, estados.get(f.clave) ?? { estado: "sin nota", resumen: f.resumen });
+        const p = estados.get(f.clave)?.proposito ?? delPlano.get(f.nombre);
+        if (p) f.proposito = p;
+      }
       continue;
     }
     let funciones: EntradaIndice[] = [];
@@ -153,6 +209,8 @@ async function actualizarYa(root: string, archivos?: string[]): Promise<Indice> 
           estado: e?.estado ?? "sin nota",
           ...(e?.tests ? { tests: e.tests } : {}),
           resumen: e?.resumen ?? "",
+          ...((e?.proposito ?? delPlano.get(f.nombre)) ? { proposito: e?.proposito ?? delPlano.get(f.nombre)! } : {}),
+          ...(esPorHacer(codigo, lang.id) ? { porHacer: true } : {}),
           huella: huella(codigo),
         };
       });
@@ -175,10 +233,7 @@ async function actualizarYa(root: string, archivos?: string[]): Promise<Indice> 
       }
     }
   idx.actualizado = new Date().toISOString();
-  fs.mkdirSync(path.dirname(archivo(root)), { recursive: true });
-  const tmp = `${archivo(root)}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(idx, null, 2));
-  fs.renameSync(tmp, archivo(root));
+  escribirJson(archivo(root), idx);
   return idx;
 }
 
@@ -196,3 +251,42 @@ const ICONO: Record<string, string> = { lista: "🟢", casi: "🟡", falta: "�
 
 export const lineaIndice = (f: EntradaIndice, conArchivo = false) =>
   `${ICONO[f.estado] ?? "·"} ${conArchivo ? `${f.archivo}: ` : ""}${f.firma}${f.tests ? ` [tests ${f.tests.pasan}✅ ${f.tests.fallan}❌]` : ""}${f.resumen ? ` — ${f.resumen.slice(0, 120)}` : ""}`;
+
+/**
+ * Las funciones que `clave` usa y que aún no están listas: vacías (⬜), 🔴 falta o 🟡 casi. Sin IA.
+ * Es lo único que la nota de una función dice de las otras: un aviso para ir a mirar SU nota.
+ */
+export function dependenciasPendientes(idx: Indice, rel: string, clave: string): { funcion: string; archivo: string; estado: string }[] {
+  const v = vecinas(idx, rel, clave);
+  return v.llama
+    .filter((g) => g.porHacer || g.estado === "falta" || g.estado === "casi")
+    .map((g) => ({ funcion: g.clave, archivo: g.archivo, estado: g.porHacer ? "por hacer" : g.estado }));
+}
+
+/**
+ * Mapa del archivo para una IA que trabaja en UNA función: cada otra función con su firma, para qué
+ * es y su estado (⬜ si está vacía), más las que el plano prevé y aún no existen. Así la IA puede decir
+ * "usa normalize" en vez de resolverlo dentro de esta función. `max` acota el largo (para la guía gris).
+ */
+export function mapaArchivo(root: string, idx: Indice, rel: string, clave?: string, max = 2500): string {
+  const corta = max < 2000;
+  const linea = (f: EntradaIndice) => {
+    const para = f.proposito || f.resumen;
+    const estado = f.porHacer ? "⬜ por hacer" : ICONO[f.estado] ?? "·";
+    return `- ${estado} ${f.firma}${para ? ` — ${para.slice(0, corta ? 70 : 140)}` : ""}${!corta && f.llama.length ? ` (usa: ${f.llama.slice(0, 5).join(", ")})` : ""}`;
+  };
+  const otras = (idx.archivos[rel]?.funciones ?? []).filter((f) => f.clave !== clave);
+  const existentes = new Set((idx.archivos[rel]?.funciones ?? []).map((f) => f.nombre));
+  const previstas = [...propositosDelPlano(root, rel)].filter(([n]) => !existentes.has(n)).map(([n, p]) => `- ⬜ (aún no existe) ${n} — ${p.slice(0, corta ? 70 : 140)}`);
+  const lineas = [...otras.map(linea), ...previstas];
+  if (!lineas.length) return "";
+  let texto = "";
+  for (const l of lineas) {
+    if (texto.length + l.length > max) {
+      texto += `- (…y ${lineas.length - texto.split("\n").length + 1} más)\n`;
+      break;
+    }
+    texto += `${l}\n`;
+  }
+  return `MAPA DEL ARCHIVO (${rel}; las otras funciones; ⬜ = vacía o prevista, por hacer):\n${texto.trimEnd()}`;
+}

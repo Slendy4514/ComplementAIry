@@ -43,6 +43,47 @@ function leer(f: string): Ocupacion | null {
   }
 }
 
+/**
+ * Crea `f` con su contenido completo, solo si no existe: se escribe en un temporal y se enlaza (el
+ * enlace falla si `f` ya existe). Así nadie puede leer el archivo a medio escribir.
+ */
+function crearCompleto(f: string, contenido: string): boolean {
+  const tmp = `${f}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmp, contenido);
+  try {
+    fs.linkSync(tmp, f);
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+    // Sistema de archivos sin enlaces duros: creación exclusiva normal.
+    try {
+      fs.writeFileSync(f, contenido, { flag: "wx" });
+      return true;
+    } catch {
+      return false;
+    }
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
+const dormir = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** Lee el registro de otro proceso; si no se puede leer y es reciente, espera un poco (máx. ~0,5 s). */
+function leerEsperando(f: string): Ocupacion | null {
+  for (let i = 0; i < 25; i++) {
+    const otro = leer(f);
+    if (otro) return otro;
+    try {
+      if (Date.now() - fs.statSync(f).mtimeMs > 2000) return null; // dañado y viejo
+    } catch {
+      return null; // ya no existe (era de un proceso que murió)
+    }
+    dormir(20);
+  }
+  return null;
+}
+
 export type Resultado = { ok: true; liberar: () => void } | { ok: false; por: Ocupacion };
 
 /** Cuántas veces este proceso tomó cada archivo (reentrante): se suelta recién al llegar a cero. */
@@ -69,13 +110,11 @@ export function ocupar(root: string, archivo: string, tarea: string, linea?: num
     };
   }
   const o: Ocupacion = { pid: process.pid, tarea, archivo, ...(linea ? { linea } : {}), desde: new Date().toISOString() };
-  try {
-    // "wx": si otro proceso lo creó en el mismo instante, gana el primero.
-    if (!actual) fs.writeFileSync(f, JSON.stringify(o), { flag: "wx" });
-  } catch {
-    const otro = leer(f);
+  if (!actual && !crearCompleto(f, JSON.stringify(o))) {
+    // Otro proceso lo creó en el mismo instante: gana el primero.
+    const otro = leerEsperando(f);
     if (otro) return { ok: false, por: otro };
-    fs.writeFileSync(f, JSON.stringify(o));
+    fs.writeFileSync(f, JSON.stringify(o)); // era de un proceso muerto o estaba dañado hace rato
   }
   tomas.set(f, 1);
   let liberado = false;
@@ -148,10 +187,63 @@ export class OcupadoError extends Error {
 
 const colas = new Map<string, Promise<unknown>>();
 
+/** Rutas que este proceso tiene tomadas con `conCandadoSync` (reentrante: no se espera a sí mismo). */
+const tomadosSync = new Map<string, number>();
+
+/**
+ * Candado síncrono para leer-modificar-escribir un archivo de datos pequeño (decisiones, tareas,
+ * ideas, correcciones): mismo `.lock` que `conCandado`, con espera activa corta. Es reentrante dentro
+ * del proceso. Si no se consigue en `maxMs`, lanza un error explicativo.
+ */
+export function conCandadoSync<T>(ruta: string, fn: () => T, maxMs = 5000): T {
+  const lock = `${ruta}.lock`;
+  const ya = tomadosSync.get(lock) ?? 0;
+  if (ya > 0) {
+    tomadosSync.set(lock, ya + 1);
+    try {
+      return fn();
+    } finally {
+      tomadosSync.set(lock, (tomadosSync.get(lock) ?? 1) - 1);
+    }
+  }
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  const hasta = Date.now() + maxMs;
+  while (!crearCompleto(lock, String(process.pid))) {
+    if (candadoAbandonado(lock)) {
+      fs.rmSync(lock, { force: true });
+      continue;
+    }
+    if (Date.now() > hasta) throw new Error(`otro proceso de ComplementAIry está guardando ${path.basename(ruta)} hace más de ${Math.round(maxMs / 1000)} s; vuelve a intentarlo (si no hay ninguno corriendo, borra ${lock})`);
+    dormir(15);
+  }
+  tomadosSync.set(lock, 1);
+  try {
+    return fn();
+  } finally {
+    tomadosSync.delete(lock);
+    fs.rmSync(lock, { force: true });
+  }
+}
+
+/**
+ * Un `.lock` quedó abandonado si el proceso que lo tomó ya no existe (el archivo guarda su pid). Uno
+ * sin pid legible (de una versión anterior) o de más de 10 min se considera abandonado también.
+ */
+function candadoAbandonado(lock: string): boolean {
+  try {
+    const edad = Date.now() - fs.statSync(lock).mtimeMs;
+    const pid = Number(fs.readFileSync(lock, "utf8").trim());
+    if (Number.isInteger(pid) && pid > 0) return !vivo(pid) || edad > 10 * 60_000;
+    return edad > 2000;
+  } catch {
+    return false; // ya no existe: se reintenta
+  }
+}
+
 /**
  * Candado para un archivo de DATOS compartido (índice, chat): lee-modifica-escribe sin pisarse. En
  * el mismo proceso, en fila; entre procesos, con un archivo `.lock` exclusivo (si quedó de un proceso
- * que murió, se descarta a los 30 s). Si no se consigue en `maxMs`, lanza un error explicativo.
+ * que murió, se descarta enseguida: guarda el pid de su dueño). Si no se consigue en `maxMs`, lanza un error explicativo.
  */
 export function conCandado<T>(ruta: string, fn: () => Promise<T>, maxMs = 15_000): Promise<T> {
   const previa = colas.get(ruta) ?? Promise.resolve();
@@ -160,18 +252,10 @@ export function conCandado<T>(ruta: string, fn: () => Promise<T>, maxMs = 15_000
     fs.mkdirSync(path.dirname(lock), { recursive: true });
     const hasta = Date.now() + maxMs;
     for (;;) {
-      try {
-        fs.closeSync(fs.openSync(lock, "wx"));
-        break;
-      } catch {
-        try {
-          if (Date.now() - fs.statSync(lock).mtimeMs > 30_000) fs.rmSync(lock, { force: true });
-        } catch {
-          /* ya no existe: se reintenta */
-        }
-        if (Date.now() > hasta) throw new Error(`otro proceso de ComplementAIry está usando ${path.basename(ruta)} hace más de ${Math.round(maxMs / 1000)} s; vuelve a intentarlo (si no hay ninguno corriendo, borra ${lock})`);
-        await new Promise((res) => setTimeout(res, 100));
-      }
+      if (crearCompleto(lock, String(process.pid))) break;
+      if (candadoAbandonado(lock)) fs.rmSync(lock, { force: true });
+      if (Date.now() > hasta) throw new Error(`otro proceso de ComplementAIry está usando ${path.basename(ruta)} hace más de ${Math.round(maxMs / 1000)} s; vuelve a intentarlo (si no hay ninguno corriendo, borra ${lock})`);
+      await new Promise((res) => setTimeout(res, 100));
     }
     try {
       return await fn();

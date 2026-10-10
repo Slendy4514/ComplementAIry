@@ -55,7 +55,7 @@ export function doctor(root: string): Check[] {
 
   c.push(filled(path.join(dataDir(root), "proyecto.md")) ? { ok: true, que: ".cai/proyecto.md completo" } : { ok: "aviso", que: ".cai/proyecto.md vacío: la IA no sabe qué busca el proyecto", arreglo: "escribí con tus palabras qué busca el proyecto" });
   c.push(filled(path.join(dataDir(root), "reglas.md")) ? { ok: true, que: ".cai/reglas.md completo" } : { ok: "aviso", que: ".cai/reglas.md vacío: no hay reglas de estilo para revisar", arreglo: "escribí tus reglas de cómo se escribe código" });
-  c.push(Object.keys(loadPerfil().temas).length ? { ok: true, que: "perfil con temas declarados" } : { ok: "aviso", que: "perfil vacío: la guía asume que sos aprendiz en todo", arreglo: "cai perfil set <lenguaje> aprendiz|intermedio|experto" });
+  c.push(Object.keys(loadPerfil().temas).length ? { ok: true, que: "perfil con temas declarados" } : { ok: "aviso", que: "perfil vacío: la guía asume que eres aprendiz en todo", arreglo: "cai perfil set <lenguaje> aprendiz|intermedio|experto" });
 
   const cfg = loadConfig(root);
   c.push(cfg.ia.context7 ? { ok: true, que: "Context7 activo (documentación actualizada)" } : { ok: "aviso", que: "Context7 inactivo: la IA cita documentación de memoria", arreglo: 'en .cai/config.json: "ia": { "context7": true } (opcional: CONTEXT7_API_KEY)' });
@@ -91,6 +91,6 @@ export function instalar(root: string): void {
     const cmd = a.install.split("#")[0]!.trim();
     console.log(`$ ${cmd}`);
     spawnSync("sh", ["-c", cmd], { cwd: root, stdio: "inherit" });
-    if (a.sistema?.length) console.log(`Paquetes de sistema: agregá a .devcontainer/Dockerfile:\n  RUN apt-get update && apt-get install -y ${a.sistema.join(" ")}\ny hacé "Rebuild Container".`);
+    if (a.sistema?.length) console.log(`Paquetes de sistema: agrega a .devcontainer/Dockerfile:\n  RUN apt-get update && apt-get install -y ${a.sistema.join(" ")}\ny haz "Rebuild Container".`);
   }
 }

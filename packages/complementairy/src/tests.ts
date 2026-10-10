@@ -12,15 +12,15 @@ import { rutaTest } from "./metricas.js";
 import { coincide, ejecutar, exportedFunctions, validarExpresion } from "./predict.js";
 import { renderReply } from "./render.js";
 import { nextThreadId } from "./threads.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 import { dataDir } from "./config.js";
 import { verifyCommentOnly } from "./verify.js";
 import { inlineSolutions } from "./guard.js";
 
 /**
- * Tests como snippets que activás vos. La IA propone casos (qué probar y qué debería pasar);
+ * Tests como snippets que activas tú. La IA propone casos (qué probar y qué debería pasar);
  * el script valida cada llamada, calcula los imports y escribe todo APAGADO en la carpeta de tests.
- * El valor esperado lo decidís vos: si la IA duda, pregunta.
+ * El valor esperado lo decides tú: si la IA duda, pregunta.
  */
 
 interface Caso {
@@ -135,7 +135,7 @@ export function noProbable(lang: string, src: string, funcion?: string): string 
 }
 
 /** Casos propuestos por la IA y validados sin IA (llamadas a funciones exportadas, literales). */
-export async function generarCasos(root: string, rel: string, funcion?: string): Promise<{ casos: Caso[]; descartados: string[]; costoUsd: number }> {
+export async function generarCasos(root: string, rel: string, funcion?: string, o: { extra?: string } = {}): Promise<{ casos: Caso[]; descartados: string[]; costoUsd: number }> {
   const abs = path.join(root, rel);
   const lang = langFor(rel);
   if (!lang) throw new Error(`tipo de archivo sin soporte: ${rel}`);
@@ -159,6 +159,7 @@ export async function generarCasos(root: string, rel: string, funcion?: string):
         : `Archivo: ${rel} (${lang.id}). Funciones exportadas: ${[...exportadas].join(", ")}.`,
       funcion ? `Propón casos SOLO para ${funcion}.` : "Propón casos para las funciones más importantes.",
       contextoComun(root, rel, { funcion }),
+      o.extra ?? "",
       existente ? `Tests que ya existen (no repitas casos):\n${existente.slice(0, 4000)}` : "",
       `Código:\n${src}`,
     ]

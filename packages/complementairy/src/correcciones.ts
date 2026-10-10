@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { dataDir } from "./config.js";
+import { escribirJson, leerJson } from "./almacen.js";
+import { conCandadoSync } from "./ocupado.js";
 
 /**
  * Correcciones del programador a lo que ComplementAIry entiende del proyecto: el resumen de un módulo,
@@ -25,47 +27,44 @@ export interface Correccion {
 const archivoCorrecciones = (root: string) => path.join(dataDir(root), "correcciones.json");
 
 export function cargarCorrecciones(root: string): Correccion[] {
-  try {
-    return (JSON.parse(fs.readFileSync(archivoCorrecciones(root), "utf8")) as { correcciones: Correccion[] }).correcciones ?? [];
-  } catch {
-    return [];
-  }
+  return leerJson<{ correcciones?: Correccion[] }>(archivoCorrecciones(root), () => ({})).correcciones ?? [];
 }
 
 function guardar(root: string, cs: Correccion[]): void {
-  fs.mkdirSync(path.dirname(archivoCorrecciones(root)), { recursive: true });
-  const tmp = `${archivoCorrecciones(root)}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ version: 1, correcciones: cs }, null, 2));
-  fs.renameSync(tmp, archivoCorrecciones(root));
+  escribirJson(archivoCorrecciones(root), { version: 1, correcciones: cs });
 }
 
 /** Registra una corrección (la del mismo módulo/archivo reemplaza a la anterior) y la aplica ya. */
 export function corregir(root: string, c: Omit<Correccion, "id" | "fecha">): Correccion {
-  if (!c.despues.trim()) throw new Error("la corrección está vacía: escribe qué debe decir");
-  if ((c.tipo === "modulo" || c.tipo === "estructura") && !c.archivo) throw new Error(`una corrección de ${c.tipo} necesita el archivo al que se refiere (--archivo)`);
-  const cs = cargarCorrecciones(root).filter((x) => !(c.tipo !== "proyecto" && x.tipo === c.tipo && x.archivo === c.archivo));
-  const nueva: Correccion = { ...c, despues: c.despues.trim(), id: `c${crypto.randomBytes(3).toString("hex")}`, fecha: new Date().toISOString() };
-  cs.push(nueva);
-  guardar(root, cs);
-  // La estructura se corrige también en su archivo (el panel y el contexto la leen de ahí).
-  if (c.tipo === "estructura") {
-    const f = path.join(dataDir(root), "estructura.json");
-    try {
-      const est = JSON.parse(fs.readFileSync(f, "utf8")) as Record<string, unknown>;
-      fs.writeFileSync(f, JSON.stringify(aplicarAEstructura(root, est), null, 2));
-    } catch {
-      /* todavía no hay estructura: se aplicará cuando se proponga */
+  return conCandadoSync(archivoCorrecciones(root), () => {
+    if (!c.despues.trim()) throw new Error("la corrección está vacía: escribe qué debe decir");
+    if ((c.tipo === "modulo" || c.tipo === "estructura") && !c.archivo) throw new Error(`una corrección de ${c.tipo} necesita el archivo al que se refiere (--archivo)`);
+    const cs = cargarCorrecciones(root).filter((x) => !(c.tipo !== "proyecto" && x.tipo === c.tipo && x.archivo === c.archivo));
+    const nueva: Correccion = { ...c, despues: c.despues.trim(), id: `c${crypto.randomBytes(3).toString("hex")}`, fecha: new Date().toISOString() };
+    cs.push(nueva);
+    guardar(root, cs);
+    // La estructura se corrige también en su archivo (el panel y el contexto la leen de ahí).
+    if (c.tipo === "estructura") {
+      const f = path.join(dataDir(root), "estructura.json");
+      try {
+        const est = JSON.parse(fs.readFileSync(f, "utf8")) as Record<string, unknown>;
+        fs.writeFileSync(f, JSON.stringify(aplicarAEstructura(root, est), null, 2));
+      } catch {
+        /* todavía no hay estructura: se aplicará cuando se proponga */
+      }
     }
-  }
-  return nueva;
+    return nueva;
+  });
 }
 
 export function quitarCorreccion(root: string, id: string): Correccion {
-  const cs = cargarCorrecciones(root);
-  const c = cs.find((x) => x.id === id);
-  if (!c) throw new Error(`no existe la corrección ${id} (míralas con: cai memoria correcciones)`);
-  guardar(root, cs.filter((x) => x.id !== id));
-  return c;
+  return conCandadoSync(archivoCorrecciones(root), () => {
+    const cs = cargarCorrecciones(root);
+    const c = cs.find((x) => x.id === id);
+    if (!c) throw new Error(`no existe la corrección ${id} (míralas con: cai memoria correcciones)`);
+    guardar(root, cs.filter((x) => x.id !== id));
+    return c;
+  });
 }
 
 /** Resúmenes de módulos con tus correcciones encima (lo tuyo manda). */

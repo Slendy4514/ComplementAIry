@@ -1,6 +1,6 @@
 import path from "node:path";
 import * as vscode from "vscode";
-import { correr, enCurso, leerConfig, minutosSilencio, modoEfectivo, MODOS, output, relDe, root, silenciado, silenciar, vista, type Ocupacion } from "./comun";
+import { correr, detenerPedido, enCurso, leerConfig, minutosSilencio, modoEfectivo, MODOS, output, relDe, root, silenciado, silenciar, vista, type Ocupacion } from "./comun";
 
 /**
  * "¿Está pensando la IA?": barra de estado con lo que hace ahora (aunque lo haya pedido el chat
@@ -77,11 +77,7 @@ export class Estado implements vscode.Disposable {
             label: `$(stop-circle) Cancelar: ${o.tarea}`,
             description: o.archivo === "__proyecto__" ? "proyecto" : o.archivo,
             run: () => {
-              try {
-                process.kill(o.pid, "SIGTERM");
-              } catch {
-                /* ya terminó */
-              }
+              if (!detenerPedido(o.pid)) void vscode.window.showInformationMessage(`ComplementAIry: "${o.tarea}" ya había terminado.`);
               setTimeout(() => this.actualizar(), 300);
             },
           });

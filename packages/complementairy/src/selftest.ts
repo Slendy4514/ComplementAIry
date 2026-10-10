@@ -5,7 +5,7 @@ import { conBloqueo, enCurso, ocupar } from "./ocupado.js";
 import { actualizarTareas, agregarTareas, cargarTareas, guardarDiagnosticos, guardarTareas, rutasDe, siguiente } from "./siguiente.js";
 import { planoArchivo } from "./planoArchivo.js";
 import { separarListas } from "./render.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -56,12 +56,21 @@ import { atender } from "./servir.js";
 import { rapida } from "./rapida.js";
 import { cargarDialogos, conversar, olvidarDialogo } from "./dialogo.js";
 import { sobreElCodigo } from "./memoria.js";
-import { generadosPor } from "./snapshot.js";
+import { generadosPor, soloHumano } from "./snapshot.js";
 import { conocer, sugerirAutoria } from "./conocer.js";
 import { execFileSync } from "node:child_process";
 import { guardReplies } from "./guard.js";
 import { verifyCommentOnly } from "./verify.js";
 import { langFor } from "./lang.js";
+import { DatosDanados, leerJson } from "./almacen.js";
+import { conCandadoSync } from "./ocupado.js";
+import { sinSoluciones } from "./guard.js";
+import { esPorHacer, mapaArchivo, leerIndice as leerIndiceInt } from "./indice.js";
+import { contextoComun as contextoComunInt } from "./contexto.js";
+import { auditar as auditarC, casosConstruir, conExpresiones, deshacer, deshacerPedido, editarCaso, ideaPaso, ofrecer, ofrecerTodo, ordenar, ordenarPasos, ordenValida, partesDeFuncion, pedidoValido, pedir, predecirConstruir, registrarAuxiliares, resolverAgregado as resolverAgregadoC, stubsAuxiliares, trampas } from "./construir.js";
+import { modoDe, MODOS as MODOS2, modoEfectivo as modoEfectivoC, migrarModos as migrarModosC } from "./compartido.js";
+import { leerPropuesta as leerPropuestaC, registrarInsercion as registrarInsercionC } from "./programar.js";
+import { cargarDecisiones as cargarDecisionesC } from "./decisiones.js";
 
 /**
  * Escenarios que prueban las garantías de ComplementAIry tal como las vería Claude Code:
@@ -95,10 +104,16 @@ function project(): string {
 const denied = (o: HookOutput) =>
   (o?.hookSpecificOutput as { permissionDecision?: string } | undefined)?.permissionDecision === "deny";
 
-interface Case {
+export interface Case {
   name: string;
   run: (root: string) => Promise<boolean>;
 }
+
+/** Falla con un mensaje que dice qué se esperaba (en vez de un ✗ sin explicación). */
+const esperar = (cond: unknown, msg: string): true => {
+  if (!cond) throw new Error(msg);
+  return true;
+};
 
 const edit = (root: string, file: string, old_string: string, new_string: string) =>
   runHook(
@@ -212,7 +227,7 @@ CASES.push(
     name: "guia: cada pregunta (y sub-pregunta) es una consulta separada; respuestas en su lugar y solo @guia",
     run: async (r) => {
       fs.writeFileSync(path.join(r, "src/g.ts"), GUIA_TS);
-      const calls = fakeLLM((o) => said(`respuesta a: ${/Respondé SOLO esta parte \(\d\/\d\): (.*)|Respondé al último/.exec(o.prompt)?.[1] ?? "redondeo"}`));
+      const calls = fakeLLM((o) => said(`respuesta a: ${/Responde SOLO esta parte \(\d\/\d\): (.*)|Responde al último/.exec(o.prompt)?.[1] ?? "redondeo"}`));
       const res = await runGuia(r, "src/g.ts");
       const out = fs.readFileSync(path.join(r, "src/g.ts"), "utf8");
       const v = await verifyCommentOnly(GUIA_TS, out, langFor("x.ts")!);
@@ -1417,14 +1432,19 @@ CASES.push(
     },
   },
   {
-    name: "responder sobre una función habla SOLO de ella: ve su código y apenas las firmas de las otras",
+    name: "responder sobre una función: ve su código y, de las otras, el mapa del archivo (para decir 'usa X'), no sus cuerpos",
     run: async (r) => {
       conNotas(r);
       fs.writeFileSync(path.join(r, "src/d.ts"), DOS);
       const calls = fakeLLM(() => respNota());
       await responderNota(r, { archivo: "src/d.ts", linea: 7, texto: "¿está bien?" });
       const p = calls[0]!.prompt;
-      return p.includes("SOLO de la función `b`") && p.includes("const z = y * 2;") && !p.includes("return 10 / x;") && p.includes("export function a(x: number) {");
+      return (
+        esperar(p.includes("nota es SOLO de la función `b`"), "falta la instrucción de que la nota es de b") &&
+        esperar(p.includes("const z = y * 2;"), "falta el código de b") &&
+        esperar(!p.includes("return 10 / x;"), "se coló el cuerpo de otra función") &&
+        esperar(p.includes("MAPA DEL ARCHIVO") && p.includes("export function a(x: number)"), "falta el mapa del archivo con la firma de a")
+      );
     },
   },
   {
@@ -2040,7 +2060,7 @@ CASES.push(
     },
   },
   {
-    name: "[0.10] cada comentario en su nota: lo que la IA dice de OTRA función va a la nota del archivo",
+    name: "[0.10] cada comentario en su nota: lo de OTRA función no se anota en esta (ni en la suya); lo general, a la del archivo",
     run: async (r) => {
       conNotas(r, { tests: { avisarSinTests: false } });
       fs.writeFileSync(path.join(r, "src/d.ts"), DOS);
@@ -2051,7 +2071,11 @@ CASES.push(
       const notas = cargarNotas(r, "src/d.ts");
       const de = (k: string) => notas.filter((n) => n.ancla.funcion === k).flatMap((n) => n.hilo.map((m) => m.texto)).join("\n");
       const arch = notas.filter((n) => n.alcance === "archivo").flatMap((n) => n.hilo.map((m) => m.texto)).join("\n");
-      return de("a").includes("valida x = 0") && !de("a").includes("b no valida") && arch.includes("Sobre `b`: b no valida y") && arch.includes("falta un README");
+      return (
+        esperar(de("a").includes("valida x = 0") && !de("a").includes("b no valida"), `la nota de a: ${de("a")}`) &&
+        esperar(!de("b").includes("b no valida y"), `lo de b se anotó en su nota desde la revisión de a: ${de("b")}`) &&
+        esperar(!arch.includes("b no valida") && arch.includes("falta un README"), `la nota del archivo: ${arch}`)
+      );
     },
   },
   {
@@ -2294,25 +2318,468 @@ CASES.push(
   },
 );
 
-export async function runSelftest(log: (s: string) => void = console.log): Promise<boolean> {
-  let ok = 0;
-  for (const c of CASES) {
-    const root = project();
-    process.env.CAI_HOME = path.join(root, ".home");
-    process.env.CAI_REPERTORIO = path.join(root, ".home", "repertorio"); // nunca el repertorio real
-    process.env.CAI_VISTA = "comentarios"; // los escenarios clásicos usan comentarios; los de notas lo declaran
-    let pass = false;
-    try {
-      pass = await c.run(root);
-    } catch (e) {
-      log(`    error: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setLLM(null);
-      fs.rmSync(root, { recursive: true, force: true });
+// --- v0.11: seguridad y datos -------------------------------------------------------------------
+CASES.push(
+  {
+    name: "[rev11] un decisiones.json dañado no se trata como vacío: no se pisa, queda una copia y el error explica qué hacer",
+    run: async (r) => {
+      const f = path.join(r, ".cai", "decisiones.json");
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, '{"decisiones": [ {"id": "d1", ');
+      let error: unknown;
+      try {
+        proponerDecisiones(r, [{ pregunta: "¿Lanzar error con negativos?", opciones: [{ texto: "sí" }, { texto: "no" }] as never }], {}, "test");
+      } catch (e) {
+        error = e;
+      }
+      const copias = fs.readdirSync(path.dirname(f)).filter((x) => x.startsWith("decisiones.json.danado-"));
+      return (
+        esperar(error instanceof DatosDanados, `se esperaba DatosDanados, llegó: ${String(error)}`) &&
+        esperar(/copia/.test((error as Error).message) && /bórralo/.test((error as Error).message), `el mensaje no explica qué hacer: ${(error as Error).message}`) &&
+        esperar(fs.readFileSync(f, "utf8") === '{"decisiones": [ {"id": "d1", ', "el archivo dañado fue sobrescrito") &&
+        esperar(copias.length === 1, `se esperaba 1 copia, hay ${copias.length}`) &&
+        esperar(leerJson(path.join(r, ".cai", "no-existe.json"), () => 7) === 7, "un archivo que no existe debería dar el valor por defecto")
+      );
+    },
+  },
+  {
+    name: "[rev11] un candado de un proceso muerto se descarta enseguida; uno de un proceso vivo hace esperar y avisa",
+    run: async (r) => {
+      const ruta = path.join(r, ".cai", "tareas.json");
+      fs.mkdirSync(path.dirname(ruta), { recursive: true });
+      // Un pid que no existe (el máximo típico de Linux es 4194304).
+      fs.writeFileSync(`${ruta}.lock`, "4194999");
+      const t0 = Date.now();
+      agregarTareas(r, [{ titulo: "Crear a.ts", origen: "manual" }]);
+      const rapido = Date.now() - t0 < 1000;
+      // Un proceso vivo que no es este (el padre) tiene el candado: hay que esperar y avisar.
+      fs.writeFileSync(`${ruta}.lock`, String(process.ppid));
+      let aviso = "";
+      try {
+        conCandadoSync(ruta, () => 1, 200);
+      } catch (e) {
+        aviso = (e as Error).message;
+      }
+      fs.rmSync(`${ruta}.lock`, { force: true });
+      // Reentrante: dentro de un candado propio se puede volver a tomar sin esperarse a sí mismo.
+      const anidado = conCandadoSync(ruta, () => conCandadoSync(ruta, () => "ok", 200), 200);
+      return (
+        esperar(rapido && cargarTareas(r).length === 1, "el candado de un proceso muerto no se descartó") &&
+        esperar(/otro proceso/.test(aviso) && /borra/.test(aviso), `se esperaba un aviso explicativo, llegó: "${aviso}"`) &&
+        esperar(anidado === "ok" && !fs.existsSync(`${ruta}.lock`), "el candado no es reentrante o quedó tomado")
+      );
+    },
+  },
+  {
+    name: "[rev11] fuera del modo programar se quita el código escrito de los textos libres (bloques y soluciones en línea), no las piezas",
+    run: async () => {
+      const t = "Valida antes con `Number.isInteger(meses)`.\n```js\nif (meses <= 0) { throw new Error('x'); }\n```\nO así: `if (!x) { return 0; }`. Simplifica a `return !!this.vault.get(p)`.";
+      const limpio = sinSoluciones(t);
+      const conComando = sinSoluciones("Corre:\n```bash\npnpm test\n```", { permitir: ["bash"] });
+      return (
+        esperar(limpio.includes("`Number.isInteger(meses)`"), "se quitó una pieza suelta") &&
+        esperar(!limpio.includes("throw new Error") && !limpio.includes("return 0") && !limpio.includes("return !!"), `quedó código: ${limpio}`) &&
+        esperar(conComando.includes("pnpm test"), "se quitó un comando de terminal permitido")
+      );
+    },
+  },
+  {
+    name: "[rev11] cai servir avisa que empezó la llamada a la IA solo cuando de verdad la empieza",
+    run: async (r) => {
+      const empezados: unknown[] = [];
+      await atender(r, JSON.stringify({ id: 1, tipo: "ping" }), (id) => empezados.push(id));
+      await atender(r, JSON.stringify({ id: 2, tipo: "rapida", archivo: "src/cuota.ts", linea: 1, vence: Date.now() - 1 }), (id) => empezados.push(id));
+      return esperar(empezados.length === 0, `avisó "empezado" sin llamar a la IA: ${JSON.stringify(empezados)}`);
+    },
+  },
+);
+
+/** Los escenarios cuyo nombre contiene `filtro` (sin distinguir mayúsculas), o todos. */
+// --- v0.11: las funciones se conocen entre sí ----------------------------------------------------
+const FILES_JS = "export class Files {\n  exists(rawPath) {\n    const p = this.normalize(rawPath);\n    return !!this.app.vault.getAbstractFileByPath(p);\n  }\n\n  normalize(path) {}\n}\n";
+CASES.push(
+  {
+    name: "[int] una función vacía sale ⬜ en el mapa del archivo, con el propósito que le dio el plano; las previstas que no existen también",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, "src/files.js"), FILES_JS);
+      agregarTareas(r, [
+        { titulo: "Crear normalize en src/files.js: quita las barras sobrantes", archivo: "src/files.js", funcion: "normalize", detalle: "quita las barras sobrantes y los espacios", origen: "plano" },
+        { titulo: "Crear ensureFolder en src/files.js: crea la carpeta si falta", archivo: "src/files.js", funcion: "ensureFolder", origen: "plano" },
+      ]);
+      await actualizarIndice(r);
+      const mapa = mapaArchivo(r, leerIndiceInt(r), "src/files.js", "exists");
+      return (
+        esperar(esPorHacer("normalize(path) {}", "javascript") && esPorHacer("def f(x):\n    pass\n", "python") && esPorHacer("function f() {\n  // TODO\n}", "javascript"), "no detecta funciones vacías") &&
+        esperar(!esPorHacer("const f = (x) => x * 2", "javascript") && !esPorHacer("function f() { return 1; }", "javascript"), "marcó como vacía una función con cuerpo") &&
+        esperar(/⬜ por hacer normalize\(path\).*quita las barras sobrantes y los espacios/.test(mapa), `normalize no sale ⬜ con su propósito:\n${mapa}`) &&
+        esperar(/aún no existe\) ensureFolder — crea la carpeta si falta/.test(mapa), `falta la función prevista:\n${mapa}`) &&
+        esperar(!/exists\(rawPath\)/.test(mapa), "el mapa incluye la función actual")
+      );
+    },
+  },
+  {
+    name: "[int] con una memoria enorme, el contexto se recorta por la memoria y no pierde el mapa del archivo",
+    run: async (r) => {
+      fs.writeFileSync(path.join(r, "src/files.js"), FILES_JS);
+      fs.mkdirSync(path.join(r, ".cai"), { recursive: true });
+      fs.writeFileSync(path.join(r, ".cai", "conocimiento.md"), `# Memoria\n${"Algo que se sabe del proyecto. ".repeat(400)}`);
+      fs.writeFileSync(path.join(r, ".cai", "proyecto.md"), `# Proyecto\n${"Detalle del proyecto. ".repeat(300)}`);
+      await actualizarIndice(r);
+      const ctx = contextoComunInt(r, "src/files.js", { funcion: "exists" });
+      const corto = contextoComunInt(r, "src/files.js", { funcion: "exists", corto: true });
+      return (
+        esperar(ctx.length <= 9100, `el contexto mide ${ctx.length}`) &&
+        esperar(ctx.includes("MAPA DEL ARCHIVO") && ctx.includes("normalize(path)"), "se perdió el mapa del archivo") &&
+        esperar(corto.includes("normalize(path)"), "la versión corta (guía gris) no trae el mapa")
+      );
+    },
+  },
+  {
+    name: "[int] verificar: de otra función solo el aviso 'aún no está lista' (sin IA); sus correcciones no se anotan en ninguna nota y lo general no se repite",
+    run: async (r) => {
+      conNotas(r);
+      fs.writeFileSync(path.join(r, "src/files.js"), FILES_JS);
+      const calls = fakeLLM(() => ({
+        estado: "casi",
+        resumen: "Usa normalize, que todavía no hace nada.",
+        mejoras: [
+          { texto: "Sigue usando normalize para limpiar la ruta (no repitas esa lógica aquí).", funcion: "" },
+          { texto: "Completa normalize: quita las barras finales y devuelve '' si no es texto.", funcion: "normalize" },
+          { texto: "El archivo no exporta la clase Files.", funcion: "archivo" },
+        ],
+        que_hacer: "Revisa exists cuando normalize esté lista.",
+        decisiones: [],
+      }));
+      await verificar(r, "src/files.js", { funcion: "exists" });
+      await verificar(r, "src/files.js", { funcion: "exists", forzar: true });
+      const notas = cargarNotas(r, "src/files.js");
+      const texto = (n?: { hilo: { texto: string }[] }) => n?.hilo.map((m) => m.texto).join("\n") ?? "";
+      const todo = notas.map(texto).join("\n");
+      const arch = notas.find((n) => n.alcance === "archivo");
+      const ex = notas.find((n) => n.ancla.funcion === "exists");
+      return (
+        esperar(/Las otras funciones/.test(calls[0]!.system ?? "") && calls[0]!.prompt.includes("MAPA DEL ARCHIVO"), "el prompt no trae la regla ni el mapa") &&
+        esperar(!/Completa normalize/.test(todo), "una corrección de normalize quedó anotada en alguna nota") &&
+        esperar(!notas.some((n) => n.ancla.funcion === "normalize"), "se creó una nota para normalize desde la revisión de exists") &&
+        esperar(ex?.dependencias?.length === 1 && ex.dependencias[0]!.funcion === "normalize" && ex.dependencias[0]!.estado === "por hacer", `aviso de dependencias: ${JSON.stringify(ex?.dependencias)}`) &&
+        esperar((texto(arch).match(/no exporta la clase/g) ?? []).length === 1, `lo general del archivo se repitió:\n${texto(arch)}`)
+      );
+    },
+  },
+
+);
+
+// --- v0.11: modos en dos ejes y "construir juntos" ---------------------------------------------
+// Un script sin export (se prueba aislado, con Node; un módulo necesitaría tsx en el proyecto).
+const DOBLE = "function doble(x) {\n}\n";
+const IDEA_1 = "Revisaría al principio que x sea un número con typeof y, si no lo es, lanzaría un error que diga qué llegó.";
+/** IA falsa para construir juntos: responde según qué se le pide (y en qué pasos). */
+const CODIGO_PASO: Record<number, string> = { 1: 'if (typeof x !== "number") throw new Error("x debe ser un número");', 2: "return x * 2;" };
+const OFERTA_PASO: Record<number, string> = { 1: IDEA_1, 2: "Devolvería x multiplicado por dos." };
+const iaConstruir = (extra: Record<string, unknown> = {}) =>
+  fakeLLM((o) => {
+    const k = o.kind ?? "";
+    if (k in extra) return typeof extra[k] === "function" ? (extra[k] as (o: AskOptions) => unknown)(o) : extra[k];
+    if (k === "programar:plan") return { pasos: [{ texto: "Validar que x sea un número", repertorio: "" }, { texto: "Devolver el doble", repertorio: "" }], separar: { nombre: "", proposito: "" } };
+    if (k === "programar:oferta" || k === "programar:otra") {
+      const pasos = [...(/Pasos para los que propones[^:]*: (.*)/.exec(o.prompt)?.[1] ?? "").matchAll(/(\d+)\. /g)].map((m) => Number(m[1]));
+      return {
+        ofertas: pasos.map((n) => ({ paso: n, idea: OFERTA_PASO[n] ?? "algo", alternativas: n === 1 ? ["Convertir con Number() y comprobar NaN, si quieres aceptar textos numéricos."] : [], sobreTuIdea: /Cómo lo haría el programador/.test(o.prompt) ? "Sirve; cuida que NaN también es number." : "" })),
+        previo: /YA TENÍA/.test(o.prompt) ? [{ texto: "No revisas que x sea un número.", porque: "doble('a') daría NaN sin avisar." }] : [],
+      };
     }
-    log(`${pass ? "✓" : "✗"} ${c.name}`);
-    if (pass) ok++;
+    if (k === "programar:orden") {
+      const pedidos = [...o.prompt.matchAll(/^Paso (\d+) \([^)]*\): (.*)$/gm)].map((m) => ({ n: Number(m[1]), t: m[2]! }));
+      return { pasos: pedidos.map(({ n, t }) => ({ paso: n, codigo: n === 2 && /suma/.test(t) ? "return x + x;" : (CODIGO_PASO[n] ?? "return x;"), falta: "", fuera: "", entrada: n === 1 ? 'doble("a")' : "doble(3)", explicacion: "hecho" })) };
+    }
+    if (k === "programar:fiel") return { agregado: [], falta: [] };
+    if (k === "tests") return { casos: [{ tipo: "normal", descripcion: "duplica", llamada: "doble(5)", esperado: "10", duda: "" }, { tipo: "normal", descripcion: "cero", llamada: "doble(0)", esperado: "0", duda: "" }] };
+    if (k === "programar:caso") return { encaja: false, porque: "contradice que la función duplica" };
+    if (k === "programar:diferencia") return { texto: "La línea 3 multiplica por dos." };
+    return {};
+  });
+const conProgramar = (r: string, modo = "programar") => fs.writeFileSync(path.join(r, ".cai/config.json"), JSON.stringify({ vista: "notas", modo, modosVersion: 2, tests: { avisarSinTests: false } }));
+const falla = (f: () => Promise<unknown>) => f().then(() => "", (e: Error) => e.message);
+CASES.push(
+  {
+    name: "[ejes] cuatro modos en dos ejes (quién escribe × cuánta ayuda); lo de antes de v0.10 se sigue migrando igual",
+    run: async () => {
+      const cfg = { modo: "sugerir", modos: { porCarpeta: { "src/": "programar" }, porFuncion: { "src/a.ts:f": "programar-aprender" } } };
+      const viejo = migrarModosC({ modo: "programar", modos: { porArchivo: { "a.ts": "programar" } } }) as { modo: string; modos: { porArchivo: Record<string, string> } };
+      return (
+        esperar(modoDe("ia", "aprender") === "programar-aprender" && modoDe("manual", "sugerir") === "sugerir" && modoDe("ia", "sugerir") === "programar", "modoDe no combina bien los ejes") &&
+        esperar(MODOS2["programar-aprender"].decidirAntes && MODOS2["programar-aprender"].probarCadaPorcion, "programar · aprender no pide decidir antes y probar cada paso") &&
+        esperar(!MODOS2.programar.decidirAntes && !MODOS2.programar.probarCadaPorcion && MODOS2.programar.proponerSolucion, "programar (sugerir) no debería pedir la idea antes ni probar cada paso") &&
+        esperar(modoEfectivoC(cfg, "src/a.ts", "f").modo === "programar-aprender" && modoEfectivoC(cfg, "src/a.ts", "g").modo === "programar" && modoEfectivoC(cfg, "b.ts").modo === "sugerir", "la precedencia función > carpeta > proyecto falló") &&
+        esperar(viejo.modo === "sugerir" && viejo.modos.porArchivo["a.ts"] === "sugerir", "la migración de antes de v0.10 cambió")
+      );
+    },
+  },  {
+    name: "[pedido] programar: pides con tus palabras qué debe hacer la función entera; un cambio toca solo lo suyo; si es mucho, propone separarla y te da las auxiliares vacías",
+    run: async (r) => {
+      conProgramar(r);
+      fs.writeFileSync(path.join(r, "src/doble.js"), DOBLE);
+      const calls = iaConstruir({
+        "programar:oferta": { idea: "Revisaría que x sea un número y devolvería su doble.", alternativas: [], previo: [] },
+        "programar:auditoria": { que_hace: "línea 2 valida", estado: "casi", resumen: "Bien, el mensaje podría ser más claro.", casos: [{ llamada: "doble(5)", comentario: "pasa" }, { llamada: "doble(0)", comentario: "pasa" }], que_hacer: ["nada urgente"], mejoras: [{ texto: "mensaje más claro", porque: "dice qué tipo llegó" }], ideal: { descripcion: "Igual, con un mensaje que diga el tipo recibido.", cuerpo: 'if (typeof x !== "number") throw new Error("x debe ser number, llegó " + typeof x);\nreturn x * 2;' } },
+        "programar:pedido": (o: AskOptions) =>
+          /lea el archivo/.test(o.prompt) && !/UNA sola/.test(o.prompt)
+            ? { cuerpo: "", falta: "", entrada: "", explicacion: "", separar: [{ nombre: "leerNota", firma: "leerNota(ruta)", proposito: "lee el archivo de la nota" }, { nombre: "moverNota", firma: "moverNota(nota, carpeta)", proposito: "mueve la nota a su carpeta" }], motivo: "hace tres cosas distintas" }
+            : /mensaje de error más claro/.test(o.prompt)
+              ? { cuerpo: 'if (typeof x !== "number") throw new Error("x debe ser number, llegó " + typeof x);\nreturn x * 2;', falta: "", entrada: "doble(3)", explicacion: "", separar: [], motivo: "" }
+              : /NaN/.test(o.prompt)
+              ? { cuerpo: 'if (typeof x !== "number" || Number.isNaN(x)) throw new Error("x debe ser un número");\nreturn x * 2;', falta: "", entrada: "doble(NaN)", explicacion: "", separar: [], motivo: "" }
+              : { cuerpo: 'if (typeof x !== "number") throw new Error("x debe ser un número");\nreturn x * 2;', falta: "", entrada: "doble(3)", explicacion: "", separar: [], motivo: "" },
+      });
+      const of = await ofrecerTodo(r, "src/doble.js", "doble");
+      const vaga = await falla(() => pedir(r, "src/doble.js", "doble", "haz la función completa por favor"));
+      const copia = await falla(() => pedir(r, "src/doble.js", "doble", "revisaría que x sea un número y devolvería su doble"));
+      const p1 = await pedir(r, "src/doble.js", "doble", "que valide que x sea número y devuelva el doble");
+      const p2 = await pedir(r, "src/doble.js", "doble", "que también rechace NaN con el mismo error");
+      const cambiadas = p2.porciones.filter((x) => x.orden === "que también rechace NaN con el mismo error");
+      const d = await deshacerPedido(r, "src/doble.js", "doble");
+      const sep = await pedir(r, "src/doble.js", "doble", "que lea el archivo, lo normalice, lo mueva a su carpeta y avise al usuario");
+      const st = await stubsAuxiliares(r, "src/doble.js", "doble");
+      fs.writeFileSync(path.join(r, "src/doble.js"), `${DOBLE}${st.texto}\n`);
+      const reg = await registrarAuxiliares(r, "src/doble.js", "doble");
+      const tareas = cargarTareas(r).filter((t) => t.funcion === "leerNota" || t.funcion === "moverNota");
+      const casos = await casosConstruir(r, "src/doble.js", "doble");
+      await predecirConstruir(r, "src/doble.js", "doble", "0");
+      const sinAuditar = await falla(() => registrarInsercionC(r, "src/doble.js", "doble"));
+      const au = await auditarC(r, "src/doble.js", "doble");
+      const conIdeal = await pedir(r, "src/doble.js", "doble", "toma de la versión ideal el mensaje de error más claro", { ideal: true });
+      const pedidoIdeal = calls.filter((c) => c.kind === "programar:pedido").pop()!;
+      const vieja = await falla(() => registrarInsercionC(r, "src/doble.js", "doble"));
+      await auditarC(r, "src/doble.js", "doble");
+      await predecirConstruir(r, "src/doble.js", "doble", "0").catch(() => undefined);
+      const ins = await registrarInsercionC(r, "src/doble.js", "doble");
+      return (
+        esperar(of.construir.forma === "pedido" && of.construir.ofertas?.[0]?.paso === 0 && !calls.some((c) => c.kind === "programar:plan"), "en programar no debería haber plan por pasos, sino una propuesta de la función") &&
+        esperar(/no dice qué debe hacer/.test(vaga), `aceptó un pedido sin contenido: "${vaga}"`) &&
+        esperar(/TUS palabras/.test(copia), `aceptó copiar la propuesta: "${copia}"`) &&
+        esperar(p1.codigo === 'function doble(x) {\n  if (typeof x !== "number") throw new Error("x debe ser un número");\n  return x * 2;\n}' && p1.porciones[0]?.entrada === "doble(3)", `la función entera:\n${p1.codigo}`) &&
+        esperar(cambiadas.length === 1 && cambiadas[0]!.codigo!.includes("isNaN") && p2.porciones.some((x) => x.codigo === "  return x * 2;" && x.orden !== cambiadas[0]!.orden), `el cambio tocó más de lo suyo: ${JSON.stringify(p2.porciones.map((x) => [x.orden, x.codigo]))}`) &&
+        esperar(d.codigo === p1.codigo, "deshacer no volvió al borrador anterior") &&
+        esperar(sep.construir.separar?.auxiliares.length === 2 && sep.codigo === p1.codigo, "si es mucho, debería proponer separar sin escribir") &&
+        esperar(st.texto.includes("// lee el archivo de la nota\nfunction leerNota(ruta) {\n}") && st.texto.includes("function moverNota(nota, carpeta) {"), `auxiliares vacías:\n${st.texto}`) &&
+        esperar(reg.construir.pedidoPendiente?.startsWith("que lea el archivo") && !reg.construir.separar && tareas.length === 2, `registrar auxiliares: ${JSON.stringify({ pend: reg.construir.pedidoPendiente, tareas })}`) &&
+        esperar(/auditoría final/.test(sinAuditar), `dejó insertar sin la auditoría final: "${sinAuditar}"`) &&
+        esperar(au.construir.auditoria?.casos?.length === 2 && au.construir.auditoria.queHacer?.[0] === "nada urgente" && au.construir.auditoria.ideal?.codigo.includes("debe ser number"), `auditoría de un paso: ${JSON.stringify(au.construir.auditoria)}`) &&
+        esperar(/Versión ideal que propuso la auditoría/.test(pedidoIdeal.prompt) && conIdeal.construir.auditoria?.codigo !== conIdeal.codigo, "tomar algo de la versión ideal no le pasó la versión como referencia") &&
+        esperar(/de esta versión/.test(vieja), `dejó insertar con una auditoría de una versión anterior: "${vieja}"`) &&
+        esperar(casos.construir?.casos?.length === 2 && ins.ordenes! >= 1, `casos e insertar por pedidos: ${JSON.stringify(ins)}`) &&
+        esperar(pedidoValido("que devuelva el nombre en minúsculas y sin tildes", []) === null, "rechazó un pedido concreto")
+      );
+    },
+  },
+  {
+    name: "[construir] tu orden decide: se rechaza lo vago ('dale, haz eso'), lo de más de un paso y lo copiado; las trampas con casos se detectan sin IA",
+    run: async () => {
+      const of = [IDEA_1];
+      const rechazos = ["dale, haz eso", "sí, dale", "haz lo que me dijiste", "usa la segunda opción", "ok, hazlo así como está", "haz que valide x y lo demás también", "escribe toda la función de una vez", "revisaría al principio que x sea un número con typeof y si no lo es lanzaría un error"].map((t) => [t, ordenValida(t, of)] as const);
+      const propia = ordenValida("haz que lance un error si x no es number", of) ?? ordenValida("si no me pasan un texto, que tire un TypeError diciendo qué llegó", of);
+      const t = trampas('function n(r) {\n  if (r === "a/b/") return 42;\n  return r;\n}', [{ llamada: 'n("a/b/")', esperado: "42" }], "normaliza la ruta");
+      const consigna = trampas('function n(r) {\n  if (r === "sin título") return 0;\n}', [{ llamada: 'n("sin título")', esperado: "0" }], 'si es "sin título" devuelve 0');
+      const js = partesDeFuncion("function doble(x) {\n}", "javascript");
+      const una = partesDeFuncion("  normalize(path) {}", "javascript");
+      const py = partesDeFuncion("def doble(x):\n    pass", "python");
+      return (
+        esperar(rechazos.every(([, e]) => e), `aceptó una orden vaga, amplia o copiada: ${rechazos.filter(([, e]) => !e).map(([x]) => x).join(" | ")}`) &&
+        esperar(/TUS palabras/.test(rechazos[7]![1] ?? ""), `la copia no se rechazó por copia: ${rechazos[7]![1]}`) &&
+        esperar(propia === null, `rechazó una orden propia y concreta: ${propia}`) &&
+        esperar(conExpresiones('revisa con `typeof titulo !== "string"` y lanza') && !conExpresiones("usa `String()` o `Number.isInteger`"), "conExpresiones confunde una pieza con una expresión") &&
+        esperar(t.some((x) => x.includes('"a/b/"')) && t.some((x) => x.includes("devuelve 42")), `no detectó la trampa: ${JSON.stringify(t)}`) &&
+        esperar(!consigna.length, `marcó como trampa un valor que pide la consigna: ${JSON.stringify(consigna)}`) &&
+        esperar(js.cabecera.join() === "function doble(x) {" && js.cierre.join() === "}" && !js.cuerpo.length && js.sangria === "  ", `partes JS: ${JSON.stringify(js)}`) &&
+        esperar(una.cabecera[0] === "  normalize(path) {" && una.cierre[0] === "  }" && una.sangria === "    ", `partes en una línea: ${JSON.stringify(una)}`) &&
+        esperar(py.cabecera.join() === "def doble(x):" && py.cuerpo.join() === "    pass", `partes Python: ${JSON.stringify(py)}`)
+      );
+    },
+  },
+  {
+    name: "[construir] la IA ofrece todos los pasos en palabras; tus órdenes (de corrido) escriben SOLO esos pasos al final de lo hecho; rehacer, deshacer, casos y predicción antes de insertar",
+    run: async (r) => {
+      conProgramar(r);
+      fs.writeFileSync(path.join(r, "src/doble.js"), DOBLE);
+      const calls = iaConstruir();
+      const p1 = await ofrecer(r, "src/doble.js", "doble");
+      const saltado = await falla(() => ordenarPasos(r, "src/doble.js", "doble", [{ paso: 2, texto: "haz que devuelva x multiplicado por dos" }]));
+      const vaga = await falla(() => ordenarPasos(r, "src/doble.js", "doble", [{ paso: 1, texto: "dale, haz eso que dijiste" }]));
+      const q = await ordenarPasos(r, "src/doble.js", "doble", [
+        { paso: 1, texto: "haz que lance un error si x no es number" },
+        { paso: 2, texto: "haz que devuelva x multiplicado por dos" },
+      ]);
+      const unaLlamada = calls.filter((c) => c.kind === "programar:orden").length === 1;
+      const fieles = calls.filter((c) => c.kind === "programar:fiel");
+      const re = await ordenar(r, "src/doble.js", "doble", "mejor que devuelva la suma de x consigo mismo", { rehacer: true });
+      const sinCasos = await falla(() => registrarInsercionC(r, "src/doble.js", "doble"));
+      const d = await deshacer(r, "src/doble.js", "doble");
+      await ordenar(r, "src/doble.js", "doble", "haz que devuelva x multiplicado por dos");
+      const conCasos = await casosConstruir(r, "src/doble.js", "doble");
+      const sinPredecir = await falla(() => registrarInsercionC(r, "src/doble.js", "doble"));
+      const pred = await predecirConstruir(r, "src/doble.js", "doble", "0");
+      const reg = await registrarInsercionC(r, "src/doble.js", "doble");
+      return (
+        esperar(calls.some((c) => c.kind === "programar:plan") && p1.construir.ofertas?.map((x) => x.paso).join() === "1,2" && p1.porciones.length === 0, `sin plan, debería pedir el plan y ofrecer los 2 pasos sin código: ${JSON.stringify(p1.construir.ofertas)}`) &&
+        esperar(/de corrido/.test(saltado), `dejó ordenar el paso 2 sin el 1: "${saltado}"`) &&
+        esperar(/QUÉ hacer/.test(vaga), `aceptó una orden vaga: "${vaga}"`) &&
+        esperar(unaLlamada && q.porciones.length === 2 && q.porciones[0]!.entrada === 'doble("a")' && q.porciones[1]!.entrada === "doble(3)" && q.codigo.endsWith("  return x * 2;\n}") && !q.construir.ofertas?.length, `dos pasos en una orden: ${JSON.stringify(q.porciones.map((x) => x.codigo))}`) &&
+        esperar(fieles.length === 2 && fieles.every((c) => /Orden del programador/.test(c.prompt) && !/Puedo hacerlo|Devolvería|hecho/.test(c.prompt)) && /ya estaba escrito antes/.test(fieles[1]!.prompt), "la IA chica no verificó cada paso a ciegas (orden, código y lo anterior; sin las explicaciones)") &&
+        esperar(re.porciones.length === 2 && re.porciones[1]!.codigo === "  return x + x;" && re.porciones[0]!.codigo === q.porciones[0]!.codigo, `rehacer el último paso: ${JSON.stringify(re.porciones.map((x) => x.codigo))}`) &&
+        esperar(/pide los casos/.test(sinCasos), `dejó insertar sin casos: "${sinCasos}"`) &&
+        esperar(d.porciones.length === 1 && d.construir.ofertas?.[0]?.paso === 2, "deshacer no quitó el paso o no devolvió su propuesta") &&
+        esperar(conCasos.construir?.prediccion?.llamada === "doble(0)" && conCasos.construir.casos!.every((x) => x.pasa), `casos: ${JSON.stringify(conCasos.construir)}`) &&
+        esperar(/predice/.test(sinPredecir), `dejó insertar sin predecir: "${sinPredecir}"`) &&
+        esperar(pred.acierto && reg.ordenes === 2 && reg.prediccion?.acierto === true && !leerPropuestaC(r, "src/doble.js", "doble"), `registro: ${JSON.stringify(reg)}`)
+      );
+    },
+  },
+  {
+    name: "[construir] la IA chica avisa si un paso agregó algo que tu orden no pedía (a ciegas): quitarlo o dejarlo lo decides tú",
+    run: async (r) => {
+      conProgramar(r);
+      fs.writeFileSync(path.join(r, "src/doble.js"), DOBLE);
+      iaConstruir({
+        "programar:orden": { pasos: [{ paso: 1, codigo: 'if (typeof x !== "number" || Number.isNaN(x)) throw new Error("x debe ser un número");', falta: "", fuera: "", entrada: 'doble("a")', explicacion: "" }] },
+        "programar:fiel": (o: AskOptions) => (/isNaN/.test(o.prompt) ? { agregado: ["también rechaza NaN"], falta: [] } : { agregado: [], falta: [] }),
+        "programar:quitar": { codigo: 'if (typeof x !== "number") throw new Error("x debe ser un número");' },
+      });
+      await ofrecer(r, "src/doble.js", "doble");
+      const q = await ordenarPasos(r, "src/doble.js", "doble", [{ paso: 1, texto: "haz que lance un error si x no es number" }]);
+      const quitado = await resolverAgregadoC(r, "src/doble.js", "doble", 0, "quitar");
+      const nada = await falla(() => resolverAgregadoC(r, "src/doble.js", "doble", 0, "dejar"));
+      return (
+        esperar(q.porciones[0]!.verificacion?.agregado[0] === "también rechaza NaN", `no avisó lo agregado: ${JSON.stringify(q.porciones[0]!.verificacion)}`) &&
+        esperar(!quitado.porciones[0]!.codigo!.includes("isNaN") && quitado.porciones[0]!.orden === "haz que lance un error si x no es number" && !quitado.porciones[0]!.verificacion?.agregado.length, `quitar: ${JSON.stringify(quitado.porciones[0])}`) &&
+        esperar(/nada agregado/.test(nada), `después de quitarlo no debería quedar nada que resolver: "${nada}"`)
+      );
+    },
+  },
+  {
+    name: "[construir] si la función ya tenía código tuyo, la IA lo revisa sin anclarse (sugerencias); 'dejarlo así' o cambiarlo con tu orden",
+    run: async (r) => {
+      conProgramar(r);
+      fs.writeFileSync(path.join(r, "src/doble.js"), "function doble(x) {\n  return x * 2;\n}\n");
+      iaConstruir({ "programar:ajuste": { cuerpo: 'if (typeof x !== "number") throw new Error("x debe ser un número");\nreturn x * 2;', falta: "", entrada: 'doble("a")', explicacion: "Valida x." } });
+      const p = await ofrecer(r, "src/doble.js", "doble");
+      const trasReturn = await falla(() => ordenarPasos(r, "src/doble.js", "doble", [{ paso: 1, texto: "haz que lance un error si x no es number" }]));
+      const copia = await falla(() => ordenar(r, "src/doble.js", "doble", "No revisas que x sea un número", { sugerencia: 0 }));
+      const q = await ordenar(r, "src/doble.js", "doble", "haz que lance un error si x no es number antes de calcular", { sugerencia: 0 });
+      return (
+        esperar(p.porciones[0]?.tipo === "ya-estaba" && p.construir.previo?.length === 1 && p.construir.previo[0]!.estado === "pendiente", `no revisó tu código previo: ${JSON.stringify(p.construir.previo)}`) &&
+        esperar(/termina con un return/.test(trasReturn), `agregó un paso después de tu return: "${trasReturn}"`) &&
+        esperar(/TUS palabras/.test(copia), `aceptó copiar la sugerencia como orden: "${copia}"`) &&
+        esperar(q.construir.previo![0]!.estado === "aplicado" && q.porciones.some((x) => x.tipo === "ajuste" && x.codigo!.includes("throw")) && q.porciones.some((x) => x.tipo === "ya-estaba" && x.codigo === "  return x * 2;"), `cambiarlo con tu orden: ${JSON.stringify(q.porciones.map((x) => [x.tipo, x.codigo]))}`)
+      );
+    },
+  },
+
+  {
+    name: "[construir] programar · aprender: dices cómo lo harías antes de ver la propuesta (la IA comenta tu idea) y pruebas cada paso antes del siguiente",
+    run: async (r) => {
+      conProgramar(r, "programar-aprender");
+      fs.writeFileSync(path.join(r, "src/doble.js"), DOBLE);
+      iaConstruir();
+      const sinIdea = await falla(() => ofrecer(r, "src/doble.js", "doble"));
+      const p = await ideaPaso(r, "src/doble.js", "doble", "veo si es un número y si no lanzo error");
+      await ordenar(r, "src/doble.js", "doble", "haz que lance un error si x no es number");
+      const sinProbar = await falla(() => ideaPaso(r, "src/doble.js", "doble", "lo multiplico por dos y lo devuelvo"));
+      const { probarPorcion } = await import("./programar.js");
+      const pr = await probarPorcion(r, "src/doble.js", "doble", 0, "", "error: número");
+      const q = await ideaPaso(r, "src/doble.js", "doble", "lo multiplico por dos y lo devuelvo");
+      return (
+        esperar(/cómo harías/.test(sinIdea), `mostró la propuesta sin tu idea: "${sinIdea}"`) &&
+        esperar(p.construir.ofertas?.length === 1 && p.construir.ofertas[0]!.ideaTuya === "veo si es un número y si no lanzo error" && /NaN/.test(p.construir.ofertas[0]!.sobreTuIdea ?? ""), `en aprender, de a un paso y comentando tu idea: ${JSON.stringify(p.construir.ofertas)}`) &&
+        esperar(/prueba el anterior/.test(sinProbar), `dejó pasar al paso 2 sin probar el 1: "${sinProbar}"`) &&
+        esperar(pr.prueba.entrada === 'doble("a")' && pr.prueba.toca && pr.prueba.acierto, `la prueba con la entrada sugerida: ${JSON.stringify(pr.prueba)}`) &&
+        esperar(q.construir.ofertas?.[0]?.paso === 2, "después de probar no ofreció el paso 2")
+      );
+    },
+  },
+  {
+    name: "[construir] un caso que no tiene sentido no se fuerza (raro + tu decisión); uno que falla se ajusta con TU orden y lo demás queda igual",
+    run: async (r) => {
+      conProgramar(r);
+      fs.writeFileSync(path.join(r, "src/doble.js"), DOBLE);
+      iaConstruir({ "programar:ajuste": { cuerpo: 'if (typeof x !== "number" || Number.isNaN(x)) throw new Error("x debe ser un número");\nreturn x * 2;', falta: "", entrada: "doble(NaN)", explicacion: "También rechaza NaN." } });
+      await ofrecer(r, "src/doble.js", "doble");
+      await ordenar(r, "src/doble.js", "doble", "haz que lance un error si x no es number");
+      await ofrecer(r, "src/doble.js", "doble");
+      await ordenar(r, "src/doble.js", "doble", "haz que devuelva x multiplicado por dos");
+      await casosConstruir(r, "src/doble.js", "doble");
+      const raro = await editarCaso(r, "src/doble.js", "doble", -1, "doble(2)", "7");
+      const pend = cargarDecisionesC(r).filter((x) => x.estado === "pendiente");
+      const vaga = await falla(() => ordenar(r, "src/doble.js", "doble", "arréglalo como dijiste"));
+      const aj = await ordenar(r, "src/doble.js", "doble", "haz que también rechace NaN con el mismo error");
+      return (
+        esperar(raro.pasa === false && raro.raro === "contradice que la función duplica", `caso: ${JSON.stringify(raro)}`) &&
+        esperar(pend.length === 1 && pend[0]!.pregunta.includes("doble(2)"), `decisión: ${JSON.stringify(pend)}`) &&
+        esperar(/QUÉ hacer/.test(vaga), `aceptó un ajuste vago: "${vaga}"`) &&
+        esperar(aj.porciones.some((x) => x.tipo === "ajuste" && x.codigo!.includes("Number.isNaN")) && aj.porciones.some((x) => x.paso === 2 && !x.tipo && x.codigo === "  return x * 2;"), `ajuste: ${JSON.stringify(aj.porciones.map((x) => [x.tipo ?? x.paso, x.codigo]))}`) &&
+        esperar(aj.construir.casos!.every((x) => x.pasa === undefined), "los casos no quedaron para volver a probar tras el ajuste")
+      );
+    },
+  },
+  {
+    name: "[construir][seg] desde el chat la IA puede ofrecer y pedir casos, pero no dar tu orden, tu idea, deshacer, predecir ni editar casos",
+    run: async () => {
+      const rel = ".cai/cache/propuestas/a.js%23doble.json";
+      const base = { tipo: "construir", porciones: [{ tipo: "ya-estaba", codigo: "  let y;" }, { paso: 1, codigo: "  if (!x) throw 1;", orden: "haz que lance si no hay x", pruebas: [{}] }], construir: { ofertas: [{ paso: 2, idea: "a", alternativas: [] }], previo: [{ texto: "s", porque: "p", estado: "pendiente" }], casos: [{ llamada: "doble(1)", esperado: "2", tuyo: true }] } };
+      const b = (x: unknown) => Buffer.from(JSON.stringify(x));
+      const ofrecerIA = generadosPor("cai programar otra a.js --funcion doble")!;
+      const nuevaOferta = ofrecerIA(rel, b(base), b({ ...base, construir: { ...base.construir, ofertas: [{ paso: 2, idea: "b", alternativas: [] }] } }));
+      const nuevaConCodigoPrevio = ofrecerIA(rel, null, b({ tipo: "construir", porciones: [{ tipo: "ya-estaba", codigo: "  let y;" }], construir: { ofertas: [{ paso: 1, idea: "a", alternativas: [] }], previo: [{ texto: "s", porque: "p", estado: "pendiente" }] } }));
+      const dejaSugerencia = ofrecerIA(rel, b(base), b({ ...base, construir: { ...base.construir, previo: [{ texto: "s", porque: "p", estado: "dejado" }] } }));
+      const dejaAgregado = ofrecerIA(rel, b(base), b({ ...base, porciones: [base.porciones[0], { ...base.porciones[1], verificacion: { agregado: ["x"], falta: [], dejado: true } }] }));
+      // Sin orden tampoco: la IA no puede meter código al borrador por su cuenta.
+      const sinOrden = ofrecerIA(rel, b(base), b({ ...base, porciones: [...base.porciones, { paso: 2, codigo: "  return x * 2;" }] }));
+      const escribe = ofrecerIA(rel, b(base), b({ ...base, porciones: [...base.porciones, { paso: 2, codigo: "  return x * 2;", orden: "haz que devuelva el doble" }] }));
+      const idea = ofrecerIA(rel, b(base), b({ ...base, construir: { ...base.construir, ofertas: [{ paso: 2, idea: "b", alternativas: [], ideaTuya: "yo lo haría así" }] } }));
+      const predice = ofrecerIA(rel, b(base), b({ ...base, construir: { ...base.construir, prediccion: { llamada: "doble(0)", espero: "0" } } }));
+      const caso = ofrecerIA(rel, b(base), b({ ...base, construir: { ...base.construir, casos: [...base.construir.casos, { llamada: "doble(2)", esperado: "5", tuyo: true }] } }));
+      return (
+        esperar(["orden", "idea", "deshacer", "predecir", "caso", "quitar", "dejar"].every((x) => generadosPor(`cai programar ${x} a.js --funcion doble --texto hola`) === null && soloHumano(`cai programar ${x} a.js --funcion doble`) !== null), "algún comando del programador lo puede correr la IA") &&
+        esperar(nuevaOferta && nuevaConCodigoPrevio, `se revirtió algo legítimo: oferta=${nuevaOferta} nueva=${nuevaConCodigoPrevio}`) &&
+        esperar(!escribe && !sinOrden && !idea && !predice && !caso && !dejaSugerencia && !dejaAgregado, `la IA pudo hacer algo del programador: escribe=${escribe} sinOrden=${sinOrden} idea=${idea} predice=${predice} caso=${caso} dejaSugerencia=${dejaSugerencia} dejaAgregado=${dejaAgregado}`)
+      );
+    },
+  },
+);
+
+export function escenarios(filtro?: string): Case[] {
+  const f = filtro?.trim().toLowerCase();
+  return f ? CASES.filter((c) => c.name.toLowerCase().includes(f)) : CASES;
+}
+
+/** Corre un escenario en un proyecto temporal propio. `error` dice por qué falló (si se sabe). */
+export async function correrEscenario(c: Case): Promise<{ ok: boolean; error?: string }> {
+  const root = project();
+  process.env.CAI_HOME = path.join(root, ".home");
+  process.env.CAI_REPERTORIO = path.join(root, ".home", "repertorio"); // nunca el repertorio real
+  process.env.CAI_VISTA = "comentarios"; // los escenarios clásicos usan comentarios; los de notas lo declaran (conNotas)
+  try {
+    return (await c.run(root)) ? { ok: true } : { ok: false };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  } finally {
+    setLLM(null);
+    fs.rmSync(root, { recursive: true, force: true });
   }
-  log(`\n${ok}/${CASES.length} escenarios OK`);
-  return ok === CASES.length;
+}
+
+export async function runSelftest(log: (s: string) => void = console.log, filtro?: string): Promise<boolean> {
+  const lista = escenarios(filtro);
+  if (!lista.length) {
+    log(`ningún escenario contiene "${filtro}"`);
+    return false;
+  }
+  let ok = 0;
+  for (const c of lista) {
+    const r = await correrEscenario(c);
+    if (r.error) log(`    error: ${r.error}`);
+    log(`${r.ok ? "✓" : "✗"} ${c.name}`);
+    if (r.ok) ok++;
+  }
+  log(`\n${ok}/${lista.length} escenarios OK${filtro ? ` (filtro: "${filtro}")` : ""}`);
+  return ok === lista.length;
 }

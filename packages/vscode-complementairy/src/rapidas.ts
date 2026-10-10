@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import * as vscode from "vscode";
 import { tieneCai } from "./iniciar";
-import { cli, correr, guiaActual, leerConfig, output, root, silenciado, vista } from "./comun";
+import { comandoCli, correr, entornoCli, guiaActual, leerConfig, output, root, silenciado, vista } from "./comun";
 import type { NotasView } from "./notasView";
 
 /**
@@ -14,12 +14,19 @@ import type { NotasView } from "./notasView";
  * ~1 s en vez de ~20 s. Si no responde a tiempo o se cae, se usa `cai rapida` (la llamada de siempre).
  */
 
+/** La IA ya estaba respondiendo cuando venció el plazo: pedirla de nuevo por otra vía sería pagarla dos veces. */
+class EnCurso extends Error {
+  constructor() {
+    super("la sugerencia tardó más de lo esperado (ya estaba en curso; no se pide otra vez)");
+  }
+}
+
 /** Proceso `cai servir` (uno por proyecto): pedidos JSON por línea, respuestas por `id`. */
 class Servidor implements vscode.Disposable {
   private proc?: ChildProcess;
   private buf = "";
   private sig = 0;
-  private readonly espera = new Map<number, { ok: (v: unknown) => void; mal: (e: Error) => void; timer: NodeJS.Timeout }>();
+  private readonly espera = new Map<number, { ok: (v: unknown) => void; mal: (e: Error) => void; timer: NodeJS.Timeout; empezado?: boolean }>();
   /** Salidas rápidas seguidas (p. ej. una CLI vieja sin `servir`): tras 3, no se relanza más en esta sesión. */
   private caidas = 0;
   private apagado = false;
@@ -27,7 +34,8 @@ class Servidor implements vscode.Disposable {
   constructor(private readonly cwd: string) {}
 
   private arrancar(): ChildProcess {
-    const p = spawn("sh", ["-c", `${cli()} servir`], { cwd: this.cwd, env: { ...process.env, CLAUDE_PROJECT_DIR: this.cwd } });
+    const { exe, base } = comandoCli();
+    const p = spawn(exe, [...base, "servir"], { cwd: this.cwd, env: entornoCli(this.cwd) });
     const inicio = Date.now();
     p.stdout!.setEncoding("utf8"); // los acentos no se cortan entre dos trozos
     p.on("error", (e) => output.appendLine(`[servir] ${e.message}`));
@@ -39,9 +47,14 @@ class Servidor implements vscode.Disposable {
         const linea = this.buf.slice(0, i);
         this.buf = this.buf.slice(i + 1);
         try {
-          const r = JSON.parse(linea) as { id: number; ok: boolean; error?: string };
+          const r = JSON.parse(linea) as { id: number; ok: boolean; error?: string; empezado?: boolean };
           const e = this.espera.get(r.id);
           if (!e) continue;
+          // Aviso intermedio: la llamada a la IA ya empezó (si se pasa del tiempo, no se paga otra).
+          if (r.empezado) {
+            e.empezado = true;
+            continue;
+          }
           clearTimeout(e.timer);
           this.espera.delete(r.id);
           if (r.ok) e.ok(r);
@@ -78,8 +91,9 @@ class Servidor implements vscode.Disposable {
     const id = ++this.sig;
     return new Promise<T>((ok, mal) => {
       const timer = setTimeout(() => {
+        const e = this.espera.get(id);
         this.espera.delete(id);
-        mal(new Error("cai servir tardó demasiado"));
+        mal(e?.empezado ? new EnCurso() : new Error("cai servir tardó demasiado"));
       }, timeoutMs);
       this.espera.set(id, { ok: ok as (v: unknown) => void, mal, timer });
       // "vence": después de eso ya no esperamos la respuesta, y `cai servir` no gasta en ella.
@@ -194,7 +208,8 @@ export class Rapidas implements vscode.Disposable {
         : (JSON.parse(await correr(["rapida", doc.uri.fsPath, "--linea", String(linea), "--json"], cwd, { silencioso: true })) as { texto?: string; motivo?: string });
     const s = this.servidor(cwd);
     if (!s) return respaldo();
-    return s.pedir<{ texto?: string; completo?: string; motivo?: string }>({ tipo: "rapida", archivo: doc.uri.fsPath, linea, texto: doc.getText(), ...(aPedido ? { aPedido: true } : {}) }).catch(respaldo);
+    return s.pedir<{ texto?: string; completo?: string; motivo?: string }>({ tipo: "rapida", archivo: doc.uri.fsPath, linea, texto: doc.getText(), ...(aPedido ? { aPedido: true } : {}) })
+      .catch((e: unknown) => (e instanceof EnCurso ? { motivo: e.message } : respaldo()));
   }
 
   private async pedir(ed: vscode.TextEditor, cwd: string, turno: number): Promise<void> {

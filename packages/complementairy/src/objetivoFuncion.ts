@@ -7,7 +7,7 @@ import { ask } from "./llm.js";
 import { cargarNotas, guardarNotas, mensaje, type Nota } from "./notas.js";
 import { ARCHIVO, claveFuncion, funcionesDe, funcionPorClave, notaPara } from "./notasFuncion.js";
 import { conBloqueo } from "./ocupado.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 
 /**
  * Entender una función (o un archivo) antes de escribirla: qué debe hacer y cuándo está terminada

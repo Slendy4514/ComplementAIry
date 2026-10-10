@@ -45,7 +45,7 @@ const SOLO_HUMANO: [RegExp, string][] = [
   [/\bchat\b.*--aplicar\b/, "aplicar una propuesta del chat"],
   [/\bmemoria\s+(corregir|quitar|responder)\b/, "corregir la memoria o responder sus preguntas"],
   [/\b(ideas|tareas)\s+descartar\b/, "descartar una idea o una tarea"],
-  [/\bprogramar\s+(contrato|probar|insertado|diferida)\b/, "definir los casos, probar una porción o registrar lo insertado"],
+  [/\bprogramar\s+(contrato|probar|insertado|diferida|orden|pedir|auxiliares|deshacer|idea|predecir|caso|quitar|dejar)\b/, "dar la orden de un paso (o deshacerlo), decir tu idea, quitar o dejar algo, predecir, editar un caso, probar o registrar lo insertado"],
   [/\bprogramar\s+plan\b.*--pasos\b/, "editar el plan"],
   [/\brepertorio\s+borrar\b/, "borrar del repertorio personal"],
   [/\bnotas\s+anotar\b/, "escribir en las notas a nombre del programador"],
@@ -59,11 +59,36 @@ export function soloHumano(comando: string): string | null {
 }
 
 /** Una propuesta escrita por un comando de la IA: ninguna porción aprobada ni probada (o se borró). */
-function propuestaSinAprobar(b: Buffer | null): boolean {
-  if (!b) return true;
+/**
+ * Un comando de la IA sobre una propuesta (ofrecer, otra forma, pedir casos) no puede AGREGAR nada de lo
+ * que hace el programador: pasos escritos con su orden, probados o con su idea, su predicción ni casos
+ * suyos. Puede conservar lo que ya estaba.
+ */
+function propuestaHonesta(antes: Buffer | null, despues: Buffer | null): boolean {
+  if (!despues) return true;
+  type P = { tipo?: string; porciones?: { tipo?: string; codigo?: string; orden?: string; aprobada?: boolean; idea?: string; pruebas?: unknown[]; verificacion?: { dejado?: boolean } }[]; construir?: { ofertas?: { ideaTuya?: string }[]; previo?: { estado: string }[]; prediccion?: { espero?: string }; casos?: { llamada: string; esperado: string; tuyo?: boolean }[] } };
   try {
-    const p = JSON.parse(b.toString("utf8")) as { porciones?: { aprobada?: boolean; pruebas?: unknown[] }[] };
-    return (p.porciones ?? []).every((x) => !x.aprobada && !x.pruebas?.length);
+    const leer = (b: Buffer | null): P => (b ? (JSON.parse(b.toString("utf8")) as P) : {});
+    const a = leer(antes);
+    const d = leer(despues);
+    // Lo que hace el programador: en construir juntos, cada paso escrito (solo con su orden); en cualquier
+    // propuesta, lo probado y su idea. Su código previo ("ya-estaba") no cuenta.
+    const hechos = (p: P) =>
+      new Set(
+        (p.porciones ?? [])
+          .filter((x) => x.tipo !== "ya-estaba")
+          .flatMap((x) => [p.tipo === "construir" ? `c|${x.codigo ?? ""}|${x.orden ?? ""}` : "", x.aprobada ? `a|${x.codigo}` : "", x.idea ? `d|${x.idea}` : "", x.pruebas?.length ? `p|${x.codigo}|${x.pruebas.length}` : ""].filter(Boolean)),
+      );
+    const ya = hechos(a);
+    if ([...hechos(d)].some((h) => !ya.has(h))) return false;
+    // Tu idea (aprender) y lo que decidiste sobre las sugerencias a tu código previo: solo tuyos.
+    const ideas = new Set((a.construir?.ofertas ?? []).map((x) => x.ideaTuya).filter(Boolean));
+    if ((d.construir?.ofertas ?? []).some((x) => x.ideaTuya && !ideas.has(x.ideaTuya))) return false;
+    if ((d.construir?.previo ?? []).some((x, i) => x.estado !== "pendiente" && x.estado !== a.construir?.previo?.[i]?.estado)) return false;
+    if (d.porciones?.some((x) => x.verificacion?.dejado && !a.porciones?.some((y) => y.codigo === x.codigo && y.verificacion?.dejado))) return false;
+    if (d.construir?.prediccion?.espero !== undefined && d.construir.prediccion.espero !== a.construir?.prediccion?.espero) return false;
+    const tuyos = new Set((a.construir?.casos ?? []).filter((x) => x.tuyo).map((x) => `${x.llamada}→${x.esperado}`));
+    return (d.construir?.casos ?? []).filter((x) => x.tuyo).every((x) => tuyos.has(`${x.llamada}→${x.esperado}`));
   } catch {
     return false;
   }
@@ -150,8 +175,8 @@ export function generadosPor(comando: string): ((rel: string, antes: Buffer | nu
       // Tus casos, el probador, el plan que editas y registrar lo que insertaste: solo humano (si lo hiciera
       // la IA, se probaría a sí misma). Proponer (plan, paso, pr, descartar): sus notas y tareas, y propuestas
       // SIN aprobar (ninguna porción probada).
-      if (/\bprogramar\s+(contrato|probar|insertado|diferida)\b/.test(plano) || (/\bprogramar\s+plan\b/.test(plano) && /--pasos\b/.test(plano))) return null;
-      return (rel, antes, despues) => notasYTareas(rel, antes, despues) || (/\/cache\/propuestas\/[^/]+\.json$/.test(rel) && propuestaSinAprobar(despues));
+      if (/\bprogramar\s+(contrato|probar|insertado|diferida|orden|pedir|auxiliares|deshacer|idea|predecir|caso|quitar|dejar)\b/.test(plano) || (/\bprogramar\s+plan\b/.test(plano) && /--pasos\b/.test(plano))) return null;
+      return (rel, antes, despues) => notasYTareas(rel, antes, despues) || (/\/cache\/propuestas\/[^/]+\.json$/.test(rel) && propuestaHonesta(antes, despues));
     case "repertorio":
       return /\brepertorio\s+borrar\b/.test(plano) ? null : () => false;
     case "ideas":
@@ -220,7 +245,7 @@ export async function checkSnapshot(z: Zoner, id: string): Promise<Action[]> {
     before = JSON.parse(fs.readFileSync(snapFile, "utf8")) as Manifest;
   } catch {
     fs.rmSync(snapFile, { force: true });
-    throw new Error("la foto previa al comando está dañada; no se pudo verificar qué cambió. Revisá los cambios con git diff.");
+    throw new Error("la foto previa al comando está dañada; no se pudo verificar qué cambió. Revisa los cambios con git diff.");
   }
   fs.rmSync(snapFile);
   const blobs = path.join(cacheDir(z.root), "blobs");

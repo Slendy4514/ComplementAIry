@@ -51,7 +51,7 @@ async function iniciar(ctx: vscode.ExtensionContext): Promise<void> {
     );
     if (op === "Conocerlo")
       try {
-        const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: conociendo el proyecto…" }, () => correr(["conocer", "--sin-preguntas"], cwd));
+        const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "ComplementAIry: conociendo el proyecto…", cancellable: true }, (_p, t) => correr(["conocer", "--sin-preguntas"], cwd, { cancelar: t }));
         const ver = await vscode.window.showInformationMessage(`Listo: ${r.trim().split("\n").slice(-1)[0] ?? ""}`, "Ver proyecto.md");
         if (ver) await vscode.window.showTextDocument(vscode.Uri.file(path.join(cwd, ".cai", "proyecto.md")), { preview: false });
         void vscode.commands.executeCommand("cai.panel.refrescar");

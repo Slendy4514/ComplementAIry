@@ -4,7 +4,7 @@ import { loadConfig } from "./config.js";
 import { llmActual, setLLM } from "./llm.js";
 import { rapida } from "./rapida.js";
 import { conSesion, fijarPlazo } from "./sesion.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 
 /**
  * `cai servir`: proceso de larga vida para la extensión. Recibe un pedido JSON por línea en stdin y
@@ -24,22 +24,27 @@ export interface Pedido {
   aPedido?: boolean;
 }
 
-export async function atender(root: string, linea: string): Promise<string> {
+/**
+ * Atiende un pedido. `alEmpezar` se llama justo antes de la llamada a la IA: la extensión lo usa para
+ * saber que, si vence el plazo, NO debe pedir la misma sugerencia por otra vía (se pagaría dos veces).
+ */
+export async function atender(root: string, linea: string, alEmpezar?: (id: Pedido["id"]) => void): Promise<string> {
   let p: Pedido;
   try {
     p = JSON.parse(linea) as Pedido;
-    if (!p || typeof p !== "object") throw new Error("no es un objeto");
+    if (!p || typeof p !== "object") throw new Error("el pedido no es un objeto JSON");
   } catch {
     return JSON.stringify({ id: null, ok: false, error: "pedido inválido (se espera un objeto JSON por línea)" });
   }
   try {
     if (p.tipo === "ping") return JSON.stringify({ id: p.id, ok: true });
     if (p.tipo === "rapida") {
-      if (!p.archivo || !p.linea) throw new Error("falta archivo o línea");
+      if (!p.archivo || !p.linea) throw new Error('el pedido "rapida" necesita "archivo" (ruta) y "linea" (número desde 1)');
       // Si quien pidió ya no espera la respuesta, no se gasta en ella.
       const queda = typeof p.vence === "number" ? p.vence - Date.now() : 15_000;
       if (queda < 500) throw new Error("vencido: la extensión ya no espera esta respuesta");
       fijarPlazo(queda - 300);
+      alEmpezar?.(p.id);
       const r = await rapida(root, path.relative(root, path.resolve(root, p.archivo)), p.linea, { ...(typeof p.texto === "string" ? { texto: p.texto } : {}), ...(p.aPedido ? { aPedido: true } : {}) });
       return JSON.stringify({ id: p.id, ok: true, ...r });
     }
@@ -69,7 +74,7 @@ export async function servir(root: string): Promise<void> {
     if (!l.trim()) return;
     cola = cola
       .then(async () => {
-        process.stdout.write(`${await atender(root, l)}\n`);
+        process.stdout.write(`${await atender(root, l, (id) => process.stdout.write(`${JSON.stringify({ id, empezado: true })}\n`))}\n`);
       })
       .catch((e: unknown) => {
         process.stderr.write(`cai servir: ${e instanceof Error ? e.message : String(e)}\n`);

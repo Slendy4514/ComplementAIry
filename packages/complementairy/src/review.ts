@@ -13,8 +13,11 @@ import { eolOf, renderReply } from "./render.js";
 import { nextThreadId, regionesTop } from "./threads.js";
 import { publicar, type Edicion } from "./salida.js";
 import { guardarDiagnosticos } from "./siguiente.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 import { verifyCommentOnly } from "./verify.js";
+import { sinSoluciones } from "./guard.js";
+import { modoEfectivo } from "./modos.js";
+import { REUTILIZAR } from "./prompts.js";
 
 /**
  * Revisión al terminar: primero los sensores deterministas (que sí bloquean), después
@@ -68,8 +71,8 @@ export const REVIEWERS: Reviewer[] = [
   },
 ];
 
-const SYSTEM = `Sos un revisor de código de ComplementAIry. El programador escribió este código y aprende de tu revisión. No escribís su código.
-- Revisá SOLO tu foco. Máximo 5 hallazgos, solo los que valgan la pena; si no hay nada importante, devolvé una lista vacía (o un único "praise" si algo está especialmente bien).
+const SYSTEM = `Eres un revisor de código de ComplementAIry. El programador escribió este código y aprende de tu revisión. No escribes su código.
+- Revisa SOLO tu foco. Máximo 5 hallazgos, solo los que valgan la pena; si no hay nada importante, devolvé una lista vacía (o un único "praise" si algo está especialmente bien).
 - Cada hallazgo apunta a una línea: copiá en "codigo" el texto exacto de esa línea.
 - Etiquetas de Conventional Comments: issue (problema real), suggestion (mejora), question (algo para que piense), nitpick (menor), praise (algo bien hecho). "bloqueante" solo si el problema puede causar un error real.
 - Adaptate al nivel del programador: aprendiz = explicá el porqué y preferí preguntas que lo lleven a descubrirlo; intermedio = directo; experto = mínimo y técnico.
@@ -77,6 +80,8 @@ const SYSTEM = `Sos un revisor de código de ComplementAIry. El programador escr
 - Ignorá las preguntas abiertas del programador (comentarios @ia?): las responde el tutor, no la revisión.
 - Ignorá los comentarios @guia existentes.
 - Español neutro con tuteo (tú), 1 a 3 oraciones por hallazgo. No cites números de línea.
+
+${REUTILIZAR}
 
 ${CRITERIO}`;
 
@@ -220,6 +225,8 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
         .slice(a - 1, b)
         .map((l, i) => `${String(a + i).padStart(4)}| ${l}`)
         .join("\n");
+    // Solo en modo programar los hallazgos pueden traer código; si no, se describen en palabras.
+    const programarArchivo = modoEfectivo(z.config, rel).c.proponerSolucion;
     const parcial = previas && cambiadas.length < regiones.length;
     const numbered = parcial
       ? `Revisa SOLO estas partes, que cambiaron desde la última revisión:\n${cambiadas.map((r) => numerar(r.desde, r.hasta)).join("\n...\n")}\n\nResto del archivo (sin cambios; solo las firmas, como contexto):\n${regiones
@@ -254,7 +261,8 @@ export async function runReview(root: string, rel: string, o: ReviewOptions = {}
           res.costoUsd += costUsd;
           return data.hallazgos.map((h) => {
             if (propio) registrarPatron(`${r.id}/${h.categoria}`, h.texto);
-            return { line: findLine(lines0, h.codigo), etiqueta: h.etiqueta, bloqueante: h.bloqueante, texto: h.texto, links: h.links, fuente: r.id };
+            const texto = programarArchivo ? h.texto : sinSoluciones(h.texto);
+            return { line: findLine(lines0, h.codigo), etiqueta: h.etiqueta, bloqueante: h.bloqueante, texto, links: h.links, fuente: r.id };
           });
         } catch (e) {
           res.omitidos.push(`revisor ${r.id}: ${e instanceof Error ? e.message : String(e)}`);

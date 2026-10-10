@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { dataDir } from "./config.js";
+import { escribirJson, leerJson } from "./almacen.js";
 
 /**
  * Notas: lo que dice la IA, guardado aparte del código (.cai/notas/<archivo>.json).
@@ -56,10 +57,20 @@ export interface Nota {
   /** Modo programar: los casos que definiste (el resultado esperado lo pones tú). */
   contrato?: { llamada: string; esperado: string }[];
   /** Se insertó desde una propuesta (modo programar): cómo se probó. */
-  programada?: { fecha: string; tipo: "dirigido" | "pr" | "adaptada"; porciones: number; pruebas: number; aciertosPrimera: number; sinProbar: number };
+  programada?: {
+    fecha: string;
+    tipo: "dirigido" | "pr" | "adaptada" | "construir";
+    porciones: number;
+    pruebas: number;
+    aciertosPrimera: number;
+    sinProbar: number;
+    /** Construir juntos: pasos escritos con tus órdenes y la predicción de la función. */
+    ordenes?: number;
+    prediccion?: { acierto: boolean };
+  };
   /** Objetivo de la función (etapa de entendimiento): qué debe hacer y cuándo está terminada. */
   objetivo?: { texto: string; criterios: string[]; confirmado?: string; terminada?: string; preguntas?: string[] };
-  /** Modo de ESTA función ("programar" / "aprender"); si no está, hereda del archivo, carpeta o proyecto. */
+  /** Modo de ESTA función (sugerir, aprender, programar, programar-aprender); si no está, hereda del archivo, carpeta o proyecto. */
   modo?: string;
   /** Escalones de ayuda que ya se dieron en esta nota (para no volver a ofrecerlos). */
   dados?: string[];
@@ -71,6 +82,11 @@ export interface Nota {
   planIndependiente?: string;
   /** Funciones que esta usa y cambiaron desde la última verificación (aviso de impacto, sin IA). */
   impacto?: { funcion: string; archivo: string; fecha: string }[];
+  /**
+   * Funciones que esta usa y que aún no están listas (sin IA, desde el índice). Se REEMPLAZA en cada
+   * verificación (no se acumula en el hilo): el panel muestra "usa X · aún no está lista, mira su nota".
+   */
+  dependencias?: { funcion: string; archivo: string; estado: string }[];
   /** Se probaron casos de test (para ofrecer "Guardar como tests" y "Correr tests"). */
   testsProbados?: { funcion: string; fecha: string; archivo?: string };
   /** Última vez que se volvieron a probar sus casos (al guardar): se reemplaza, no se acumula. */
@@ -127,26 +143,18 @@ export function reanclar(src: string, n: Nota): Nota {
 }
 
 export function cargarNotas(root: string, rel: string, src?: string): Nota[] {
-  let notas: Nota[] = [];
-  try {
-    notas = (JSON.parse(fs.readFileSync(archivoNotas(root, rel), "utf8")) as { notas: Nota[] }).notas ?? [];
-  } catch {
-    return [];
-  }
+  const notas = leerJson<{ notas?: Nota[] }>(archivoNotas(root, rel), () => ({})).notas ?? [];
   const texto = src ?? (fs.existsSync(path.join(root, rel)) ? fs.readFileSync(path.join(root, rel), "utf8") : "");
   return notas.map((n) => (n.estado === "abierta" ? reanclar(texto, n) : n));
 }
 
 export function guardarNotas(root: string, rel: string, notas: Nota[]): void {
   const f = archivoNotas(root, rel);
-  fs.mkdirSync(path.dirname(f), { recursive: true });
   // Las resueltas más viejas se archivan (el panel no crece sin fin): se guardan las últimas 30.
   const resueltas = notas.filter((n) => n.estado === "resuelta").slice(-30);
   const abiertas = notas.filter((n) => n.estado === "abierta");
   // Atómico (temporal + rename): la extensión nunca lee un archivo a medio escribir.
-  const tmp = `${f}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ version: 1, archivo: rel, notas: [...abiertas, ...resueltas] }, null, 2));
-  fs.renameSync(tmp, f);
+  escribirJson(f, { version: 1, archivo: rel, notas: [...abiertas, ...resueltas] });
 }
 
 export function nuevaNota(notas: Nota[], parcial: Omit<Nota, "id" | "creada" | "actualizada" | "estado" | "hilo" | "snippets" | "bloqueante" | "accion"> & Partial<Nota>): Nota {

@@ -15,7 +15,11 @@ import { cargarNotas, guardarNotas, mensaje, type Nota } from "./notas.js";
 import { guardarEnRepertorio } from "./repertorio.js";
 import { CAMPO_FUNCION, claveFuncion, consolidar, funcionPorClave, notaPara, repartir } from "./notasFuncion.js";
 import { conBloqueo } from "./ocupado.js";
-import { iaOpts, type Tamano } from "./tutor.js";
+import { iaOpts, type Tamano } from "./llm.js";
+import { sinSoluciones } from "./guard.js";
+import { modoEfectivo } from "./modos.js";
+import { REUTILIZAR } from "./prompts.js";
+import { actualizarIndice, dependenciasPendientes, leerIndice } from "./indice.js";
 
 /**
  * "¿Quedó lista?": revisa una función con lo que ya escribiste.
@@ -28,6 +32,8 @@ import { iaOpts, type Tamano } from "./tutor.js";
 export type Estado = "lista" | "casi" | "falta";
 
 export interface Veredicto {
+  /** Funciones que usa y aún no están listas (aviso, sin IA). */
+  dependencias?: { funcion: string; archivo: string; estado: string }[];
   funcion: string;
   estado: Estado;
   resumen: string;
@@ -87,7 +93,9 @@ const SYSTEM = `Verificas si UNA función del programador quedó lista. Nunca es
 - "lista": hace lo que su nota pedía, maneja los casos borde razonables y no tiene bugs evidentes. Puede haber mejoras opcionales.
 - "casi": funciona en lo principal, pero falta algo concreto (un caso borde, un error mal manejado, una regla del proyecto).
 - "falta": no cumple lo pedido o tiene un bug claro.
-Habla SOLO de esta función. Sé concreto y breve. Español neutro con tuteo.
+Habla SOLO de esta función. De las otras del mapa, como mucho di que esta las use; nunca qué les falta (eso va en su propia nota). Sé concreto y breve. Español neutro con tuteo.
+
+${REUTILIZAR}
 
 ${CRITERIO}`;
 
@@ -116,6 +124,7 @@ export async function verificar(
     explicacion?: string;
   } = {},
 ): Promise<{ veredictos: Veredicto[]; costoUsd: number }> {
+  let indiceAlDia = false; // el mapa del archivo (contexto) sale del índice: se refresca una vez
   const lang = langFor(rel);
   if (!lang) throw new Error(`tipo de archivo sin soporte: ${rel}`);
   return conBloqueo(root, rel, "verificando", async () => {
@@ -175,6 +184,14 @@ export async function verificar(
 
       // 2. Con IA, a ciegas: solo el código, el objetivo y las reglas (sin la conversación ni comentarios que aprueban).
       o.log?.(`cai: verificando ${f.nombre} en ${rel}`);
+      if (!indiceAlDia) {
+        await actualizarIndice(root, [rel]).catch(() => undefined);
+        indiceAlDia = true;
+      }
+      // Lo único que esta nota dice de otras funciones: cuáles usa y aún no están listas (sin IA; se reemplaza).
+      const deps = dependenciasPendientes(leerIndice(root), rel, clave);
+      if (deps.length) nota.dependencias = deps;
+      else delete nota.dependencias;
       const firma = (lineas[f.linea - 1] ?? "").trim();
       const otraMirada = o.independiente || o.independienteSiCambio;
       let plan = otraMirada ? (nota.planIndependiente ?? "") : "";
@@ -218,6 +235,12 @@ export async function verificar(
       });
       res.costoUsd += costUsd;
       llamadas++;
+      // Fuera del modo programar, la verificación describe en palabras: el código escrito se quita (sin IA).
+      if (!modoEfectivo(z.config, rel, clave).c.proponerSolucion) {
+        const limpio = (t: string) => sinSoluciones(t);
+        Object.assign(data, { resumen: limpio(data.resumen), que_hacer: limpio(data.que_hacer), ...(data.otra_mirada ? { otra_mirada: limpio(data.otra_mirada) } : {}) });
+        data.mejoras = (data.mejoras ?? []).map((m) => (typeof m === "string" ? limpio(m) : { ...m, texto: limpio(m.texto) }));
+      }
       // Lo que habla de otra función o del archivo va a la nota del archivo (esta nota, solo lo suyo).
       const mejoras = repartir(notas, rel, funciones, src, { clave, nombre: f.nombre }, (data.mejoras ?? []).map((m) => (typeof m === "string" ? { texto: m, funcion: "" } : m)), "verificar", (m) => m.texto).map((m) => m.texto);
       registrar(nota, data.estado, data.resumen, mejoras, data.que_hacer, h, false, { otra: data.otra_mirada ?? "", modelo, costo: costUsd });
@@ -234,7 +257,7 @@ export async function verificar(
           /* el repertorio es opcional: si falla (sin git, sin permisos), sigue */
         }
       if (conExplicacion && data.explicacion) nota.explicacion = { texto: o.explicacion!.trim(), coincide: data.explicacion.coincide, comentario: data.explicacion.comentario, fecha: new Date().toISOString() };
-      res.veredictos.push({ funcion: clave, estado: data.estado, resumen: data.resumen, sinIa: false, nota: nota.id });
+      res.veredictos.push({ funcion: clave, estado: data.estado, resumen: data.resumen, sinIa: false, nota: nota.id, ...(nota.dependencias ? { dependencias: nota.dependencias } : {}) });
     }
     guardarNotas(root, rel, notas);
     return res;

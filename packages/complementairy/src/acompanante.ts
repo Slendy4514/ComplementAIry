@@ -20,8 +20,10 @@ import { publicar } from "./salida.js";
 import { dejarPendiente, ocupar, tomarPendiente } from "./ocupado.js";
 import { planoArchivo } from "./planoArchivo.js";
 import { findThreads, nextThreadId, regionesTop, regionOf } from "./threads.js";
-import { iaOpts, marcadores, runGuia, TIPOS, type Tamano } from "./tutor.js";
+import { iaOpts } from "./llm.js";
+import { marcadores, runGuia, TIPOS, type Tamano } from "./tutor.js";
 import { syntaxErrors } from "./sintaxis.js";
+import { REUTILIZAR } from "./prompts.js";
 
 /**
  * El acompañante: corre cada vez que guardás. Las decisiones de CUÁNDO intervenir son
@@ -95,6 +97,8 @@ const SYSTEM = `Eres el acompañante de ComplementAIry: observas cómo programa 
 - Plano de archivo: qué funciones crear (nombre y responsabilidad en palabras: qué recibe, qué devuelve, qué casos cuida), en qué orden, y qué snippets de la BIBLIOTECA sirven (tipo "snippet", texto = "<nombre> clave=valor — para qué"). Respeta docs/ESTRUCTURA.md si existe.
 - Ayuda cuando se traba: empieza explicando qué significa el error y dónde mirar (tipo "pista"); si sirve, la pieza (función/API con link a docs). Tono de compañero, breve, sin condescendencia. Sin código.
 - Español neutro con tuteo; 1 a 3 oraciones por respuesta. No cites números de línea.
+
+${REUTILIZAR}
 
 ${CRITERIO}`;
 
@@ -518,5 +522,7 @@ const REVISION_SYSTEM = `Eres el compañero de programación de ComplementAIry. 
 - Si está bien, devuelve una lista vacía (o un único "praise" si algo está especialmente bien hecho).
 - Explica el porqué y da la pista o la pieza (con link a documentación oficial si estás seguro); nunca escribas la corrección en código.
 - Español neutro con tuteo, 1 a 2 oraciones por comentario. No cites números de línea; en "codigo" copia la línea exacta.
+
+${REUTILIZAR}
 
 ${CRITERIO}`;

@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "actualizado": "2026-10-10T20:35:23.482Z",
+  "archivos": {
+    "examples/obsidian-files/Files.js": {
+      "huella": "53f14d466a64",
+      "funciones": [
+        {
+          "archivo": "examples/obsidian-files/Files.js",
+          "clave": "constructor",
+          "nombre": "constructor",
+          "firma": "constructor()",
+          "linea": 2,
+          "lineas": 3,
+          "exportada": false,
+          "llama": [],
+          "llamadasCrudas": [],
+          "llamadaPor": [],
+          "estado": "casi",
+          "resumen": "Asigna `window.app` correctamente para lo principal, pero no valida que exista, así que fuera de Obsidian o antes de que cargue falla tarde y con un mensaje poco claro.",
+          "huella": "763f4b53a0df"
+        },
+        {
+          "archivo": "examples/obsidian-files/Files.js",
+          "clave": "exists",
+          "nombre": "exists",
+          "firma": "exists(rawPath)",
+          "linea": 6,
+          "lineas": 5,
+          "exportada": false,
+          "llama": [
+            "normalize"
+          ],
+          "llamadasCrudas": [
+            "normalize",
+            "getAbstractFileByPath"
+          ],
+          "llamadaPor": [],
+          "estado": "casi",
+          "resumen": "La lógica es correcta y breve, y usa `normalize` como debe. Falta decidir qué hace con entradas inválidas (hoy dan false en silencio) y revisar que `this.obsidian` esté definido.",
+          "huella": "ca8f8531be19"
+        },
+        {
+          "archivo": "examples/obsidian-files/Files.js",
+          "clave": "ensureFolder",
+          "nombre": "ensureFolder",
+          "firma": "ensureFolder(path) {}",
+          "linea": 12,
+          "lineas": 1,
+          "exportada": false,
+          "llama": [],
+          "llamadasCrudas": [],
+          "llamadaPor": [],
+          "estado": "falta",
+          "resumen": "La función está sin implementar: solo existe la firma con el cuerpo vacío.",
+          "porHacer": true,
+          "huella": "5902b56c044b"
+        },
+        {
+          "archivo": "examples/obsidian-files/Files.js",
+          "clave": "moveTo",
+          "nombre": "moveTo",
+          "firma": "async moveTo(file, destFolder)",
+          "linea": 14,
+          "lineas": 8,
+          "exportada": false,
+          "llama": [],
+          "llamadasCrudas": [
+            "Error",
+            "String"
+          ],
+          "llamadaPor": [],
+          "estado": "falta",
+          "resumen": "Solo existe el esqueleto del manejo de errores; el cuerpo del `try` está vacío, así que la función no mueve nada y devuelve undefined.",
+          "huella": "3498de70348b"
+        },
+        {
+          "archivo": "examples/obsidian-files/Files.js",
+          "clave": "normalize",
+          "nombre": "normalize",
+          "firma": "normalize(path) {}",
+          "linea": 23,
+          "lineas": 1,
+          "exportada": false,
+          "llama": [],
+          "llamadasCrudas": [],
+          "llamadaPor": [
+            "examples/obsidian-files/Files.js:exists"
+          ],
+          "estado": "falta",
+          "resumen": "Está sin implementar: devuelve undefined, así que `exists` (que depende de ella) no puede funcionar bien todavía.",
+          "porHacer": true,
+          "huella": "e26334883c1e"
+        }
+      ]
+    },
+    "Manifiesto.md": {
+      "huella": "54b69f656582",
+      "funciones": []
+    }
+  }
+}

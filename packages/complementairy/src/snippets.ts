@@ -81,7 +81,7 @@ export function snippetPolicy(z: Zoner, content: string): SnippetPolicy {
     ? {
         allowed: false,
         why:
-          `todavía no dominás ${noDominados.join(", ")} según tu perfil: el snippet lo armás vos con guía ` +
+          `todavía no dominas ${noDominados.join(", ")} según tu perfil: el snippet lo armas tú con guía ` +
           `(la delegación se gana; ver \`cai perfil\`)`,
       }
     : { allowed: true, why: "" };
@@ -126,7 +126,7 @@ export function crearSnippet(root: string, o: NuevoSnippet): { file: string; bod
   if (text.includes(`${key}:`)) throw new Error(`ya existe un snippet llamado ${o.nombre}`);
   const entry =
     `  ${key}: {\n` +
-    `    // TODO(vos): reemplazá los valores que cambian cada vez por \${1:nombre}, \${2:otro}...\n` +
+    `    // TODO(tú): reemplaza los valores que cambian cada vez por \${1:nombre}, \${2:otro}...\n` +
     `    "prefix": ${JSON.stringify(o.nombre)},\n` +
     (scope ? `    "scope": ${JSON.stringify(scope)},\n` : "") +
     `    "description": "",\n` +

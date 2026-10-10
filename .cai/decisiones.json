@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "decisiones": [
+    {
+      "id": "df96aba",
+      "pregunta": "¿Qué debe hacer `exists` cuando `rawPath` es inválido (no es string, o queda vacío tras normalizar)?",
+      "opciones": [
+        {
+          "opcion": "Lanzar un error explicativo",
+          "consecuencia": "Cumple la regla del proyecto y no oculta errores del que llama, pero obliga a usar try/catch si se quiere preguntar de forma tolerante."
+        },
+        {
+          "opcion": "Devolver false",
+          "consecuencia": "Más cómodo de usar, pero un bug (pasar undefined por error) se confunde con 'no existe' y pasa desapercibido."
+        },
+        {
+          "opcion": "Lanzar si no es string, false si queda vacío tras normalizar",
+          "consecuencia": "Distingue un error de programación (tipo incorrecto) de una ruta legítima sin contenido."
+        }
+      ],
+      "recomendada": "Lanzar si no es string, false si queda vacío tras normalizar",
+      "alcance": {
+        "archivo": "examples/obsidian-files/Files.js",
+        "funcion": "exists"
+      },
+      "estado": "pendiente",
+      "creada": "2026-10-10T17:53:57.135Z",
+      "origen": "verificar"
+    },
+    {
+      "id": "d873c57",
+      "pregunta": "¿Qué recibe `file` y qué devuelve moveTo?",
+      "opciones": [
+        {
+          "opcion": "`file` es un TFile de Obsidian y devuelve la nueva ruta (string)",
+          "consecuencia": "Valida con instanceof/propiedad `path`; no hace falta buscar el archivo, y el llamador recibe un dato simple."
+        },
+        {
+          "opcion": "`file` es una ruta (string) y moveTo la resuelve",
+          "consecuencia": "Debes usar normalize y buscar el archivo en el vault; más flexible pero más casos de error (ruta inexistente, es carpeta)."
+        }
+      ],
+      "recomendada": "`file` es un TFile de Obsidian y devuelve la nueva ruta (string)",
+      "alcance": {
+        "archivo": "examples/obsidian-files/Files.js",
+        "funcion": "moveTo"
+      },
+      "estado": "vigente",
+      "creada": "2026-10-10T17:55:19.753Z",
+      "origen": "verificar",
+      "eleccion": "`file` es una ruta (string) y moveTo la resuelve",
+      "decidida": "2026-10-10T18:39:41.337Z"
+    },
+    {
+      "id": "d468dc6",
+      "pregunta": "¿Qué hacer si ya existe un archivo con ese nombre en destino?",
+      "opciones": [
+        {
+          "opcion": "Lanzar un error explicativo",
+          "consecuencia": "Simple y seguro, pero el llamador debe resolver el conflicto."
+        },
+        {
+          "opcion": "Renombrar automáticamente (ej. 'nombre 1.md')",
+          "consecuencia": "Nunca falla por colisión, pero el archivo termina con un nombre distinto al esperado y debes devolver la ruta final."
+        }
+      ],
+      "recomendada": "Renombrar automáticamente (ej. 'nombre 1.md')",
+      "alcance": {
+        "archivo": "examples/obsidian-files/Files.js",
+        "funcion": "moveTo"
+      },
+      "estado": "vigente",
+      "creada": "2026-10-10T17:55:19.753Z",
+      "origen": "verificar",
+      "eleccion": "Lanzar un error explicativo",
+      "decidida": "2026-10-10T18:39:54.468Z"
+    },
+    {
+      "id": "d902305",
+      "pregunta": "¿Qué debe hacer normalize con una ruta vacía (o solo espacios), que podría significar la raíz de la bóveda?",
+      "opciones": [
+        {
+          "opcion": "Lanzar error",
+          "consecuencia": "Más seguro: evita operar sobre la raíz por accidente, pero exists('') lanzará en vez de devolver false."
+        },
+        {
+          "opcion": "Devolver '' (raíz)",
+          "consecuencia": "Permite referirse a la raíz, pero un valor vacío por descuido podría actuar sobre toda la bóveda."
+        },
+        {
+          "opcion": "Devolver '/'",
+          "consecuencia": "Representa la raíz explícitamente, pero rompe la convención de rutas sin barra inicial de Obsidian."
+        }
+      ],
+      "recomendada": "Lanzar error",
+      "alcance": {
+        "archivo": "examples/obsidian-files/Files.js",
+        "funcion": "normalize"
+      },
+      "estado": "pendiente",
+      "creada": "2026-10-10T17:55:50.795Z",
+      "origen": "verificar"
+    }
+  ]
+}

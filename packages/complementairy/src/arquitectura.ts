@@ -4,7 +4,7 @@ import { loadConfig } from "./config.js";
 import { contextBlock, projectContext } from "./context.js";
 import { ask } from "./llm.js";
 import { loadPerfil, nivelDe } from "./profile.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 import { sanitizeGuia } from "./verify.js";
 
 /**
@@ -57,11 +57,11 @@ export function nuevoAdr(root: string, titulo: string, guia?: AdrGuia): string {
     "",
     "## Decisión",
     "",
-    g("pista: Escribí qué elegiste y POR QUÉ, en tus palabras. Es lo que tu yo del futuro va a leer."),
+    g("pista: Escribe qué elegiste y POR QUÉ, en tus palabras. Es lo que tu yo del futuro va a leer."),
     "",
     "## Consecuencias",
     "",
-    g("pregunta: ¿Qué se vuelve más fácil y qué más difícil? ¿Qué regla verificable podés sacar de esto (p. ej. dependency-cruiser)?"),
+    g("pregunta: ¿Qué se vuelve más fácil y qué más difícil? ¿Qué regla verificable puedes sacar de esto (p. ej. dependency-cruiser)?"),
     ...(guia?.lecturas.length ? ["", ...guia.lecturas.map((l) => g(`pieza: lectura recomendada: ${l}`))] : []),
     "",
   ].join("\n");
@@ -97,7 +97,7 @@ const SCHEMA = {
   },
 };
 
-const SYSTEM = `Sos el guía de arquitectura de ComplementAIry. El programador toma las decisiones y las escribe; vos preparás el terreno.
+const SYSTEM = `Eres el guía de arquitectura de ComplementAIry. El programador toma las decisiones y las escribe; tú preparas el terreno.
 - Leé el proyecto (Read/Grep/Glob): estructura, dependencias, docs/adr existentes.
 - Devolvé: las preguntas que debería responderse antes de decidir (requisitos, restricciones, escala, equipo), 2 a 4 opciones reales con pros, contras y cuándo conviene cada una, y hasta 3 lecturas (links oficiales o clásicos que conozcas con certeza).
 - No elijas por el programador. Si una opción es claramente mala para su contexto, decilo en sus contras.

@@ -11,7 +11,10 @@ import { leerIndice, lineaIndice } from "./indice.js";
 import { ask } from "./llm.js";
 import { conCandado } from "./ocupado.js";
 import { aplicarCambioTarea, cargarTareas, type CambioTarea } from "./siguiente.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
+import { escribirJson, leerJson } from "./almacen.js";
+import { sinSoluciones } from "./guard.js";
+import { modoEfectivo } from "./modos.js";
 
 /**
  * Chat del proyecto (fuera de cualquier archivo), en VARIAS conversaciones (`.cai/chats/<id>.json`):
@@ -92,21 +95,14 @@ function nueva(root: string, tipo: Conversacion["tipo"], modelo: Tamano, fecha =
 }
 
 function guardar(root: string, c: Conversacion): void {
-  fs.mkdirSync(dir(root), { recursive: true });
-  const f = archivo(root, c.id);
-  const tmp = `${f}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ ...c, mensajes: c.mensajes.slice(-200) }, null, 2));
-  fs.renameSync(tmp, f);
+  escribirJson(archivo(root, c.id), { ...c, mensajes: c.mensajes.slice(-200) });
 }
 
 export function cargarConversacion(root: string, id: string): Conversacion {
   migrar(root);
-  let c: Conversacion;
-  try {
-    c = JSON.parse(fs.readFileSync(archivo(root, id), "utf8")) as Conversacion;
-  } catch {
+  const c = leerJson<Conversacion>(archivo(root, id), () => {
     throw new Error(`no existe la conversación ${id} (míralas con: cai chat --lista)`);
-  }
+  });
   // v0.9: las "tareas sugeridas" pasan a ser cambios de tareas (crear), con su botón Aplicar.
   for (const m of c.mensajes)
     if (m.tareas?.length) {
@@ -279,7 +275,9 @@ export async function conversar(root: string, texto: string, o: { conversacion?:
     const respuesta: MensajeChat = {
       id: nuevoId(),
       quien: "ia",
-      texto: data.texto,
+      // Fuera del modo programar el chat explica en palabras: el código escrito se quita (sin IA). Los
+      // comandos de terminal sí pasan: sugerirlos es parte de acompañar.
+      texto: modoEfectivo(z.config, "").c.proponerSolucion ? data.texto : sinSoluciones(data.texto, { permitir: ["bash", "sh", "shell", "console", "zsh", "powershell"] }),
       fecha: new Date().toISOString(),
       ...(nuevas.length ? { decisiones: nuevas.map((d) => d.id) } : {}),
       ...(data.cambiosTareas?.length ? { cambiosTareas: data.cambiosTareas.map(({ id, ...c }) => ({ ...c, ...(id ? { id } : {}) })) } : {}),

@@ -111,7 +111,7 @@ export async function verifyCommentOnly(before: string, after: string, lang: Lan
     }
     const p = placement(after, c);
     if (p.kind === "invalida") reasons.push(`un comentario @guia tiene que ocupar su propia línea o ir al final de una línea: ${JSON.stringify(preview(c.text))}`);
-    if (!GUIA_FORMAT.test(c.content)) reasons.push(`formato inválido; usá "@guia[id] pista|pieza|pregunta|revision|ejemplo: texto": ${JSON.stringify(preview(c.content))}`);
+    if (!GUIA_FORMAT.test(c.content)) reasons.push(`formato inválido; usa "@guia[id] pista|pieza|pregunta|revision|ejemplo: texto": ${JSON.stringify(preview(c.content))}`);
     const directive = DIRECTIVES.find((re) => re.test(c.content));
     if (directive) reasons.push(`el comentario contiene algo que una herramienta podría interpretar como directiva (${directive.source}): ${JSON.stringify(preview(c.content))}`);
     if (/\\\s*$/.test(c.text)) reasons.push("un comentario no puede terminar en \\ (continuación de línea)");

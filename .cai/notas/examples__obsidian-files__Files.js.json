@@ -1,0 +1,343 @@
+{
+  "version": 1,
+  "archivo": "examples/obsidian-files/Files.js",
+  "notas": [
+    {
+      "accion": "Mira las funciones en 🔴/🟡 (cada una tiene su nota con qué falta)",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🔎 Revisión**\n- issue (blocking): `ensureFolder` devuelve `undefined` y no es `async`. En `moveTo`, `await this.ensureFolder(...)` daría un valor falsy y siempre tomaría la rama de fallo. Cuando la implementes, debe ser `async` y devolver siempre un booleano, incluso para rutas vacías. [📖](https://docs.obsidian.md/Reference/TypeScript+API/Vault/createFolder)\n- issue (blocking): Este `catch` relanza, pero la guía de `moveTo` y la de `ensureFolder` dicen que se registre con `console.error` y se devuelva `false`. Así `moveTo` rompe el contrato `{ moved, skipped }`: una falla en un archivo abortaría todo el lote. Decide cuál comportamiento quieres y mantenlo igual en ambas funciones.\n- suggestion: Esta función confía por completo en `normalize` para sanear la ruta, y hoy `normalize` está vacío (devuelve `undefined`). Cuando lo implementes, piensa qué pasa con rutas como `../..` o `a/../b`: ¿quieres que `exists` y `moveTo` puedan referirse a algo fuera de la carpeta que esperas? Decide si `normalize` debe rechazarlas.\n- suggestion: `exists` ya depende de que `normalize` devuelva una cadena. Piensa qué debe pasar con `\"/\"`, `\"   \"`, `null` o `\"a//b\"`. Las dos primeras quedan vacías tras quitar las `/` y los espacios, y `\"//\"` no debe tratarse como la raíz de la bóveda.\n- suggestion: Cuando implementes el cuerpo, valida primero los tipos de `file` y `destFolder`, antes de armar la ruta final. `destFolder` viene de fuera, así que se concatenaría con el nombre del archivo y podría apuntar a cualquier lugar de la bóveda. Usa `normalize` y comprueba que el resultado sea una ruta aceptable. [📖](https://docs.obsidian.md/Reference/TypeScript+API/FileManager/renameFile)",
+          "fecha": "2026-10-10T17:52:50.570Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🔎 Revisión** · 🔴 Archivo con cosas por hacer: 0 de 5 funciones listas · 3 hallazgo(s) bloqueante(s).  \n- 🟡 constructor  \n- 🟡 exists  \n- 🔴 ensureFolder  \n- 🔴 moveTo  \n- 🔴 normalize",
+          "fecha": "2026-10-10T17:55:50.824Z"
+        }
+      ],
+      "snippets": [],
+      "bloqueante": true,
+      "estado": "abierta",
+      "creada": "2026-10-10T17:52:50.569Z",
+      "actualizada": "2026-10-10T17:55:50.824Z",
+      "archivo": "examples/obsidian-files/Files.js",
+      "ancla": {
+        "linea": 1,
+        "texto": "class Files {"
+      },
+      "tipo": "revision",
+      "titulo": "Este archivo",
+      "origen": "revisar",
+      "id": "n1",
+      "alcance": "archivo",
+      "desanclada": false
+    },
+    {
+      "accion": "Añade una validación al inicio del constructor que lance un error explicativo si `window.app` no está disponible.",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🔎 Revisión**\n- issue (blocking): `getAbstractFileByPath` es un método de `Vault`, no de `app`, y `renameFile` es de `fileManager`. Con `this.obsidian = window.app`, `exists` lanzará un TypeError. Revisa en la documentación a qué objeto pertenece cada método. [📖](https://docs.obsidian.md/Reference/TypeScript+API/Vault/getAbstractFileByPath)\n- question: ¿Qué pasa si `window` o `window.app` no existe cuando se construye la clase (por ejemplo, en un test de Node)? Hoy fallaría con un error poco claro. ¿Prefieres comprobarlo y lanzar un mensaje explicativo, como pide la regla del proyecto?\n- suggestion: No hay tests de este archivo. Como el constructor toma `window.app` directamente, no puedes probar la clase sin un navegador ni Obsidian. ¿Qué pasaría si el constructor recibiera la app como parámetro (con `window.app` como valor por defecto)? Así podrías pasarle un objeto falso en los tests.",
+          "fecha": "2026-10-10T17:52:50.571Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🟡 Casi lista** · Asigna `window.app` correctamente para lo principal, pero no valida que exista, así que fuera de Obsidian o antes de que cargue falla tarde y con un mensaje poco claro.\n\nQué falta:\n- Valida que `window` y `window.app` existan (y que tengan lo que usarás, p. ej. `vault`) y, si no, lanza un Error que explique: 'Files solo funciona dentro de Obsidian: no se encontró window.app'. Es la regla de errores explicativos del proyecto y tu error frecuente de validación de entrada.\n- Permite inyectar la app como parámetro opcional (por defecto `window.app`). Así puedes probar la clase con un app falso sin depender de la global, y encaja con tu hábito pendiente de escribir tests de casos borde.\n- El nombre `this.obsidian` sugiere el módulo de Obsidian, pero guardas la instancia `app`. Considera llamarlo `app` para que no confunda al leer `this.obsidian.vault`.\n\n🔀 **Otra mirada** (pensada sin ver tu código): Mi plan incluía validar el contexto (nulo/tipo incorrecto) y que las capacidades esperadas existan; eso es lo que falta aquí. El resto de mi plan (ruta base, caché, permisos, listeners) no hace falta: Obsidian gestiona los permisos y las demás funciones normalizan rutas por su cuenta, así que mantener el constructor mínimo es una buena decisión.",
+          "fecha": "2026-10-10T17:53:23.751Z",
+          "meta": {
+            "kind": "verificar",
+            "modelo": "claude-sonnet-5-5",
+            "costo": 0.042151
+          }
+        },
+        {
+          "quien": "ia",
+          "texto": "**🧭 Plan de constructor** (edítalo si quieres)\n1. Comprueba que existe `window` y que `window.app` tiene valor. Usa `typeof window === \"undefined\"` antes de acceder, para que fuera de Obsidian (por ejemplo en pruebas o Node) no falle con un ReferenceError poco claro.\n2. Si falta alguno de los dos, lanza un `Error` con un mensaje explicativo: qué falta (`window.app`), por qué importa (esta clase necesita la API de Obsidian) y dónde debe ejecutarse (dentro de Obsidian, por ejemplo desde un script de Templater o DataviewJS).\n3. Si la validación pasa, guarda `window.app` en `this.obsidian`, como ya lo haces.",
+          "fecha": "2026-10-10T17:58:23.261Z",
+          "meta": {
+            "kind": "programar"
+          }
+        },
+        {
+          "quien": "tu",
+          "texto": "🧭 Ajuste: «Ok, entonces hagamos eso, que sea solo lo que usamos.»",
+          "fecha": "2026-10-10T18:09:03.991Z",
+          "meta": {
+            "kind": "programar"
+          }
+        },
+        {
+          "quien": "tu",
+          "texto": "🧭 Ajuste: «Quiero que el vault sea referenciado como vault»",
+          "fecha": "2026-10-10T18:10:45.763Z",
+          "meta": {
+            "kind": "programar"
+          }
+        }
+      ],
+      "snippets": [],
+      "bloqueante": true,
+      "estado": "abierta",
+      "creada": "2026-10-10T17:52:50.570Z",
+      "actualizada": "2026-10-10T18:10:45.764Z",
+      "archivo": "examples/obsidian-files/Files.js",
+      "ancla": {
+        "linea": 2,
+        "texto": "constructor() {",
+        "funcion": "constructor"
+      },
+      "tipo": "revision",
+      "titulo": "constructor",
+      "origen": "revisar",
+      "id": "n2",
+      "desanclada": false,
+      "planIndependiente": "Pasos: Recibir como parámetro la referencia al app/vault de Obsidian (o contexto equivalente que permita acceso al sistema de archivos) / Validar que el contexto es válido, accesible y está inicializado (no nulo, tipo correcto) / Inicializar una propiedad para almacenar la ruta base o raíz de trabajo (típicamente la raíz del vault) / Guardar referencias a los adaptadores/APIs necesarios para las otras funciones (métodos para leer, escribir, mover archivos dentro de Obsidian) / Preparar estado auxiliar si es necesario: caché de rutas normalizadas, banderas de configuración, listeners si hay sincronización / Validar que las dependencias y capacidades esperadas están disponibles (permisos de lectura/escritura, métodos que usarán las otras funciones)\nCasos borde: El parámetro (vault/app) es nulo, undefined o de tipo inesperado / El vault existe pero no tiene permisos de lectura o escritura / La ruta base no existe o es inválida en el contexto del vault / El API de Obsidian cambió de versión y los métodos esperados no están disponibles / Múltiples instancias de Files apuntando al mismo vault (riesgo de condiciones de carrera si hay operaciones concurrentes) / El constructor es llamado antes de que Obsidian esté completamente cargado o su contexto esté listo",
+      "verificacion": {
+        "estado": "casi",
+        "resumen": "Asigna `window.app` correctamente para lo principal, pero no valida que exista, así que fuera de Obsidian o antes de que cargue falla tarde y con un mensaje poco claro.",
+        "fecha": "2026-10-10T17:53:23.751Z",
+        "hash": "763f4b53a0df",
+        "lineas": [
+          "  constructor() {",
+          "    this.obsidian = window.app;",
+          "  }"
+        ]
+      },
+      "plan": {
+        "pasos": [
+          {
+            "texto": "Comprueba que existe `window` y que `window.app` tiene valor. Usa `typeof window === \"undefined\"` antes de acceder, para que fuera de Obsidian (por ejemplo en pruebas o Node) no falle con un ReferenceError poco claro."
+          },
+          {
+            "texto": "Si falta alguno de los dos, lanza un `Error` con un mensaje explicativo: qué falta (`window.app`), por qué importa (esta clase necesita la API de Obsidian) y dónde debe ejecutarse (dentro de Obsidian, por ejemplo desde un script de Templater o DataviewJS)."
+          },
+          {
+            "texto": "Si la validación pasa, guarda `window.app` en `this.obsidian`, como ya lo haces."
+          }
+        ],
+        "separar": null,
+        "fecha": "2026-10-10T17:58:23.257Z"
+      }
+    },
+    {
+      "accion": "Decide qué hace `exists` con una entrada inválida (lanzar error explicativo o devolver false) y agrega la validación de tipo al inicio.",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🟡 Casi lista** · La lógica es correcta y breve, y usa `normalize` como debe. Falta decidir qué hace con entradas inválidas (hoy dan false en silencio) y revisar que `this.obsidian` esté definido.\n\nQué falta:\n- Valida el tipo de `rawPath` al inicio: si no es string, lanza un error con mensaje explicativo (qué se recibió y qué se esperaba), según la regla del proyecto, en vez de pasárselo a `normalize`.\n- Simplifica la línea 9 convirtiendo a booleano directamente (por ejemplo, comparando con null) en lugar del ternario true/false.\n- Escribe tests de los casos borde: ruta vacía, solo espacios, null/número, ruta con barras sobrantes, carpeta existente y archivo inexistente.\n\n🔀 **Otra mirada** (pensada sin ver tu código): El plan coincide en lo esencial. Añade casos que aquí no se cubren: la ruta raíz (`/`) y rutas con `../`. Esto depende de `normalize`, por lo que conviene que `exists` solo use su resultado. También menciona la distinción entre mayúsculas y minúsculas, que depende del sistema de archivos y de Obsidian, no de esta función.",
+          "fecha": "2026-10-10T17:53:57.134Z",
+          "meta": {
+            "kind": "verificar",
+            "modelo": "claude-sonnet-5-5",
+            "costo": 0.0398044
+          }
+        }
+      ],
+      "snippets": [],
+      "bloqueante": false,
+      "estado": "abierta",
+      "creada": "2026-10-10T17:53:23.757Z",
+      "actualizada": "2026-10-10T17:53:57.134Z",
+      "archivo": "examples/obsidian-files/Files.js",
+      "ancla": {
+        "linea": 6,
+        "texto": "exists(rawPath) {",
+        "funcion": "exists"
+      },
+      "tipo": "nota",
+      "titulo": "exists",
+      "origen": "verificar",
+      "id": "n3",
+      "dependencias": [
+        {
+          "funcion": "normalize",
+          "archivo": "examples/obsidian-files/Files.js",
+          "estado": "por hacer"
+        }
+      ],
+      "planIndependiente": "Pasos: Validar que `rawPath` no sea vacío, nulo o sólo espacios; si falla, retornar false o lanzar error según convención del proyecto / Normalizar la ruta usando la función `normalize()` (eliminar barras inconsistentes, espacios redundantes, carácteres inválidos del filesystem) / Consultar la API del vault de Obsidian (ej: `this.app.vault.getAbstractFileByPath(normalized)`) para obtener el archivo o carpeta / Verificar si el resultado es nulo o undefined; retornar false si no existe, true si existe / Considerar si las rutas parciales o direcciones hacia 'arriba' (../) deben permitirse; si no, validar antes de consultar\nCasos borde: Ruta raíz (barra sola `/` o vacío) — ¿qué debe retornar? / Rutas con barras al inicio/final inconsistentes (ej: `/path/` vs `path`) — depende de cómo `normalize()` las resuelva / Caracteres prohibidos en filesystem (`:`, `*`, `?`, `\"`, `<`, `>`, `|`) — deben rechazarse o escaparse / Acceso fuera del vault (ruta con `../` que escape) — validar límites de seguridad / Diferencia entre mayúsculas/minúsculas si el SO es case-sensitive — decidir si la búsqueda es case-sensitive / Symlinks o archivos que Obsidian ignora por filtros — ¿API los ve como existentes?",
+      "verificacion": {
+        "estado": "casi",
+        "resumen": "La lógica es correcta y breve, y usa `normalize` como debe. Falta decidir qué hace con entradas inválidas (hoy dan false en silencio) y revisar que `this.obsidian` esté definido.",
+        "fecha": "2026-10-10T17:53:57.134Z",
+        "hash": "ca8f8531be19",
+        "lineas": [
+          "  exists(rawPath) {",
+          "    const path = this.normalize(rawPath);",
+          "    if (!path) return false;",
+          "    return this.obsidian.getAbstractFileByPath(path) ? true : false;",
+          "  }"
+        ]
+      },
+      "desanclada": false
+    },
+    {
+      "accion": "Implementa el cuerpo como función async: valida y normaliza la ruta con `normalize`, comprueba si existe y crea los niveles faltantes uno a uno.",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🔴 Falta** · La función está sin implementar: solo existe la firma con el cuerpo vacío.\n\n🔀 **Otra mirada** (pensada sin ver tu código): Tu plan cubre bien lo esencial. Añadiría tres detalles. Primero, `exists` devuelve solo un booleano y no distingue carpeta de archivo; para el caso \"existe pero es archivo\" tendrás que consultar el tipo con la API del vault. Segundo, crear una carpeta ya existente lanza error en Obsidian si el chequeo quedó viejo o hay concurrencia, así que conviene tolerarlo. Tercero, en vez de recursión puedes recorrer los segmentos de la ruta acumulándolos y crear los que falten: es más simple y no necesita condición de parada para la raíz.",
+          "fecha": "2026-10-10T17:54:43.097Z",
+          "meta": {
+            "kind": "verificar",
+            "modelo": "claude-sonnet-5-5",
+            "costo": 0.051080600000000004
+          }
+        }
+      ],
+      "snippets": [],
+      "bloqueante": false,
+      "estado": "abierta",
+      "creada": "2026-10-10T17:53:57.140Z",
+      "actualizada": "2026-10-10T17:54:43.097Z",
+      "archivo": "examples/obsidian-files/Files.js",
+      "ancla": {
+        "linea": 12,
+        "texto": "ensureFolder(path) {}",
+        "funcion": "ensureFolder"
+      },
+      "tipo": "nota",
+      "titulo": "ensureFolder",
+      "origen": "verificar",
+      "id": "n4",
+      "planIndependiente": "Pasos: Normalizar la ruta usando normalize(path) para resolver caracteres especiales y redundancias / Verificar si la carpeta ya existe en esa ruta usando exists() o consulta directa del API Obsidian / Si existe y es carpeta: retornar exitosamente (carpeta ya asegurada) / Si existe pero es un archivo: lanzar error explícito (no es una carpeta) / Si no existe: obtener recursivamente la carpeta padre, llamando ensureFolder() en ella / Crear la carpeta final usando window.app.vault.createFolder() y manejar promesas/errores\nCasos borde: Ruta raíz o carpeta padre (ej: 'Carpetas' o '/') — no intentar crear lo que ya existe / Rutas anidadas profundas con múltiples niveles no existentes — recursión debe terminar cuando llega a raíz / Ruta contiene un archivo intermedio donde debería haber carpeta (ej: 'archivo.txt/nueva/') — error claro / Permisos insuficientes en Obsidian — capturar error del vault.createFolder() y comunicarlo / Caracteres inválidos en la ruta o nombres según Obsidian (ej: '/', '<', '>') — validar tras normalizar / Ruta nula, vacía o solo espacios — rechazar antes de procesar",
+      "verificacion": {
+        "estado": "falta",
+        "resumen": "La función está sin implementar: solo existe la firma con el cuerpo vacío.",
+        "fecha": "2026-10-10T17:54:43.097Z",
+        "hash": "5902b56c044b",
+        "lineas": [
+          "  ensureFolder(path) {}"
+        ]
+      },
+      "desanclada": false
+    },
+    {
+      "accion": "Escribe dentro del `try` la validación de tipos de `file` y `destFolder`, lanzando errores explicativos, y luego sigue con normalizar, comprobar origen, asegurar carpeta, colisión y mover.",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🔴 Falta** · Solo existe el esqueleto del manejo de errores; el cuerpo del `try` está vacío, así que la función no mueve nada y devuelve undefined.\n\nQué falta:\n- Usa `normalize` para la ruta de destFolder (y para la de file si es un string) en vez de limpiar rutas dentro de moveTo.\n- Usa `ensureFolder` para crear la carpeta destino antes de mover, en lugar de llamar a la API de carpetas directamente.\n- Usa `exists` para comprobar la colisión de nombres en destino y para confirmar que el origen existe.\n- El catch envuelve con 'Files.moveTo:' errores que ya podrían llevar ese prefijo; lanza las validaciones con mensajes propios y claros (qué se recibió y qué se esperaba) para que no queden duplicados.\n\n🔀 **Otra mirada** (pensada sin ver tu código): Tu plan cubre bien el flujo. Dos matices: en Obsidian conviene mover con `app.fileManager.renameFile` en vez de `vault.rename`, porque actualiza los enlaces internos; y la validación de tipos de los argumentos (tu error más repetido) debe ir antes de cualquier otro paso, ya que no aparece explícita en tu plan.",
+          "fecha": "2026-10-10T17:55:19.752Z",
+          "meta": {
+            "kind": "verificar",
+            "modelo": "claude-sonnet-5-5",
+            "costo": 0.0412434
+          }
+        },
+        {
+          "quien": "ia",
+          "texto": "**🧭 Plan de moveTo** (edítalo si quieres)\n1. Validar las entradas dentro del try: comprueba que `file` y `destFolder` sean strings no vacíos y, si no, lanza un error explicativo que diga cuál parámetro falló y qué se recibió (por ejemplo, \"file debe ser una ruta (string), se recibió number\").\n2. Normalizar ambas rutas con `normalize` (no repitas aquí la limpieza de rutas) y deducir el nombre del archivo a partir de la ruta de origen normalizada, es decir, lo que queda después de la última barra.\n3. Comprobar que el origen existe usando `exists`; si no existe, lanzar un error que mencione la ruta de origen. Así evitas fallar más tarde con un mensaje confuso de Obsidian.\n4. Asegurar la carpeta destino con `ensureFolder`, y armar la ruta final uniendo la carpeta destino con el nombre del archivo. Luego comprobar con `exists` si esa ruta final ya está ocupada; si lo está, lanzar un error explicativo (decisión tomada) indicando la ruta en conflicto, sin sobrescribir.\n5. Mover el archivo: obtener el objeto del archivo desde la ruta de origen mediante la API de Obsidian (`this.app.vault`), y llamar al método de renombrar/mover de `fileManager` con la ruta final, esperando (`await`) el resultado. El catch ya existente se encarga de anteponer el prefijo `Files.moveTo:` a cualquier error.",
+          "fecha": "2026-10-10T18:40:09.002Z",
+          "meta": {
+            "kind": "programar"
+          }
+        },
+        {
+          "quien": "tu",
+          "texto": "🧭 Paso 1: «Haz el trycatch, revisamos y validamos file y dest folder, los normalizamos, si falla da el error»",
+          "fecha": "2026-10-10T18:42:31.224Z",
+          "meta": {
+            "kind": "programar"
+          }
+        }
+      ],
+      "snippets": [],
+      "bloqueante": false,
+      "estado": "abierta",
+      "creada": "2026-10-10T17:54:43.101Z",
+      "actualizada": "2026-10-10T18:42:31.224Z",
+      "archivo": "examples/obsidian-files/Files.js",
+      "ancla": {
+        "linea": 14,
+        "texto": "async moveTo(file, destFolder) {",
+        "funcion": "moveTo"
+      },
+      "tipo": "nota",
+      "titulo": "moveTo",
+      "origen": "verificar",
+      "id": "n5",
+      "planIndependiente": "Pasos: Validar que el archivo origen existe (usar método exists() con la ruta normalizada de file) / Normalizar ambas rutas: file y destFolder para garantizar formato consistente / Asegurar que la carpeta destino existe: llamar ensureFolder(destFolder), creándola si es necesario / Verificar que origen y destino no son idénticos después de normalizar (evitar operación innecesaria) / Confirmar que no existe un archivo con el mismo nombre en la carpeta destino, según estrategia elegida (fallar, sobrescribir o renombrar) / Ejecutar la operación de mover usando la API de Obsidian (vault.rename()) o filesystem, y retornar la nueva ruta o archivo movido\nCasos borde: Archivo origen no existe: fallar con error claro antes de intentar mover / Rutas con formatos inconsistentes (separadores, rutas relativas): normalizarlas antes de comparar / Destino es idéntico a origen después de normalizar: detectar y evitar operación / Archivo con mismo nombre ya existe en destFolder: definir comportamiento (sobrescribir, rechazar, renombrar automático) / Carpeta destino no existe: ensureFolder() debe crearla o fallar según diseño / Permisos insuficientes o rutas inválidas: capturar excepciones de la API y propagar con contexto útil",
+      "verificacion": {
+        "estado": "falta",
+        "resumen": "Solo existe el esqueleto del manejo de errores; el cuerpo del `try` está vacío, así que la función no mueve nada y devuelve undefined.",
+        "fecha": "2026-10-10T17:55:19.753Z",
+        "hash": "3498de70348b",
+        "lineas": [
+          "  async moveTo(file, destFolder) {",
+          "    try {",
+          "    } catch (error) {",
+          "      throw new Error(",
+          "        `Files.moveTo: ${error instanceof Error ? error.message : String(error)}`,",
+          "      );",
+          "    }",
+          "  }"
+        ]
+      },
+      "desanclada": false,
+      "plan": {
+        "pasos": [
+          {
+            "texto": "Validar las entradas dentro del try: comprueba que `file` y `destFolder` sean strings no vacíos y, si no, lanza un error explicativo que diga cuál parámetro falló y qué se recibió (por ejemplo, \"file debe ser una ruta (string), se recibió number\")."
+          },
+          {
+            "texto": "Normalizar ambas rutas con `normalize` (no repitas aquí la limpieza de rutas) y deducir el nombre del archivo a partir de la ruta de origen normalizada, es decir, lo que queda después de la última barra."
+          },
+          {
+            "texto": "Comprobar que el origen existe usando `exists`; si no existe, lanzar un error que mencione la ruta de origen. Así evitas fallar más tarde con un mensaje confuso de Obsidian."
+          },
+          {
+            "texto": "Asegurar la carpeta destino con `ensureFolder`, y armar la ruta final uniendo la carpeta destino con el nombre del archivo. Luego comprobar con `exists` si esa ruta final ya está ocupada; si lo está, lanzar un error explicativo (decisión tomada) indicando la ruta en conflicto, sin sobrescribir."
+          },
+          {
+            "texto": "Mover el archivo: obtener el objeto del archivo desde la ruta de origen mediante la API de Obsidian (`this.app.vault`), y llamar al método de renombrar/mover de `fileManager` con la ruta final, esperando (`await`) el resultado. El catch ya existente se encarga de anteponer el prefijo `Files.moveTo:` a cualquier error."
+          }
+        ],
+        "separar": null,
+        "fecha": "2026-10-10T18:40:08.997Z"
+      }
+    },
+    {
+      "accion": "Escribe el cuerpo de normalize: validar tipo, recortar, unificar separadores, colapsar repetidos, quitar `/` de los bordes y lanzar errores explicativos.",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🔴 Falta** · Está sin implementar: devuelve undefined, así que `exists` (que depende de ella) no puede funcionar bien todavía.\n\nQué falta:\n- Implementa el cuerpo: valida que sea string no vacío tras recortar espacios, y lanza un Error con mensaje que diga qué se recibió y qué se esperaba.\n- Unifica `\\` a `/`, colapsa separadores repetidos y quita `/` al inicio y al final, para que 'a//b/' y '/a/b' den 'a/b'.\n- Rechaza con error las rutas con segmentos `..` (salen de la bóveda) y descarta los segmentos `.`; es más simple y seguro que resolverlos.\n- Considera que `exists` y otras funciones dependen del contrato: documenta en un comentario qué devuelve y cuándo lanza error.\n\n🔀 **Otra mirada** (pensada sin ver tu código): Tu plan coincide en lo esencial. Diferencias útiles: en Obsidian conviene quitar la barra inicial y final (tu plan lo deja como decisión abierta), y para `..` es mejor lanzar error que resolverlo. Los caracteres especiales y espacios internos se preservan, no se codifican.",
+          "fecha": "2026-10-10T17:55:50.794Z",
+          "meta": {
+            "kind": "verificar",
+            "modelo": "claude-sonnet-5-5",
+            "costo": 0.037098400000000004
+          }
+        }
+      ],
+      "snippets": [],
+      "bloqueante": false,
+      "estado": "abierta",
+      "creada": "2026-10-10T17:55:19.757Z",
+      "actualizada": "2026-10-10T17:55:50.794Z",
+      "archivo": "examples/obsidian-files/Files.js",
+      "ancla": {
+        "linea": 23,
+        "texto": "normalize(path) {}",
+        "funcion": "normalize"
+      },
+      "tipo": "nota",
+      "titulo": "normalize",
+      "origen": "verificar",
+      "id": "n6",
+      "planIndependiente": "Pasos: Validar entrada: detectar si es nula, undefined, o no es string; decidir si devolver vacío, lanzar error, o un valor por defecto / Limpiar espacios: trimear inicio/final de la cadena / Normalizar separadores: convertir todos a un estándar (ej. `/`) para coherencia entre plataformas / Eliminar repeticiones: contraer múltiples separadores consecutivos (`//` → `/`) para evitar rutas malformadas / Resolver puntos: procesar `.` (carpeta actual) y `..` (carpeta padre) si aplica, pero solo si son seguros (no subir más allá de la raíz) / Asegurar formato final: decidir si la ruta termina con `/` (útil para carpetas) o no, y si debe tener una estructura coherente\nCasos borde: Entrada nula, undefined, o no-string (¿qué devolver?) / Ruta vacía `\"\"` o solo espacios (¿normalizar a `\"\"`, `.`, o `/`?) / Rutas con `../` que suben más allá de la raíz (¿permitir, limitar a raíz, o error?) / Múltiples separadores consecutivos: `folder//subfolder///file.md` / Rutas que empiezan o terminan con separador: `/folder` vs `folder/` (¿afecta intención?) / Caracteres especiales o espacios en nombres: `mi carpeta/nota (draft).md` (¿preservar o codificar?)",
+      "verificacion": {
+        "estado": "falta",
+        "resumen": "Está sin implementar: devuelve undefined, así que `exists` (que depende de ella) no puede funcionar bien todavía.",
+        "fecha": "2026-10-10T17:55:50.794Z",
+        "hash": "e26334883c1e",
+        "lineas": [
+          "  normalize(path) {}"
+        ]
+      },
+      "desanclada": false
+    }
+  ]
+}

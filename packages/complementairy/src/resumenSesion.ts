@@ -9,7 +9,7 @@ import { deudaComprension, pendienteDiferida } from "./programar.js";
 import { ask, leerUso } from "./llm.js";
 import { rutaTest } from "./metricas.js";
 import { todasLasNotas } from "./notas.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 
 /**
  * Para retomar y cerrar sin perder el hilo (casi todo sin IA):

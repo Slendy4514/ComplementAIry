@@ -133,24 +133,38 @@ export function agregar(n: Nota, texto: string): boolean {
 /** Esquema común: de qué función habla cada cosa que dice la IA (para que cada nota hable solo de lo suyo). */
 export const CAMPO_FUNCION = {
   type: "string",
-  description: 'De qué habla este punto: "" si es sobre ESTA función; el nombre de OTRA función si habla de ella; "archivo" si es algo general del archivo.',
+  description:
+    'De qué es este punto: "" si es de ESTA función (también "usa otra función para…"); "archivo" si es algo general del archivo. No escribas puntos sobre cómo debería ser OTRA función: no se anotan (si esta depende de una que no está lista, el sistema ya lo avisa).',
 };
 
-/**
- * En la nota de una función va solo lo de esa función. Lo que la IA dijo sobre OTRA función o sobre
- * el archivo se manda a la nota del archivo ("Sobre `x`: …"). Devuelve lo que sí es de esta función.
- */
 export function repartir<T extends { funcion?: string }>(notas: Nota[], rel: string, funciones: Funcion[], src: string, actual: { clave: string; nombre: string }, items: T[], kind: string, texto: (x: T) => string): T[] {
   const propios: T[] = [];
-  const ajenos: string[] = [];
+  const delArchivo: string[] = [];
   for (const it of items) {
     const f = (it.funcion ?? "").trim().replace(/\(\)$/, "").replace(/^`|`$/g, "");
     if (!f || f === actual.nombre || f === actual.clave || f === "esta") propios.push(it);
-    else ajenos.push(f.toLowerCase() === "archivo" ? texto(it) : `Sobre \`${f}\`: ${texto(it)}`);
+    // Lo general del archivo va a la nota del archivo. Correcciones o sugerencias sobre OTRA función no se
+    // anotan en ninguna parte: las dirá la revisión de esa función (aquí solo se avisa, sin IA, si no está lista).
+    else if (f.toLowerCase() === "archivo") delArchivo.push(texto(it));
   }
-  if (ajenos.length) {
+  if (delArchivo.length) {
     const n = notaPara(notas, rel, funciones, src, { linea: 1, alcance: "archivo", origen: kind });
-    agregar(n, `**Visto al revisar \`${actual.nombre}\`** (no es de esa función)\n${ajenos.map((a) => `- ${a}`).join("\n")}`);
+    // Sin repetir: lo que ya está dicho en la nota del archivo (o casi igual) no se vuelve a agregar.
+    const dicho = n.hilo.slice(-12).map((m) => m.texto).join("\n");
+    const nuevos = delArchivo.filter((t) => !yaDicho(t, dicho));
+    if (nuevos.length) agregar(n, `**Visto al revisar \`${actual.nombre}\`**\n${nuevos.map((a) => `- ${a}`).join("\n")}`);
   }
   return propios;
+}
+
+const palabrasDe = (t: string) => new Set(t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").match(/[a-zñ0-9]{4,}/g) ?? []);
+
+/** ¿`texto` ya está dicho en `previo` (casi con las mismas palabras)? Sin IA. */
+export function yaDicho(texto: string, previo: string): boolean {
+  const a = palabrasDe(texto);
+  if (!a.size) return true;
+  const b = palabrasDe(previo);
+  let comun = 0;
+  for (const w of a) if (b.has(w)) comun++;
+  return comun / a.size >= 0.7;
 }

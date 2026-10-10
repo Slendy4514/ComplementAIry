@@ -4,7 +4,7 @@ import { dataDir, makeZoner } from "./config.js";
 import { contextBlock, CRITERIO, projectContext } from "./context.js";
 import { ask } from "./llm.js";
 import { preguntasAbiertas } from "./panorama.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 
 /**
  * Conversar sobre una pregunta abierta antes de responderla: "¿por qué me preguntas esto?",

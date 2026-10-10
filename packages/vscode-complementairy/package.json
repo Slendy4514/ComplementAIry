@@ -2,7 +2,7 @@
   "name": "complementairy",
   "displayName": "ComplementAIry — tú programas, la IA te acompaña",
   "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "publisher": "complementairy",
   "license": "MIT",
   "engines": {
@@ -17,6 +17,12 @@
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "ComplementAIry ejecuta la CLI `cai` y tu código (tests, probador) al guardar: solo en carpetas en las que confías."
+    }
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/Slendy4514/ComplementAIry"
@@ -308,7 +314,8 @@
         "cai.comando": {
           "type": "string",
           "default": "cai",
-          "description": "Comando para invocar la CLI de ComplementAIry."
+          "scope": "machine",
+          "description": "Comando para invocar la CLI de ComplementAIry (p. ej. `cai` o `node /ruta/dist/cli.js`). Se ejecuta sin shell, y solo se puede fijar en la configuración de la máquina: un proyecto clonado no puede cambiarlo."
         },
         "cai.resaltar": {
           "type": "boolean",
@@ -610,7 +617,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p .",
+    "build": "node scripts/compartido.cjs && tsc -p .",
     "package": "pnpm build && node scripts/humo.cjs && vsce package --no-dependencies --allow-missing-repository -o complementairy.vsix",
     "humo": "node scripts/humo.cjs"
   },

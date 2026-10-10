@@ -11,12 +11,14 @@ import { funcionesSinTests, medir, violaciones, type Violacion } from "./metrica
 import { loadPerfil, nivelDe } from "./profile.js";
 import { findThreads } from "./threads.js";
 import { agregarPreguntas, parseMemoria, sinSugerencia, sobreElCodigo, sugerenciaDe, unaLinea, type Memoria } from "./memoria.js";
-import { agregarTareas, cargarTareas, guardarTareas, rutasDe } from "./siguiente.js";
+import { agregarTareas, cargarTareas, guardarTareas, rutasDe, tareasFile } from "./siguiente.js";
+import { conCandadoSync } from "./ocupado.js";
 import type { Nota } from "./notas.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
 import { aplicarAResumenes, bloqueCorrecciones } from "./correcciones.js";
 import { bloqueObjetivos, guardarEvaluacion, leerObjetivos, type Criterio, type EvaluacionTerminado } from "./entender.js";
 import { contextoIdeas, registrarIdeas, schemaIdeas, tiposIdeas, type Idea, type TipoIdea } from "./ideas.js";
+import { sinSoluciones } from "./guard.js";
 
 /**
  * Panorama del proyecto completo y memoria del proyecto (.cai/conocimiento.md).
@@ -311,12 +313,15 @@ export async function panorama(root: string, o: { sinIa?: boolean; log?: (s: str
         .join("\n\n"),
     });
     costo += costUsd;
+    // El panorama orienta en palabras: lo que llegue como código escrito se quita (sin IA).
+    for (const s of data.sugerencias) Object.assign(s, { porque: sinSoluciones(s.porque), plano: sinSoluciones(s.plano) });
+    for (const a of data.alternativas) Object.assign(a, { propuesta: sinSoluciones(a.propuesta), porque: sinSoluciones(a.porque) });
     sug = data;
     registrarIdeas(root, data.ideas ?? []);
     if (criteriosObjetivos.length && data.criterios) guardarEvaluacion(root, data.criterios);
     // Cada sugerencia, una tarea con el archivo a tocar. Las del panorama anterior que sigan
     // pendientes se reemplazan (la IA reformula los títulos: si no, se acumularían).
-    guardarTareas(root, cargarTareas(root).filter((t) => t.origen !== "panorama" || t.hecha || t.descartada));
+    conCandadoSync(tareasFile(root), () => guardarTareas(root, cargarTareas(root).filter((t) => t.origen !== "panorama" || t.hecha || t.descartada)));
     agregarTareas(
       root,
       data.sugerencias.map((s) => ({ titulo: unaLinea(s.titulo), detalle: unaLinea(`${s.porque} Cómo: ${s.plano}`), ...(rutasDe(s.archivos.join(", "))[0] ? { archivo: rutasDe(s.archivos.join(", "))[0]! } : {}), origen: "panorama" as const })),

@@ -16,7 +16,10 @@ import { bloqueRepertorio, buscarEnRepertorio, cargarRepertorio } from "./repert
 import { ubicarSnippet } from "./responder.js";
 import { analizarScript } from "./sandbox.js";
 import { agregarTareas } from "./siguiente.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
+import { escribirJson } from "./almacen.js";
+import { REUTILIZAR } from "./prompts.js";
+import { modoEfectivo } from "./modos.js";
 
 /**
  * Modo programar: la IA escribe código, en porciones manejables, y tú no te pierdes. Nada entra a tu
@@ -52,11 +55,61 @@ export interface Porcion {
   paso: number;
   porque: string;
   pruebas: Prueba[];
+  /** Probada: una entrada que la recorre dio lo que esperabas. */
   aprobada: boolean;
+  /** Construir juntos: una llamada (literal) que recorre esta porción, para predecir qué da (comprobado sin IA). */
+  entrada?: string;
+  /** Construir juntos: ya es parte del borrador. */
+  incluida?: boolean;
+  /** Construir juntos: sus líneas (el borrador se arma con la firma + estas líneas + el cierre). */
+  codigo?: string;
+  /** "ya-estaba": tu código previo; "ajuste": un cambio que pediste al final. Sin tipo: un paso del plan. */
+  tipo?: "ya-estaba" | "ajuste";
+  /** Construir juntos: TU orden (con tus palabras) con la que se escribió. */
+  orden?: string;
+  /** Lo que la IA ofreció en palabras para este paso (antes de tu orden). */
+  oferta?: Oferta;
+  /** Modo aprender: lo que dijiste que harías ANTES de ver la propuesta. */
+  idea?: string;
+  /** Lo que tu orden no decía (la IA no lo completó) o pedía de otro paso. */
+  falta?: string;
+  /** Qué hace lo que se escribió, en una oración (de la IA). */
+  explicacion?: string;
+  /**
+   * La IA chica (a ciegas: solo tu orden y el código) dice si se agregó algo que no pediste o falta algo de
+   * lo que pediste. Solo avisa: `dejado` = decidiste dejar lo agregado.
+   */
+  verificacion?: { agregado: string[]; falta: string[]; dejado?: boolean };
+}
+
+/** Lo que la IA ofrece en palabras para un paso: cómo lo haría, alternativas y (en aprender) qué opina de tu idea. */
+export interface Oferta {
+  paso: number;
+  idea: string;
+  alternativas: string[];
+  ideaTuya?: string;
+  sobreTuIdea?: string;
+  fecha: string;
+}
+
+/** Un caso del final de "construir juntos": propuesto según la intención, probado contra el borrador. */
+export interface CasoConstruir {
+  descripcion: string;
+  llamada: string;
+  esperado: string;
+  obtenido?: string;
+  pasa?: boolean;
+  duda?: string;
+  /** Lo editaste tú. */
+  tuyo?: boolean;
+  /** No encaja con el objetivo u otros casos (la IA no tuerce el código por él; lo decides tú). */
+  raro?: string;
+  /** Encaja pero el borrador no lo cumple: se puede pedir ajustar la propuesta. */
+  ajustar?: boolean;
 }
 
 export interface Propuesta {
-  tipo: "dirigido" | "pr" | "adaptada";
+  tipo: "dirigido" | "pr" | "adaptada" | "construir";
   archivo: string;
   funcion: string;
   fecha: string;
@@ -79,10 +132,55 @@ export interface Propuesta {
   /** adaptada: tu versión original (para el diff) y qué cambia. */
   original?: { id: string; codigo: string; proyecto: string };
   cambios?: { que: string; porque: string }[];
+  /** Construir juntos (modo programar): la ayuda con la que se armó, los casos del final y tu predicción. */
+  construir?: {
+    ayuda: "sugerir" | "aprender";
+    /** La firma y el cierre de la función (el borrador = firma + porciones + cierre). */
+    base?: { cabecera: string[]; cierre: string[]; sangria: string };
+    /** Cuántos pasos tenía el plan (todos tienen que estar antes de insertar). */
+    pasosPlan?: number;
+    /** "pedido" (programar: la función entera con lo que pides) o "pasos" (programar · aprender). */
+    forma?: "pedido" | "pasos";
+    /** Por pedidos: es mucho para una función; las auxiliares que propone crear (lo decides tú). */
+    separar?: { pedido: string; motivo: string; auxiliares: { nombre: string; firma: string; proposito: string }[] };
+    /** Por pedidos: creaste las auxiliares; tu pedido queda listo para escribir la principal usándolas. */
+    pedidoPendiente?: string;
+    /** Por pedidos: salió más larga que tu práctica (sin IA): se ofrece separarla. */
+    larga?: { lineas: number; max: number; pedido: string };
+    /** Por pedidos: la auditoría final (IA mediana, a ciegas) de una versión del borrador. */
+    auditoria?: {
+      estado: "lista" | "casi" | "falta";
+      resumen: string;
+      /** Un comentario por caso. */
+      casos?: { llamada: string; comentario: string }[];
+      /** Qué hay que corregir, en orden. */
+      queHacer?: string[];
+      /** Cómo mejorarla aunque funcione. */
+      hallazgos: { texto: string; porque: string }[];
+      /** La mejor versión que propone (si difiere de la actual). */
+      ideal?: { descripcion: string; codigo: string };
+      /** La versión del borrador que se auditó (si cambia, hay que auditar de nuevo). */
+      codigo: string;
+      fecha: string;
+    };
+    /** Por pedidos: los borradores anteriores (para deshacer el último pedido). */
+    historial?: Porcion[][];
+    /** Los pasos recién escritos (0 = un ajuste): el panel abre ahí para que los revises. */
+    escritos?: number[];
+    /** Lo que la IA ofrece para los pasos que faltan (en palabras; cada uno espera tu orden). */
+    ofertas?: Oferta[];
+    /** Si la función ya tenía código tuyo: lo que la IA sugiere o pregunta de él (lo decides tú). */
+    previo?: { texto: string; porque: string; estado: "pendiente" | "dejado" | "aplicado" }[];
+    casos?: CasoConstruir[];
+    /** La predicción de la función: uno de los casos, sin mostrar su resultado hasta que digas qué esperas. */
+    prediccion?: { llamada: string; espero?: string; obtenido?: string; acierto?: boolean; explicacion?: string };
+    /** Avisos sin IA: la propuesta compara contra el valor exacto de un caso (trampa típica). */
+    trampas?: string[];
+  };
 }
 
 const dirPropuestas = (root: string) => path.join(dataDir(root), "cache", "propuestas");
-const archivoPropuesta = (root: string, rel: string, fn: string) => path.join(dirPropuestas(root), `${encodeURIComponent(rel)}#${encodeURIComponent(fn)}.json`);
+export const archivoPropuesta = (root: string, rel: string, fn: string) => path.join(dirPropuestas(root), `${encodeURIComponent(rel)}#${encodeURIComponent(fn)}.json`);
 
 export function leerPropuesta(root: string, rel: string, fn: string): Propuesta | null {
   try {
@@ -92,11 +190,8 @@ export function leerPropuesta(root: string, rel: string, fn: string): Propuesta 
   }
 }
 
-function guardarPropuesta(root: string, p: Propuesta): void {
-  fs.mkdirSync(dirPropuestas(root), { recursive: true });
-  const f = archivoPropuesta(root, p.archivo, p.funcion);
-  fs.writeFileSync(`${f}.${process.pid}.tmp`, JSON.stringify(p, null, 2));
-  fs.renameSync(`${f}.${process.pid}.tmp`, f);
+export function guardarPropuesta(root: string, p: Propuesta): void {
+  escribirJson(archivoPropuesta(root, p.archivo, p.funcion), p);
 }
 
 /** ¿Lo que dio la ejecución es lo que esperabas? "error: <parte del mensaje>" exige ESE error; un valor, ese valor. */
@@ -115,7 +210,7 @@ export function descartarPropuesta(root: string, rel: string, fn: string): void 
 
 // --- Contexto común de la función --------------------------------------------------------------------
 
-async function cargar(root: string, rel: string, clave: string) {
+export async function cargar(root: string, rel: string, clave: string) {
   const lang = langFor(rel);
   if (!lang) throw new Error(`tipo de archivo sin soporte: ${rel}`);
   const abs = path.join(root, rel);
@@ -126,11 +221,18 @@ async function cargar(root: string, rel: string, clave: string) {
   const lineas = src.split(/\r?\n/);
   const codigo = lineas.slice(f.linea - 1, f.linea - 1 + f.lineas).join("\n");
   const nota = cargarNotas(root, rel, src).find((n) => n.ancla.funcion === claveFuncion(funciones, f) && n.estado === "abierta") ?? cargarNotas(root, rel, src).filter((n) => n.ancla.funcion === claveFuncion(funciones, f)).pop();
-  return { lang, abs, src, funciones, f, lineas, codigo, nota, clave: claveFuncion(funciones, f) };
+  // El comentario justo encima de la función (su especificación, si la escribiste ahí).
+  let i = f.linea - 2;
+  while (i >= 0 && /^\s*(\/\/|#|\*|\/\*|"""|\'\'\')/.test(lineas[i] ?? "")) i--;
+  const comentario = lineas.slice(i + 1, f.linea - 1).join("\n").trim();
+  return { lang, abs, src, funciones, f, lineas, codigo, comentario, nota, clave: claveFuncion(funciones, f) };
 }
 
+/** La función como está hoy, con el comentario que tenga encima (su especificación). */
+export const funcionConComentario = (c: { comentario: string; codigo: string }) => (c.comentario ? `${c.comentario}\n${c.codigo}` : c.codigo);
+
 /** Actualiza la nota de la función (con el archivo tomado). */
-function conNota<T>(root: string, rel: string, clave: string, fn: (n: Nota) => T): Promise<T> {
+export function conNota<T>(root: string, rel: string, clave: string, fn: (n: Nota) => T): Promise<T> {
   return conBloqueo(root, rel, "modo programar", async () => {
     const src = fs.readFileSync(path.join(root, rel), "utf8");
     const funciones = await funcionesDe(src, langFor(rel));
@@ -144,7 +246,7 @@ function conNota<T>(root: string, rel: string, clave: string, fn: (n: Nota) => T
   });
 }
 
-const objetivoDe = (n?: Nota) => (n?.objetivo ? `Objetivo de la función${n.objetivo.confirmado ? " (confirmado)" : " (borrador)"}: ${n.objetivo.texto}${n.objetivo.criterios.length ? `\nCriterios: ${n.objetivo.criterios.join("; ")}` : ""}` : n?.accion ? `Lo que pedía su nota: ${n.accion}` : "");
+export const objetivoDe = (n?: Nota) => (n?.objetivo ? `Objetivo de la función${n.objetivo.confirmado ? " (confirmado)" : " (borrador)"}: ${n.objetivo.texto}${n.objetivo.criterios.length ? `\nCriterios: ${n.objetivo.criterios.join("; ")}` : ""}` : n?.accion ? `Lo que pedía su nota: ${n.accion}` : "");
 
 // --- 1. Plan de pasos ---------------------------------------------------------------------------------
 
@@ -152,6 +254,8 @@ const SYSTEM_PLAN = `Propones el PLAN de una función en 3 a 5 pasos, por IDEA (
 - Si hacen falta más de 5 pasos, la función hace demasiado: propone separar una función auxiliar ("separar") y en el plan pon el paso como "usar <auxiliar>". La auxiliar se trabajará aparte, en su propia nota.
 - Si el programador ya hizo algo parecido (su repertorio), ese paso puede ser más grande: indica el id en "repertorio".
 - En palabras, sin código. Español neutro con tuteo.
+
+${REUTILIZAR}
 
 ${CRITERIO}`;
 
@@ -174,7 +278,7 @@ export async function planFuncion(root: string, rel: string, clave: string): Pro
       },
     },
     ...iaOpts(z.config, "mediano"),
-    prompt: [contextoComun(root, rel, { funcion: c.clave }), objetivoDe(c.nota), bloqueRepertorio(rep), `Función (${c.lang.id}) ${c.f.nombre}, como está hoy:\n${c.codigo}`].filter(Boolean).join("\n\n"),
+    prompt: [contextoComun(root, rel, { funcion: c.clave }), objetivoDe(c.nota), bloqueRepertorio(rep), `Función (${c.lang.id}) ${c.f.nombre}, como está hoy (con su comentario, si lo tiene):\n${funcionConComentario(c)}`].filter(Boolean).join("\n\n"),
   });
   const validos = new Set(rep.map((e) => e.id));
   const plan: NonNullable<Nota["plan"]> = {
@@ -297,7 +401,7 @@ export async function definirContrato(root: string, rel: string, clave: string, 
 }
 
 /** El archivo con la función reemplazada por `codigo` (opcionalmente con marcas en unas líneas). */
-async function copiaConFuncion(c: Awaited<ReturnType<typeof cargar>>, codigo: string, marcarLineas?: { desde: number; hasta: number }): Promise<{ texto: string; marcas: { id: number; rama: boolean }[] }> {
+export async function copiaConFuncion(c: Awaited<ReturnType<typeof cargar>>, codigo: string, marcarLineas?: { desde: number; hasta: number }): Promise<{ texto: string; marcas: { id: number; rama: boolean }[] }> {
   let cod = codigo;
   let marcas: { id: number; rama: boolean }[] = [];
   if (marcarLineas) ({ codigo: cod, marcas } = await marcar(codigo, c.lang, marcarLineas.desde, marcarLineas.hasta));
@@ -361,7 +465,7 @@ async function marcar(codigo: string, lang: LangSpec, desde: number, hasta: numb
 }
 
 /** Escribe la copia junto al original (para que sus imports relativos funcionen) y la ejecuta; siempre la borra. */
-async function ejecutarCopia(root: string, rel: string, c: Awaited<ReturnType<typeof cargar>>, texto: string, expresion: string): Promise<Ejecucion> {
+export async function ejecutarCopia(root: string, rel: string, c: Awaited<ReturnType<typeof cargar>>, texto: string, expresion: string): Promise<Ejecucion> {
   const dir = path.dirname(rel);
   const base = path.basename(rel);
   // Nombre importable también en Python (sin puntos ni guiones al inicio).
@@ -381,6 +485,8 @@ const SYSTEM_PR = `Escribes la función completa del programador, como un pull r
 - Tiene que cumplir sus casos (entrada → esperado): son su contrato. Respeta su firma, estilo y reglas.
 - "codigo": la función COMPLETA desde la firma (misma firma). "porciones": rangos de líneas (1-based, dentro de "codigo") que cubren el cuerpo, en orden, sin solaparse; cada una con su "porque" (por qué así, en una o dos oraciones).
 - Código claro y mínimo. Español neutro con tuteo en los textos.
+
+${REUTILIZAR}
 
 ${CRITERIO}`;
 
@@ -460,26 +566,32 @@ export async function propuestaPR(root: string, rel: string, clave: string, o: {
   return ultima!;
 }
 
-const SYSTEM_DIFERENCIA = `El programador predijo qué devolvería su función con una entrada y NO coincidió. Explica en 1-2 oraciones, sin código, qué parte del código produce el resultado real (para que entienda la diferencia). Español neutro con tuteo.`;
+export const SYSTEM_DIFERENCIA = `El programador predijo qué devolvería su función con una entrada y NO coincidió. Explica en 1-2 oraciones, sin código, qué parte del código produce el resultado real (para que entienda la diferencia). Español neutro con tuteo.`;
 
 /**
  * El probador: TU entrada y lo que esperas, para la porción k. Pasa si la entrada recorre esa porción
  * (marcas en la copia, sin IA) y lo que esperabas coincide con lo que da al ejecutarla.
  */
-export async function probarPorcion(root: string, rel: string, clave: string, k: number, entrada: string, espero: string): Promise<{ prueba: Prueba; porcion: Porcion; aprobadas: number; total: number }> {
+export async function probarPorcion(root: string, rel: string, clave: string, k: number, entradaTuya: string, espero: string): Promise<{ prueba: Prueba; porcion: Porcion; aprobadas: number; total: number }> {
   const c = await cargar(root, rel, clave);
   const p = leerPropuesta(root, rel, c.clave);
-  if (!p?.porciones) throw new Error("no hay una propuesta por porciones para esta función (pídela con 📦 Como un PR)");
+  if (!p?.porciones) throw new Error("no hay una propuesta por porciones para esta función (pídela en el panel Nota: 🧭 Construir juntos)");
   const por = p.porciones[k];
   if (!por) throw new Error(`no existe la porción ${k + 1}`);
-  if (makeZoner(root).config.programar.prediccionObligatoria && p.porciones.slice(0, k).some((x) => !x.aprobada)) throw new Error("prueba primero las porciones anteriores (una a la vez)");
+  if (p.tipo === "construir") {
+    if (p.porciones.slice(0, k).some((x) => !x.incluida)) throw new Error("ve de a una porción: incluye primero las anteriores");
+  } else if (makeZoner(root).config.programar.prediccionObligatoria && p.porciones.slice(0, k).some((x) => !x.aprobada)) throw new Error("prueba primero las porciones anteriores (una a la vez)");
+  // Construir juntos: si no das una entrada, se usa la sugerida (ya se comprobó que recorre la porción).
+  const entrada = entradaTuya.trim() || por.entrada || "";
+  if (!entrada) throw new Error(`escribe una entrada: una llamada a ${c.f.nombre}(…) que pase por estas líneas`);
   const e = validarExpresion(entrada, new Set([c.f.nombre]), c.lang.id);
   if (e) throw new Error(`la entrada tiene que ser una llamada a ${c.f.nombre}(…) con valores: ${e}`);
   if (!espero.trim()) throw new Error("escribe qué esperas ANTES de ejecutar");
   const { texto, marcas } = await copiaConFuncion(c, p.codigo, { desde: por.desde, hasta: por.hasta });
   const r = await ejecutarCopia(root, rel, c, texto, entrada);
   if (r.infra) throw new Error(`no se pudo ejecutar la copia: ${r.error ?? "sin detalle"}`);
-  const requeridas = marcas.some((m) => m.rama) ? marcas.filter((m) => m.rama) : marcas;
+  // Una porción de un paso: la entrada tiene que entrar en sus condiciones. Por pedidos (la función entera), basta con pasar por ella.
+  const requeridas = p.construir?.forma !== "pedido" && marcas.some((m) => m.rama) ? marcas.filter((m) => m.rama) : marcas;
   const toca = !requeridas.length || requeridas.some((m) => (r.marcas ?? []).includes(m.id));
   const acierto = toca && cumple(espero, r);
   const prueba: Prueba = { entrada, espero, obtenido: r.ok ? JSON.stringify(r.valor) : `error: ${r.error ?? ""}`, toca, acierto, fecha: new Date().toISOString() };
@@ -519,25 +631,44 @@ export async function probarPorcion(root: string, rel: string, clave: string, k:
  * La extensión insertó la propuesta (tu clic): queda registrado en la nota (cómo se probó), el paso del
  * plan se marca hecho, y lo no probado queda como deuda de comprensión.
  */
-export async function registrarInsercion(root: string, rel: string, clave: string): Promise<NonNullable<Nota["programada"]>> {
+export async function registrarInsercion(root: string, rel: string, clave: string, o: { soloComprobar?: boolean } = {}): Promise<NonNullable<Nota["programada"]>> {
   const p = leerPropuesta(root, rel, clave);
   if (!p) throw new Error("no hay una propuesta para esta función");
-  const obligatoria = makeZoner(root).config.programar.prediccionObligatoria;
-  if (p.porciones && obligatoria && p.porciones.some((x) => !x.aprobada)) throw new Error("faltan porciones por probar (la prueba es obligatoria en este proyecto: programar.prediccionObligatoria)");
+  const cfg = makeZoner(root).config;
+  const obligatoria = cfg.programar.prediccionObligatoria;
+  if (p.tipo === "construir") {
+    // Construir juntos: todos los pasos del plan (cada uno con tu orden) y, antes de insertar, tu predicción.
+    const comp = modoEfectivo(cfg, rel, p.funcion).c;
+    const hechos = new Set((p.porciones ?? []).filter((x) => !x.tipo).map((x) => x.paso));
+    const faltan = Array.from({ length: p.construir?.pasosPlan ?? 0 }, (_, i) => i + 1).filter((i) => !hechos.has(i));
+    if (faltan.length) throw new Error(`faltan pasos del plan (${faltan.join(", ")}): cada uno se escribe con tu orden, de a uno`);
+    if (comp.probarCadaPorcion && p.porciones?.some((x) => x.tipo !== "ya-estaba" && !x.aprobada)) throw new Error("en programar · aprender cada paso se prueba antes de insertarlo: faltan pasos por probar");
+    if ((obligatoria || comp.predecir) && !p.construir?.casos) throw new Error("antes de insertarla, pide los casos (🧪) y predice qué da la función con uno de ellos");
+    // Por pedidos: el ida y vuelta lo hace la IA chica; antes de insertar, la mediana audita la versión FINAL.
+    if (p.construir?.forma === "pedido" && p.construir.auditoria?.codigo !== p.codigo) throw new Error("antes de insertarla, pide la auditoría final (🔎) de esta versión del borrador");
+    if ((obligatoria || comp.predecir) && p.construir?.prediccion && p.construir.prediccion.espero === undefined) throw new Error("antes de insertarla, predice qué da la función con el caso elegido (sin ver el resultado)");
+  } else if (p.porciones && obligatoria && p.porciones.some((x) => !x.aprobada)) throw new Error("faltan porciones por probar (la prueba es obligatoria en este proyecto: programar.prediccionObligatoria)");
   const pruebas = (p.porciones ?? []).flatMap((x) => x.pruebas);
+  if (o.soloComprobar) return { fecha: new Date().toISOString(), tipo: p.tipo, porciones: p.porciones?.length ?? 1, pruebas: pruebas.length, aciertosPrimera: 0, sinProbar: 0 };
   const reg: NonNullable<Nota["programada"]> = {
     fecha: new Date().toISOString(),
     tipo: p.tipo,
     porciones: p.porciones?.length ?? 1,
     pruebas: pruebas.length,
     aciertosPrimera: (p.porciones ?? []).filter((x) => x.pruebas.find((y) => y.toca)?.acierto).length,
-    sinProbar: (p.porciones ?? []).filter((x) => !x.aprobada).length,
+    sinProbar: p.tipo === "construir" ? 0 : (p.porciones ?? []).filter((x) => !x.aprobada).length,
+    ...(p.tipo === "construir"
+      ? {
+          ordenes: (p.porciones ?? []).filter((x) => x.orden).length,
+          ...(p.construir?.prediccion?.acierto !== undefined ? { prediccion: { acierto: p.construir.prediccion.acierto } } : {}),
+        }
+      : {}),
   };
   await conNota(root, rel, p.funcion, (n) => {
     n.programada = reg;
     if (p.tipo === "dirigido" && p.paso && n.plan?.pasos[p.paso - 1]) n.plan.pasos[p.paso - 1]!.hecho = true;
     if (p.tipo !== "dirigido" && n.plan) for (const x of n.plan.pasos) x.hecho = true;
-    const detalle = p.tipo === "dirigido" ? `paso ${p.paso} dirigido por ti` : `${reg.porciones} porción(es), ${reg.pruebas} prueba(s) (${reg.aciertosPrimera} acertadas a la primera)${reg.sinProbar ? ` · ⚠ ${reg.sinProbar} sin probar (deuda de comprensión)` : ""}`;
+    const detalle = p.tipo === "construir" ? `${reg.ordenes ?? 0} paso(s) escritos con tus órdenes, ${reg.pruebas} prueba(s)${reg.prediccion ? `, predicción ${reg.prediccion.acierto ? "✓" : "✗"}` : ""}` : p.tipo === "dirigido" ? `paso ${p.paso} dirigido por ti` : `${reg.porciones} porción(es), ${reg.pruebas} prueba(s) (${reg.aciertosPrimera} acertadas a la primera)${reg.sinProbar ? ` · ⚠ ${reg.sinProbar} sin probar (deuda de comprensión)` : ""}`;
     n.hilo.push(mensaje("ia", `**🧭 Insertado por ti** desde una propuesta${p.tipo === "adaptada" ? ` (tu versión de ${p.original?.proyecto})` : ""}: ${detalle}.`, { kind: "programar" }));
   });
   descartarPropuesta(root, rel, p.funcion);

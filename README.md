@@ -62,24 +62,29 @@ Después escribe con tus palabras `.cai/proyecto.md` (qué buscas) y `.cai/regla
 
 ## Uso diario
 
-### Modos: sugerir, aprender o programar
-| | 💡 sugerir (por defecto) | 🎓 aprender | 🚀 programar |
-|---|---|---|---|
-| quién escribe el código | tú | tú | la IA, **por pasos que diriges tú** o como un PR por porciones; entra a tu archivo **solo con tu clic** |
-| ayuda | directa (plano, piezas, snippets) | gradual (pista → piezas → pseudo → ejemplo) | plan de pasos + propuestas |
-| snippets | sí | después de que lo intentes | sí |
-| guía mientras escribes | sí | no (primero piensas tú) | sí |
-| "¿quedó lista?" | verificación | + explícala con tus palabras y 🎯 predecir | verificación |
+### Modos: quién escribe y cuánta ayuda
+Dos ejes, que se combinan:
 
-Se elige por **proyecto, carpeta, archivo o función** (gana el más específico): clic en el modo de la barra de estado, el selector del panel Nota o `cai modo programar --funcion src/x.ts:miFuncion`. **Cambiar de modo no toca lo ya hecho.** Hasta v0.9, "programar" se llamaba así lo que hoy es "sugerir": una configuración vieja se lee como "sugerir" (nadie pasa al nuevo modo sin elegirlo).
+| | 💡 sugerir (rápido) | 🎓 aprender (más fricción) |
+|---|---|---|
+| **✍ escribes tú** | `sugerir` (por defecto): ayuda directa (plano, piezas, snippets), guía mientras escribes | `aprender`: ayuda gradual (pista → piezas → pseudo → ejemplo), predecir, explicar con tus palabras |
+| **🤖 la IA propone (construir juntos)** | `programar`: la IA propone cada paso en palabras, tú das la orden con tus palabras y escribe solo eso; predices la función antes de insertarla | `programar-aprender`: además, antes de ver cada propuesta dices cómo lo harías, y pruebas cada paso |
 
-### Modo programar: la IA escribe, tú no te pierdes
-Delegar todo baja la comprensión (en el estudio de Anthropic, 2026, quienes delegaban todo sacaron menos de 40%; quienes pedían el código con explicación y preguntaban, 65% o más). Por eso, en este modo:
-- **Plan de pasos primero:** 3 a 5 pasos por **idea** (validar, caso especial, cálculo, resultado), no por líneas, que editas tú. **Si hacen falta más de 5, son dos funciones:** se propone una auxiliar, que queda como tarea y se trabaja **en su propia nota**.
-- **🧭 Tú diriges, la IA escribe:** dices en palabras cómo hacer el paso; la IA escribe **solo eso**. Si a tu paso le falta algo, no lo completa en silencio: te lo dice ("tu paso no dice cómo importar calcularCuota"). Ves la propuesta y la insertas (o la corriges).
-- **📦 Como un pull request, por porciones:** defines **tus casos** (el resultado esperado lo pones tú, con al menos un borde); la IA propone la función en porciones (una por paso) **ya probada contra tus casos**. Ves una porción a la vez y, para avanzar, la pruebas en el **probador**: tu entrada (que **tiene que pasar por esas líneas**: se comprueba con marcas en una copia, sin IA) y lo que esperas, escrito **antes** de ver el resultado. Si no coincide, ves el resultado real y por qué. Al final, ⤵ Insertar (con diff).
-- **Repertorio personal:** tus funciones 🟢 (escritas por ti o insertadas pasando el probador) se guardan en un repo git tuyo, entre proyectos (`~/.complementairy/repertorio`; en devcontainers, un volumen de Docker). Lo que ya hiciste va en pasos más grandes, y se puede proponer **tu versión adaptada** (como diff). Se configura por proyecto (guardar sí/no; usar siempre / preguntar / nunca); nunca guarda lo heredado ni de terceros.
-- **Después:** al día siguiente, una **prueba diferida** sobre lo que insertaste (otra entrada, comprobada ejecutando). Lo insertado sin probar (si apagas la prueba obligatoria) queda como **deuda de comprensión** en `cai deuda`. `cai programar estado` mide si sirve (aciertos a la primera, deuda, diferidas).
+Se elige por **proyecto, carpeta, archivo o función** (gana el más específico): los dos selectores del panel Nota ("¿Quién escribe?" y "Ayuda"), clic en el modo de la barra de estado o `cai modo programar-aprender --funcion src/x.ts:miFuncion`. **Cambiar de modo no toca lo ya hecho.** Hasta v0.9, "programar" se llamaba así lo que hoy es "sugerir": una configuración vieja se lee como "sugerir" (nadie pasa al modo programar sin elegirlo).
+
+### Construir juntos: la idea primero, tu orden después, el código al final
+Delegar todo baja la comprensión (en el estudio de Anthropic, 2026, quienes delegaban todo sacaron menos de 40%; quienes pedían el código con explicación y preguntaban, 65% o más). Pero un botón "Aceptar" se aprieta sin leer. Por eso, todo en el panel Nota, sin cajas en la barra de arriba y **una página a la vez** (chips arriba: Plan · 1 · 2 · 3 · Casos, con ✓ escrito, ⚠ con aviso, ○ falta; ◀ / ▶ para moverte; se abre solo lo que pide tu atención):
+- **Plan primero:** 3 a 5 pasos por **idea** (validar, caso especial, cálculo, resultado), editables. Si hacen falta más de 5, son dos funciones: la auxiliar queda como tarea y se trabaja **en su propia nota**.
+- **Si ya tenías código**, la IA lo revisa sin anclarse: hasta 3 sugerencias o preguntas en palabras, y tú decides **"Dejarlo así"**, **cambiarlo con tu orden** o **🗑 reemplazarlo con los pasos**.
+- **💬 La IA ofrece en palabras** cómo haría **todos los pasos que faltan** ("puedo hacerlo así…", y hasta 2 alternativas por paso), sin código, en un solo formulario. En programar · aprender va de a un paso: antes dices **cómo lo harías tú** y la IA comenta tu idea.
+- **Tus órdenes, con tus palabras:** en la página de cada paso, su propuesta y tu caja de orden van juntas ("haz que…"). Puedes avanzar con ▶ dejando órdenes y escribir de corrido hasta donde llegaste (**✍ Escribir los pasos 2–3**). Sin IA se rechaza lo vago ("dale, haz eso", "lo que dijiste", "la segunda"), lo que pide más de un paso ("y lo demás también", "toda la función") y lo copiado de la propuesta: decides tú qué se escribe.
+- **La IA escribe SOLO eso:** las líneas de cada paso, al final de lo ya escrito (lo anterior no se toca). Si a tu orden le falta algo, lo dice en vez de completarlo.
+- **🔎 Una IA chica verifica** cada paso viendo solo tu orden, el código y lo escrito antes (no las explicaciones de la otra IA): si agregó algo que no pediste, te avisa (**Quitarlo** / **Dejarlo**); si no hizo algo de lo que pediste, también.
+- **▶ Probar:** un campo por parámetro, ya lleno con una entrada que recorre el paso (comprobado sin IA, sin mostrarte el resultado); escribes qué crees que da (texto sin comillas = texto) y lo compruebas. No hace falta escribir la llamada. Obligatorio en aprender antes del paso siguiente. **✎ No es lo que quise** (nueva orden) o **↶ deshacer**.
+- **Casos al final**, según la **intención** (objetivo, plan y el comentario de la función), no según el borrador. Uno queda oculto para que **predigas la función** antes de insertarla. Un caso que falla se ajusta **con otra orden tuya**; uno que no encaja con el objetivo **no se fuerza**: se marca y te queda la decisión. Un control sin IA rechaza el código que compara contra el valor exacto de un caso.
+- **⤵ Insertar** solo con tu clic (con diff a un clic); las reglas se comprueban antes de tocar tu archivo. Desde el chat, la IA puede ofrecer, pero no dar tu orden.
+- **Repertorio personal:** tus funciones 🟢 se guardan en un repo git tuyo, entre proyectos (`~/.complementairy/repertorio`); lo que ya hiciste va en pasos más grandes y se puede proponer **tu versión adaptada**. Configurable por proyecto; nunca guarda lo heredado ni de terceros.
+- **Después:** una **prueba diferida** al día siguiente; `cai deuda` y `cai programar estado` miden si sirve.
 
 ### Entender antes de programar
 - **El proyecto** (chat → **🎯 Entender el proyecto**, o `cai entender --texto "…"`): la IA lee el proyecto y te pregunta de a poco, con opciones: qué buscas, para quién, qué es **"terminado"** (criterios comprobables), restricciones y qué queda fuera. Cuando cree que ya entendió, lo dice con un resumen; **tú lo confirmas** (o corriges, o lo reabres después). Lo confirmado entra al contexto de toda la IA.
@@ -185,13 +190,13 @@ Arriba de cada archivo: `🗺️ Plano · 💡 Ayuda con el archivo · 🔎 Revi
 | Conversaciones del chat | selector del chat | `cai chat --lista`, `--nueva`, `--conversacion <id>`, `--modelo chico\|mediano\|grande` |
 | Corregir lo que entiende | chat, o ✎ en el panel | `cai memoria corregir --modulo\|--estructura <archivo> \| --proyecto --texto "…"` |
 | Ideas | panel → 💡 Ideas | `cai ideas`, `cai ideas mas`, `cai ideas tarea\|descartar <id>` |
-| Modo programar | panel Nota (🧭, 📋, 📦, 🔬) | `cai programar plan\|paso\|contrato\|pr\|probar … --funcion f`, `cai programar estado`, `cai repertorio` |
+| Construir juntos (modo programar) | panel Nota (💬, orden, ▶, ✎, 🧪, 🎯) | `cai programar construir\|otra\|orden\|deshacer\|casos\|predecir … --funcion f`, `cai programar estado`, `cai repertorio` |
 
 ### Desde el chat de Claude Code
 En un proyecto con `cai init`, el chat de Claude Code también es ComplementAIry:
 - **Sabe usarlo:** viene con la skill `cai`, que indica qué comando corresponde a cada pedido, más `cai-guia`, `cai-revisar` y `cai-snippet`. La sección de `CLAUDE.md` le explica las reglas.
 - **Corre los mismos comandos que los atajos.** Por ejemplo, "revisa src/cuota.ts" lleva a `cai revisar`, "¿cómo sigo?" a `cai panorama` y "tests para calcularCuota" a `cai tests`. Lo que esos comandos escriben (`panorama.md`, `conocimiento.md`, ADRs, `ESTRUCTURA.md`) se conserva, solo si el comando es **una sola llamada a `cai`, sin encadenar**.
-- **Es el mismo chat que el del plugin:** entiende el proyecto (`cai entender`), conversa (`cai chat`), cambia tareas cuando le cuentas qué harás, propone ideas, y en modo programar propone planes, pasos y PRs.
+- **Es el mismo chat que el del plugin:** entiende el proyecto (`cai entender`), conversa (`cai chat`), cambia tareas cuando le cuentas qué harás, propone ideas, y en modo programar ofrece en palabras cómo hacer cada paso (la orden la das tú).
 - **Lo que solo decides tú, con sus botones:** para decidir, retractar, descartar, confirmar objetivos o aplicar una corrección, Claude Code te pregunta con su herramienta de preguntas y **un hook registra tu respuesta** (comprobado: la respuesta llega después de tu clic; si la pregunta ya trae una respuesta puesta, se rechaza, y el texto de la pregunta tiene que incluir exactamente lo que se registra). Si lo intentara con un comando, se revierte.
 - **Conoce el proyecto:** consulta `cai entender estado`, `cai indice`, `cai decisiones` y `cai memoria correcciones` antes de responder. En modo notas, lo que diga sobre tu código va a las notas (`cai responder`), no como comentarios en el archivo. Si tu `CLAUDE.md` tiene instrucciones de una versión anterior, la extensión ofrece actualizarlas (`cai init --solo-claude`).
 - **No puede escribir tu código:** los hooks lo bloquean. Tampoco puede activar snippets (`cai expandir`), instalar (`cai init`), crear snippets ni declarar tu perfil: eso lo haces tú.

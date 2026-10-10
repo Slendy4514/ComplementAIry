@@ -7,6 +7,8 @@ import { langFor } from "./lang.js";
 import { medir } from "./metricas.js";
 import { todasLasNotas } from "./notas.js";
 import { leerMemoria } from "./panorama.js";
+import { escribirJson, leerJson } from "./almacen.js";
+import { conCandadoSync } from "./ocupado.js";
 
 /**
  * "▶ Siguiente paso": una sola cosa que hacer ahora, elegida SIN IA con un orden fijo:
@@ -54,7 +56,7 @@ export interface Paso {
 }
 
 const diagFile = (root: string) => path.join(dataDir(root), "cache", "diagnosticos.json");
-const tareasFile = (root: string) => path.join(dataDir(root), "tareas.json");
+export const tareasFile = (root: string) => path.join(dataDir(root), "tareas.json");
 
 export function guardarDiagnosticos(root: string, rel: string, diags: Diagnostico[]): void {
   let todo: Record<string, { fecha: string; diags: Diagnostico[] }> = {};
@@ -88,31 +90,26 @@ export function rutasDe(texto: string): string[] {
 }
 
 export function cargarTareas(root: string): Tarea[] {
-  try {
-    return (JSON.parse(fs.readFileSync(tareasFile(root), "utf8")) as { tareas: Tarea[] }).tareas ?? [];
-  } catch {
-    return [];
-  }
+  return leerJson<{ tareas?: Tarea[] }>(tareasFile(root), () => ({})).tareas ?? [];
 }
 
 export function guardarTareas(root: string, tareas: Tarea[]): void {
-  fs.mkdirSync(path.dirname(tareasFile(root)), { recursive: true });
-  const tmp = `${tareasFile(root)}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ version: 1, tareas }, null, 2));
-  fs.renameSync(tmp, tareasFile(root));
+  escribirJson(tareasFile(root), { version: 1, tareas });
 }
 
 export function agregarTareas(root: string, nuevas: Omit<Tarea, "id" | "hecha" | "creada">[]): number {
-  const tareas = cargarTareas(root);
-  let n = 0;
-  for (const t of nuevas) {
-    if (tareas.some((x) => x.titulo === t.titulo && x.archivo === t.archivo)) continue;
-    const max = Math.max(0, ...tareas.map((x) => Number(/^t(\d+)$/.exec(x.id)?.[1] ?? 0)));
-    tareas.push({ ...t, id: `t${max + 1}`, hecha: false, creada: new Date().toISOString() });
-    n++;
-  }
-  guardarTareas(root, tareas);
-  return n;
+  return conCandadoSync(tareasFile(root), () => {
+    const tareas = cargarTareas(root);
+    let n = 0;
+    for (const t of nuevas) {
+      if (tareas.some((x) => x.titulo === t.titulo && x.archivo === t.archivo)) continue;
+      const max = Math.max(0, ...tareas.map((x) => Number(/^t(\d+)$/.exec(x.id)?.[1] ?? 0)));
+      tareas.push({ ...t, id: `t${max + 1}`, hecha: false, creada: new Date().toISOString() });
+      n++;
+    }
+    guardarTareas(root, tareas);
+    return n;
+  });
 }
 
 /** Un cambio de tareas (lo propone el chat o Claude Code; se aplica solo con tu clic o tu respuesta). */
@@ -126,27 +123,30 @@ export interface CambioTarea {
 
 /** Aplica un cambio de tareas y dice qué pasó (con un error explicativo si no se puede). */
 export function aplicarCambioTarea(root: string, c: CambioTarea): string {
-  if (c.accion === "crear") {
-    if (!c.titulo?.trim()) throw new Error("para crear una tarea hace falta un título");
-    const n = agregarTareas(root, [{ titulo: c.titulo.trim(), ...(c.archivo ? { archivo: c.archivo } : {}), ...(c.detalle ? { detalle: c.detalle } : {}), origen: "manual" }]);
-    return n ? `tarea agregada: ${c.titulo.trim()}` : `ya existía: ${c.titulo.trim()}`;
-  }
-  const tareas = cargarTareas(root);
-  const t = tareas.find((x) => x.id === c.id);
-  if (!t) throw new Error(`no existe la tarea ${c.id ?? "(sin id)"} (míralas con: cai tareas)`);
-  if (c.accion === "editar") {
-    if (c.titulo?.trim()) t.titulo = c.titulo.trim();
-    if (c.detalle !== undefined) t.detalle = c.detalle;
-    if (c.archivo !== undefined) t.archivo = c.archivo || undefined;
-  } else if (c.accion === "descartar") Object.assign(t, { archivada: true, descartada: true }); // no vuelve a proponerse
-  else Object.assign(t, { hecha: c.accion === "hecha", archivada: false, descartada: false, ...(c.accion === "hecha" ? { hechaEn: new Date().toISOString() } : { hechaEn: undefined }) });
-  guardarTareas(root, tareas);
-  return `${t.id}: ${{ editar: "editada", descartar: "descartada", hecha: "hecha", reabrir: "pendiente otra vez" }[c.accion]} (${t.titulo})`;
+  return conCandadoSync(tareasFile(root), () => {
+    if (c.accion === "crear") {
+      if (!c.titulo?.trim()) throw new Error("para crear una tarea hace falta un título");
+      const n = agregarTareas(root, [{ titulo: c.titulo.trim(), ...(c.archivo ? { archivo: c.archivo } : {}), ...(c.detalle ? { detalle: c.detalle } : {}), origen: "manual" }]);
+      return n ? `tarea agregada: ${c.titulo.trim()}` : `ya existía: ${c.titulo.trim()}`;
+    }
+    const tareas = cargarTareas(root);
+    const t = tareas.find((x) => x.id === c.id);
+    if (!t) throw new Error(`no existe la tarea ${c.id ?? "(sin id)"} (míralas con: cai tareas)`);
+    if (c.accion === "editar") {
+      if (c.titulo?.trim()) t.titulo = c.titulo.trim();
+      if (c.detalle !== undefined) t.detalle = c.detalle;
+      if (c.archivo !== undefined) t.archivo = c.archivo || undefined;
+    } else if (c.accion === "descartar") Object.assign(t, { archivada: true, descartada: true }); // no vuelve a proponerse
+    else Object.assign(t, { hecha: c.accion === "hecha", archivada: false, descartada: false, ...(c.accion === "hecha" ? { hechaEn: new Date().toISOString() } : { hechaEn: undefined }) });
+    guardarTareas(root, tareas);
+    return `${t.id}: ${{ editar: "editada", descartar: "descartada", hecha: "hecha", reabrir: "pendiente otra vez" }[c.accion]} (${t.titulo})`;
+  });
 }
 
 /** Marca hechas, sin IA, las tareas cuya función ya existe en su archivo. */
 export async function actualizarTareas(root: string): Promise<Tarea[]> {
   const tareas = cargarTareas(root);
+  const antes = new Map(tareas.map((t) => [t.id, JSON.stringify(t)]));
   let cambio = false;
   const ahora = new Date().toISOString();
   // Tareas viejas con varias rutas en una ("a.js (y b.ts)"): se separan; sin ruta válida, se archivan.
@@ -205,8 +205,21 @@ export async function actualizarTareas(root: string): Promise<Tarea[]> {
       cambio = true;
     }
   }
-  if (cambio) guardarTareas(root, tareas);
-  return tareas;
+  if (!cambio) return tareas;
+  // Mientras se analizaba el código otro proceso pudo cambiar tareas: se guarda sobre lo que hay ahora,
+  // y solo se pisa una tarea si nadie la tocó en el medio.
+  return conCandadoSync(tareasFile(root), () => {
+    const ahoraEnDisco = cargarTareas(root);
+    const nuestras = new Map(tareas.map((t) => [t.id, t]));
+    const final = ahoraEnDisco.map((t) => (antes.get(t.id) === JSON.stringify(t) ? (nuestras.get(t.id) ?? t) : t));
+    for (const t of tareas)
+      if (!antes.has(t.id) && !final.some((x) => x.archivo === t.archivo && x.titulo === t.titulo)) {
+        const max = Math.max(0, ...final.map((x) => Number(/^t(\d+)$/.exec(x.id)?.[1] ?? 0)));
+        final.push({ ...t, id: `t${max + 1}` });
+      }
+    guardarTareas(root, final);
+    return final;
+  });
 }
 
 export async function siguiente(root: string): Promise<Paso[]> {

@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 import { dataDir } from "./config.js";
+import { escribirJson, leerJson } from "./almacen.js";
+import { conCandadoSync } from "./ocupado.js";
 
 /**
  * Registro de decisiones: lo que la IA necesita que TÚ decidas ("¿un monto negativo es error o se
@@ -34,18 +35,11 @@ export interface Decision {
 const archivo = (root: string) => path.join(dataDir(root), "decisiones.json");
 
 export function cargarDecisiones(root: string): Decision[] {
-  try {
-    return (JSON.parse(fs.readFileSync(archivo(root), "utf8")) as { decisiones: Decision[] }).decisiones ?? [];
-  } catch {
-    return [];
-  }
+  return leerJson<{ decisiones?: Decision[] }>(archivo(root), () => ({})).decisiones ?? [];
 }
 
 function guardar(root: string, ds: Decision[]): void {
-  fs.mkdirSync(path.dirname(archivo(root)), { recursive: true });
-  const tmp = `${archivo(root)}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ version: 1, decisiones: ds }, null, 2));
-  fs.renameSync(tmp, archivo(root));
+  escribirJson(archivo(root), { version: 1, decisiones: ds });
 }
 
 /**
@@ -94,51 +88,57 @@ function parecida(a: string, b: string): boolean {
  * lo decidido no se vuelve a preguntar. Devuelve las que quedaron nuevas.
  */
 export function proponerDecisiones(root: string, nuevas: { pregunta: string; opciones: Opcion[]; recomendada?: string }[], alcance: Decision["alcance"], origen: string): Decision[] {
-  const ds = cargarDecisiones(root);
-  const agregadas: Decision[] = [];
-  for (const n of nuevas) {
-    if (!n.pregunta.trim() || n.opciones.length < 2) continue;
-    if (ds.some((d) => d.estado !== "retractada" && parecida(d.pregunta, n.pregunta))) continue;
-    const d: Decision = {
-      id: `d${crypto.randomBytes(3).toString("hex")}`,
-      pregunta: n.pregunta.trim(),
-      opciones: n.opciones.slice(0, 4),
-      ...(n.recomendada ? { recomendada: n.recomendada } : {}),
-      alcance,
-      estado: "pendiente",
-      creada: new Date().toISOString(),
-      origen,
-    };
-    ds.push(d);
-    agregadas.push(d);
-  }
-  if (agregadas.length) guardar(root, ds);
-  return agregadas;
+  return conCandadoSync(archivo(root), () => {
+    const ds = cargarDecisiones(root);
+    const agregadas: Decision[] = [];
+    for (const n of nuevas) {
+      if (!n.pregunta.trim() || n.opciones.length < 2) continue;
+      if (ds.some((d) => d.estado !== "retractada" && parecida(d.pregunta, n.pregunta))) continue;
+      const d: Decision = {
+        id: `d${crypto.randomBytes(3).toString("hex")}`,
+        pregunta: n.pregunta.trim(),
+        opciones: n.opciones.slice(0, 4),
+        ...(n.recomendada ? { recomendada: n.recomendada } : {}),
+        alcance,
+        estado: "pendiente",
+        creada: new Date().toISOString(),
+        origen,
+      };
+      ds.push(d);
+      agregadas.push(d);
+    }
+    if (agregadas.length) guardar(root, ds);
+    return agregadas;
+  });
 }
 
 export function decidir(root: string, id: string, eleccion: string): Decision {
-  const ds = cargarDecisiones(root);
-  const d = ds.find((x) => x.id === id);
-  if (!d) throw new Error(`no existe la decisión ${id} (míralas con: cai decisiones)`);
-  if (!eleccion.trim()) throw new Error("la elección no puede estar vacía");
-  if (d.eleccion && d.estado === "vigente") (d.anterior ??= []).push({ eleccion: d.eleccion, fecha: d.decidida ?? d.creada });
-  d.eleccion = eleccion.trim();
-  d.estado = "vigente";
-  d.decidida = new Date().toISOString();
-  guardar(root, ds);
-  return d;
+  return conCandadoSync(archivo(root), () => {
+    const ds = cargarDecisiones(root);
+    const d = ds.find((x) => x.id === id);
+    if (!d) throw new Error(`no existe la decisión ${id} (míralas con: cai decisiones)`);
+    if (!eleccion.trim()) throw new Error("la elección no puede estar vacía");
+    if (d.eleccion && d.estado === "vigente") (d.anterior ??= []).push({ eleccion: d.eleccion, fecha: d.decidida ?? d.creada });
+    d.eleccion = eleccion.trim();
+    d.estado = "vigente";
+    d.decidida = new Date().toISOString();
+    guardar(root, ds);
+    return d;
+  });
 }
 
 /** Retractar: deja de regir (sale del contexto de la IA) y queda en el historial; se puede volver a decidir. */
 export function retractar(root: string, id: string): Decision {
-  const ds = cargarDecisiones(root);
-  const d = ds.find((x) => x.id === id);
-  if (!d) throw new Error(`no existe la decisión ${id} (míralas con: cai decisiones)`);
-  if (d.eleccion) (d.anterior ??= []).push({ eleccion: d.eleccion, fecha: d.decidida ?? d.creada });
-  d.estado = "retractada";
-  delete d.eleccion;
-  guardar(root, ds);
-  return d;
+  return conCandadoSync(archivo(root), () => {
+    const ds = cargarDecisiones(root);
+    const d = ds.find((x) => x.id === id);
+    if (!d) throw new Error(`no existe la decisión ${id} (míralas con: cai decisiones)`);
+    if (d.eleccion) (d.anterior ??= []).push({ eleccion: d.eleccion, fecha: d.decidida ?? d.creada });
+    d.estado = "retractada";
+    delete d.eleccion;
+    guardar(root, ds);
+    return d;
+  });
 }
 
 /** Las que rigen para un archivo o función (las del proyecto rigen siempre). */

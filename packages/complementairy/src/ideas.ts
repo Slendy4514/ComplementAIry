@@ -1,12 +1,13 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 import { dataDir, makeZoner } from "./config.js";
 import { CRITERIO } from "./context.js";
 import { contextoComun } from "./contexto.js";
 import { ask } from "./llm.js";
 import { agregarTareas } from "./siguiente.js";
-import { iaOpts } from "./tutor.js";
+import { iaOpts } from "./llm.js";
+import { escribirJson, leerJson } from "./almacen.js";
+import { conCandadoSync } from "./ocupado.js";
 
 /**
  * Ideas para el proyecto (panel → Proyecto → 💡 Ideas), a partir del panorama: funcionalidades nuevas
@@ -32,18 +33,11 @@ export interface Idea {
 const archivo = (root: string) => path.join(dataDir(root), "ideas.json");
 
 export function cargarIdeas(root: string): Idea[] {
-  try {
-    return (JSON.parse(fs.readFileSync(archivo(root), "utf8")) as { ideas: Idea[] }).ideas ?? [];
-  } catch {
-    return [];
-  }
+  return leerJson<{ ideas?: Idea[] }>(archivo(root), () => ({})).ideas ?? [];
 }
 
 function guardar(root: string, ideas: Idea[]): void {
-  fs.mkdirSync(path.dirname(archivo(root)), { recursive: true });
-  const tmp = `${archivo(root)}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ version: 1, ideas }, null, 2));
-  fs.renameSync(tmp, archivo(root));
+  escribirJson(archivo(root), { version: 1, ideas });
 }
 
 const norm = (t: string) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
@@ -76,38 +70,44 @@ export function contextoIdeas(root: string): string {
 
 /** Agrega ideas nuevas (sin repetir ni revivir las descartadas: filtro sin IA). Devuelve las agregadas. */
 export function registrarIdeas(root: string, nuevas: Omit<Idea, "id" | "fecha">[]): Idea[] {
-  const ideas = cargarIdeas(root);
-  const tipos = new Set(tiposIdeas(root));
-  const out: Idea[] = [];
-  for (const n of nuevas) {
-    if (!tipos.has(n.tipo) || !n.titulo.trim()) continue;
-    if (ideas.some((i) => norm(i.titulo) === norm(n.titulo))) continue;
-    const i: Idea = { ...n, titulo: n.titulo.trim(), id: `i${crypto.randomBytes(3).toString("hex")}`, fecha: new Date().toISOString() };
-    ideas.push(i);
-    out.push(i);
-  }
-  if (out.length) guardar(root, ideas);
-  return out;
+  return conCandadoSync(archivo(root), () => {
+    const ideas = cargarIdeas(root);
+    const tipos = new Set(tiposIdeas(root));
+    const out: Idea[] = [];
+    for (const n of nuevas) {
+      if (!tipos.has(n.tipo) || !n.titulo.trim()) continue;
+      if (ideas.some((i) => norm(i.titulo) === norm(n.titulo))) continue;
+      const i: Idea = { ...n, titulo: n.titulo.trim(), id: `i${crypto.randomBytes(3).toString("hex")}`, fecha: new Date().toISOString() };
+      ideas.push(i);
+      out.push(i);
+    }
+    if (out.length) guardar(root, ideas);
+    return out;
+  });
 }
 
 /** Tu clic: "No me interesa" (no vuelve a proponerse) o "➕ Tarea". */
 export function descartarIdea(root: string, id: string): Idea {
-  const ideas = cargarIdeas(root);
-  const i = ideas.find((x) => x.id === id);
-  if (!i) throw new Error(`no existe la idea ${id} (míralas con: cai ideas)`);
-  i.descartada = true;
-  guardar(root, ideas);
-  return i;
+  return conCandadoSync(archivo(root), () => {
+    const ideas = cargarIdeas(root);
+    const i = ideas.find((x) => x.id === id);
+    if (!i) throw new Error(`no existe la idea ${id} (míralas con: cai ideas)`);
+    i.descartada = true;
+    guardar(root, ideas);
+    return i;
+  });
 }
 
 export function ideaATarea(root: string, id: string): Idea {
-  const ideas = cargarIdeas(root);
-  const i = ideas.find((x) => x.id === id);
-  if (!i) throw new Error(`no existe la idea ${id} (míralas con: cai ideas)`);
-  agregarTareas(root, [{ titulo: i.titulo, detalle: i.porque, ...(i.archivos[0] ? { archivo: i.archivos[0] } : {}), origen: "panorama" }]);
-  i.tarea = i.titulo;
-  guardar(root, ideas);
-  return i;
+  return conCandadoSync(archivo(root), () => {
+    const ideas = cargarIdeas(root);
+    const i = ideas.find((x) => x.id === id);
+    if (!i) throw new Error(`no existe la idea ${id} (míralas con: cai ideas)`);
+    agregarTareas(root, [{ titulo: i.titulo, detalle: i.porque, ...(i.archivos[0] ? { archivo: i.archivos[0] } : {}), origen: "panorama" }]);
+    i.tarea = i.titulo;
+    guardar(root, ideas);
+    return i;
+  });
 }
 
 /** "🔄 Más ideas": una llamada (modelo mediano) sin rehacer el panorama. */

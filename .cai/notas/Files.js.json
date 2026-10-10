@@ -1,0 +1,358 @@
+{
+  "version": 1,
+  "archivo": "Files.js",
+  "notas": [
+    {
+      "accion": "Completa constructor cuidando: Hoy guardas `window.app` como `this.obsidian`, pero `getAbstractFileByPath` y `createFolder` están en `app.vault`, no en `app`. Usa `this.app = window.app` y llama a `this.app.vault...`",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🔎 Revisión** · issue (blocking): El nombre `obsidian` esconde que guardas el objeto `app`, y eso ya te juega en contra: `getAbstractFileByPath` no vive en `app`, sino en `app.vault`. Renombrarlo a `app` hace que cada llamada se lea como la documentación y te ayuda a ver qué miembro corresponde.\n\n📖 [docs.obsidian.md/Reference/TypeScript+API/Vault/getAbstractF](https://docs.obsidian.md/Reference/TypeScript+API/Vault/getAbstractFileByPath)",
+          "fecha": "2026-10-08T03:43:41.349Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🗺️ Plano** · Guarda la app de Obsidian para que el resto de métodos la use.  \n- Recibe: Nada.  \n- Devuelve: La instancia.  \n- Cuida: Hoy guardas `window.app` como `this.obsidian`, pero `getAbstractFileByPath` y `createFolder` están en `app.vault`, no en `app`. Usa `this.app = window.app` y llama a `this.app.vault...`; si no, `exists` fallará; si `window.app` no existe, lanza un error explicativo; pon el bloque `// ===== CONFIGURACIÓN =====` que pedía la guía",
+          "fecha": "2026-10-08T04:16:35.131Z"
+        },
+        {
+          "quien": "tu",
+          "texto": "Pido: casos de prueba.",
+          "fecha": "2026-10-09T02:30:18.074Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🧪 Tests** · No puedo ejecutar `constructor` fuera de su programa: el archivo no exporta funciones: para probarlas fuera de su programa, expórtalas (si es un script que corre dentro de otra app, como Obsidian, los casos quedan para probar a mano).",
+          "fecha": "2026-10-09T02:30:18.074Z",
+          "meta": {
+            "kind": "tests"
+          }
+        }
+      ],
+      "snippets": [],
+      "bloqueante": true,
+      "estado": "abierta",
+      "creada": "2026-10-08T03:43:41.349Z",
+      "actualizada": "2026-10-09T02:30:18.074Z",
+      "archivo": "Files.js",
+      "ancla": {
+        "linea": 26,
+        "texto": "constructor() {",
+        "funcion": "constructor"
+      },
+      "tipo": "revision",
+      "titulo": "constructor",
+      "origen": "revisar",
+      "id": "n2",
+      "desanclada": false,
+      "huellaInicial": "763f4b53a0df"
+    },
+    {
+      "accion": "Implementar: validar entrada, comprobar si existe, crear con `await` si no existe, retornar resultado.",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🔎 Revisión** · issue: Está vacía y devuelve `undefined`, que es falsy, así que `moveTo` siempre creerá que falló. Además, la guía dice que debe ser `async` porque `createFolder` devuelve una promesa. Si no lo es, los llamadores no podrán usar `await` sobre un resultado fiable.\n\n📖 [docs.obsidian.md/Reference/TypeScript+API/Vault/createFolder](https://docs.obsidian.md/Reference/TypeScript+API/Vault/createFolder)",
+          "fecha": "2026-10-08T03:43:41.349Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🗺️ Plano** · Deja lista una carpeta, creándola con las intermedias si no existe.  \n- Recibe: `path` (string).  \n- Devuelve: Una promesa de `true` si la carpeta quedó lista, o de `false` si falló o si en esa ruta hay un archivo.  \n- Cuida: debe ser `async` y esperar `createFolder` con `await`; normaliza primero y devuelve `false` si queda vacía; distingue carpeta de archivo con `instanceof TFolder`/`TFile` o con `children`; crea las intermedias, porque `createFolder` puede fallar si el padre no existe, así que créalas una a una desde la raíz; `try/catch` con `console.error(\"Files.ensureFolder:\", e)`\n\nSnippets sugeridos (botón **Insertar aquí**): `fnasync nombre=ensureFolder args=path`",
+          "fecha": "2026-10-08T04:16:35.132Z"
+        },
+        {
+          "quien": "tu",
+          "texto": "⤵ Inserté el snippet `fnasync nombre=ensureFolder args=path` después de la línea 54.",
+          "fecha": "2026-10-09T02:11:40.825Z",
+          "meta": {
+            "kind": "registro"
+          }
+        },
+        {
+          "quien": "ia",
+          "texto": "**🔴 Falta** · Está incompleta: ni es `async` ni implementa lógica alguna. Solo declara la firma vacía.\n\nQué falta:\n- Hacer `async` la función\n- Validar `path` con `normalize()` antes de usarlo\n- Usar `await createFolder()` para crear la carpeta\n- Retornar `true`/`false` o similar para indicar éxito",
+          "fecha": "2026-10-09T21:47:01.926Z",
+          "meta": {
+            "kind": "verificar",
+            "modelo": "claude-haiku-4-5",
+            "costo": 0.016988999999999997
+          }
+        }
+      ],
+      "snippets": [
+        {
+          "llamada": "fnasync nombre=ensureFolder args=path",
+          "despues": "ensureFolder(path) {}"
+        }
+      ],
+      "bloqueante": false,
+      "estado": "abierta",
+      "creada": "2026-10-08T03:43:41.349Z",
+      "actualizada": "2026-10-09T21:47:01.926Z",
+      "archivo": "Files.js",
+      "ancla": {
+        "linea": 54,
+        "texto": "ensureFolder(path) {}",
+        "funcion": "ensureFolder"
+      },
+      "tipo": "revision",
+      "titulo": "ensureFolder",
+      "origen": "revisar",
+      "id": "n5",
+      "desanclada": false,
+      "verificacion": {
+        "estado": "falta",
+        "resumen": "Está incompleta: ni es `async` ni implementa lógica alguna. Solo declara la firma vacía.",
+        "fecha": "2026-10-09T21:47:01.926Z",
+        "hash": "5902b56c044b",
+        "lineas": [
+          "  ensureFolder(path) {}"
+        ]
+      }
+    },
+    {
+      "accion": "Completa la función con validación de entrada y, si aplica, normalización de la ruta (responde las 3 preguntas arriba para afinar).",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🔎 Revisión** · issue (blocking): `normalize` es la base de la validación de todas las rutas y hoy no hace nada. Al implementarla, piensa qué pasa con rutas como `../` o `a/../b`, o con rutas absolutas. ¿Quieres que un destino pueda salir de la carpeta que esperas dentro de la bóveda? Decide si las rechazas y deja esa regla en un solo lugar.",
+          "fecha": "2026-10-08T03:43:41.349Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🗺️ Plano** · Limpia una ruta: quita espacios en los extremos y las `/` del inicio y del final.  \n- Recibe: `path` (cualquier valor).  \n- Devuelve: Un string limpio, o `\"\"` si la entrada no es un string.  \n- Cuida: entrada que no es string (número, null, undefined); solo espacios o solo `/` (queda vacío); no toques las `/` del medio; es síncrona y no usa la API de Obsidian\n\nSnippets sugeridos (botón **Insertar aquí**): `fn nombre=normalize args=path`",
+          "fecha": "2026-10-08T04:16:35.131Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🔴 Falta** · La función está vacía y no implementa nada de lo pedido: ni valida la entrada ni maneja los casos borde (null, undefined, número).\n\nQué falta:\n- Validar que `path` sea string, rechazar null/undefined/número con error explicativo\n- Decidir qué pasa cuando es válido: ¿retorna el string tal cual o también normaliza la ruta?",
+          "fecha": "2026-10-09T21:47:31.960Z",
+          "meta": {
+            "kind": "verificar",
+            "modelo": "claude-haiku-4-5",
+            "costo": 0.017398
+          }
+        }
+      ],
+      "snippets": [
+        {
+          "llamada": "fn nombre=normalize args=path",
+          "despues": "normalize(path) {}"
+        }
+      ],
+      "bloqueante": true,
+      "estado": "abierta",
+      "creada": "2026-10-08T03:43:41.349Z",
+      "actualizada": "2026-10-09T21:47:31.960Z",
+      "archivo": "Files.js",
+      "ancla": {
+        "linea": 89,
+        "texto": "normalize(path) {}",
+        "funcion": "normalize"
+      },
+      "tipo": "revision",
+      "titulo": "normalize",
+      "origen": "revisar",
+      "id": "n6",
+      "desanclada": false,
+      "verificacion": {
+        "estado": "falta",
+        "resumen": "La función está vacía y no implementa nada de lo pedido: ni valida la entrada ni maneja los casos borde (null, undefined, número).",
+        "fecha": "2026-10-09T21:47:31.960Z",
+        "hash": "e26334883c1e",
+        "lineas": [
+          "  normalize(path) {}"
+        ]
+      }
+    },
+    {
+      "accion": "Implementa el cuerpo del `try`: valida entrada, construye la ruta final, comprueba colisión, y ejecuta `await app.fileManager.renameFile()`.",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🔎 Revisión** · question: El `catch` relanza, pero tu guía dice que `moveTo` debe registrar con `console.error` y devolver false para respetar el contrato true/false. Si relanzas, quien llame tendrá que envolver todo en try/catch. Decide qué contrato quieres y mantenlo igual en las tres funciones.",
+          "fecha": "2026-10-08T03:43:41.349Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🔎 Revisión** · suggestion: Debe ser `async`, porque `renameFile` devuelve una promesa. Sin `await`, el `catch` no atrapa los fallos y el `true` llega antes de que el archivo se mueva. Cuando lo implementes, valida antes `file` y `destFolder`, y decide qué devuelves si el archivo ya está en el destino.\n\n📖 [docs.obsidian.md/Reference/TypeScript+API/FileManager/rename](https://docs.obsidian.md/Reference/TypeScript+API/FileManager/renameFile)",
+          "fecha": "2026-10-08T03:43:41.349Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🔎 Revisión** · suggestion: Tu regla dice que los errores se lanzan con mensajes explicativos, y aquí solo anteponer \"Files.moveTo:\" al mensaje original no explica qué se intentaba hacer. Indica qué archivo y qué carpeta destino estaban involucrados, para que quien lea el error entienda el contexto sin depurar.",
+          "fecha": "2026-10-08T03:43:41.349Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🗺️ Plano** · Mueve un archivo a una carpeta destino con el mismo nombre, sin pisar nada y conservando los enlaces.  \n- Recibe: `file` (TFile o ruta string) y `destFolder` (string).  \n- Devuelve: Una promesa de `true` si lo movió y de `false` si no lo movió.  \n- Cuida: debe ser `async` y usar `await` con `app.fileManager.renameFile`; valida los tipos de `file` y `destFolder` antes de usarlos y no muevas nada si no son los esperados; si `file` es una ruta, resuélvela y verifica que sea un archivo y no una carpeta; quita la `/` final del destino con `normalize`; si `ensureFolder` devuelve `false`, devuelve `false`; si el archivo ya está en el destino, decide `true` o `false` y deja el comentario (te sugiero `false` para que `skipped` cuente bien en `{ moved, skipped }`); si ya existe otra cosa en la ruta final, devuelve `false`; hoy el catch relanza el error, pero la guía pide registrar y devolver `false`; decide uno (ver la pregunta del orden) y sé consistente\n\nSnippets sugeridos (botón **Insertar aquí**): `fnasync nombre=moveTo args=file, destFolder`",
+          "fecha": "2026-10-08T04:16:35.132Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🔴 Falta** · Está solo el esqueleto: `async` correcto y captura de errores lista, pero el `try` está vacío. Falta toda la lógica de movimiento y validación.\n\nQué falta:\n- Validar entrada: `file` y `destFolder` no nulos, tipo correcto\n- Calcular la ruta completa de destino, normalizando la carpeta\n- Verificar colisión: si el archivo destino ya existe, retornar `false` sin sobrescribir\n- Usar `await app.fileManager.renameFile(file, newPath)` y retornar `true` si fue exitoso",
+          "fecha": "2026-10-09T21:47:17.718Z",
+          "meta": {
+            "kind": "verificar",
+            "modelo": "claude-haiku-4-5",
+            "costo": 0.018763
+          }
+        }
+      ],
+      "snippets": [
+        {
+          "llamada": "fnasync nombre=moveTo args=file, destFolder",
+          "despues": "moveTo(file, destFolder) {"
+        }
+      ],
+      "bloqueante": false,
+      "estado": "abierta",
+      "creada": "2026-10-08T03:43:41.349Z",
+      "actualizada": "2026-10-09T21:47:17.718Z",
+      "archivo": "Files.js",
+      "ancla": {
+        "linea": 80,
+        "texto": "async moveTo(file, destFolder) {",
+        "funcion": "moveTo"
+      },
+      "tipo": "revision",
+      "titulo": "moveTo",
+      "origen": "revisar",
+      "id": "n7",
+      "desanclada": false,
+      "verificacion": {
+        "estado": "falta",
+        "resumen": "Está solo el esqueleto: `async` correcto y captura de errores lista, pero el `try` está vacío. Falta toda la lógica de movimiento y validación.",
+        "fecha": "2026-10-09T21:47:17.718Z",
+        "hash": "3498de70348b",
+        "lineas": [
+          "  async moveTo(file, destFolder) {",
+          "    try {",
+          "    } catch (error) {",
+          "      throw new Error(",
+          "        `Files.moveTo: ${error instanceof Error ? error.message : String(error)}`,",
+          "      );",
+          "    }",
+          "  }"
+        ]
+      }
+    },
+    {
+      "accion": "Empieza por `normalize` (no depende de nada y las demás la usan), sigue con `exists` (corrigiendo `vault`), luego `ensureFolder` y `moveTo` (ambas `async`) y deja `selfTest` para el final. Pregunta antes de `moveTo`: cuando algo falla por dentro, ¿debe devolver `false` (como pide la guía) o lanzar un error explicativo (como pide tu regla de estilo)? Elige una sola política para toda la clase.",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🗺️ Plano** · Files.js es una clase pequeña que envuelve la API de Obsidian para comprobar rutas, asegurar carpetas y mover notas sin romper enlaces. No encontré docs/ESTRUCTURA.md en el repo, así que me guío por los comentarios @guia del archivo.  \n1) `constructor`: Guarda la app de Obsidian para que el resto de métodos la use. ✓ ya existe  \n2) `normalize`: Limpia una ruta: quita espacios en los extremos y las `/` del inicio y del final. ✓ ya existe  \n3) `exists`: Dice si hay algo (archivo o carpeta) en una ruta de la bóveda. ✓ ya existe  \n4) `ensureFolder`: Deja lista una carpeta, creándola con las intermedias si no existe. ✓ ya existe  \n5) `moveTo`: Mueve un archivo a una carpeta destino con el mismo nombre, sin pisar nada y conservando los enlaces. ✓ ya existe  \n6) `selfTest`: Prueba de humo dentro de Obsidian: crea una carpeta temporal, mueve una nota de prueba, comprueba que el segundo intento devuelve `false` y limpia todo.  \nEmpieza por `normalize` (no depende de nada y las demás la usan), sigue con `exists` (corrigiendo `vault`), luego `ensureFolder` y `moveTo` (ambas `async`) y deja `selfTest` para el final. Pregunta antes de `moveTo`: cuando algo falla por dentro, ¿debe devolver `false` (como pide la guía) o lanzar un error explicativo (como pide tu regla de estilo)? Elige una sola política para toda la clase.",
+          "fecha": "2026-10-08T04:16:35.130Z"
+        }
+      ],
+      "snippets": [],
+      "bloqueante": false,
+      "estado": "abierta",
+      "creada": "2026-10-08T04:16:35.131Z",
+      "actualizada": "2026-10-08T04:16:35.131Z",
+      "archivo": "Files.js",
+      "ancla": {
+        "linea": 1,
+        "texto": "// @guia[c1.1] plano: Una sola `class Files` sin `export`, con bloque `// ===== CONFIGURACIÓN =====` al"
+      },
+      "tipo": "plano",
+      "titulo": "Este archivo",
+      "origen": "plano",
+      "alcance": "archivo",
+      "id": "n10",
+      "desanclada": false
+    },
+    {
+      "accion": "",
+      "hilo": [
+        {
+          "quien": "ia",
+          "texto": "**🔎 Revisión** · issue (blocking): `normalize` está vacío y devuelve `undefined`, así que `exists` siempre devolverá false, incluso para rutas válidas. Es un error silencioso, difícil de notar. ¿Cómo te darías cuenta de esto sin un selfTest?",
+          "fecha": "2026-10-08T03:43:41.349Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🔎 Revisión** · issue (blocking): `getAbstractFileByPath` no está en `app`, sino en `app.vault`. Tal como está, lanzará un TypeError al llamarla. Revisa en la documentación dónde vive ese método.\n\n📖 [docs.obsidian.md/Reference/TypeScript+API/Vault/getAbstractF](https://docs.obsidian.md/Reference/TypeScript+API/Vault/getAbstractFileByPath)",
+          "fecha": "2026-10-08T03:43:41.349Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🗺️ Plano** · Dice si hay algo (archivo o carpeta) en una ruta de la bóveda.  \n- Recibe: `rawPath` (string).  \n- Devuelve: `true` o `false`.  \n- Cuida: ruta inválida o vacía devuelve `false` sin consultar la API; busca con `this.app.vault.getAbstractFileByPath`; la guía pide `false` en vez de lanzar error, y está bien porque es una pregunta de sí o no; ya la tienes casi lista, solo cambia el objeto",
+          "fecha": "2026-10-08T04:16:35.132Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🟢 Lista** · Cumple lo pedido: valida la ruta antes de consultar la API mediante `normalize`, ahorrando llamadas innecesarias. La lógica es clara y directa.\n\nMejoras opcionales:\n- El ternario `? true : false` en línea 51 es redundante; podrías simplificar a `return Boolean(this.obsidian.getAbstractFileByPath(path))` o `return !!this.obsidian.getAbstractFileByPath(path)` para mayor concisión (opcional).",
+          "fecha": "2026-10-09T21:46:48.847Z",
+          "meta": {
+            "kind": "verificar",
+            "modelo": "claude-haiku-4-5",
+            "costo": 0.018122
+          }
+        }
+      ],
+      "snippets": [],
+      "bloqueante": false,
+      "estado": "resuelta",
+      "creada": "2026-10-08T03:43:41.349Z",
+      "actualizada": "2026-10-09T21:46:48.847Z",
+      "archivo": "Files.js",
+      "ancla": {
+        "linea": 48,
+        "texto": "exists(rawPath) {",
+        "funcion": "exists"
+      },
+      "tipo": "revision",
+      "titulo": "exists",
+      "origen": "revisar",
+      "id": "n3",
+      "desanclada": false,
+      "verificacion": {
+        "estado": "lista",
+        "resumen": "Cumple lo pedido: valida la ruta antes de consultar la API mediante `normalize`, ahorrando llamadas innecesarias. La lógica es clara y directa.",
+        "fecha": "2026-10-09T21:46:48.847Z",
+        "hash": "ca8f8531be19",
+        "lineas": [
+          "  exists(rawPath) {",
+          "    const path = this.normalize(rawPath);",
+          "    if (!path) return false;",
+          "    return this.obsidian.getAbstractFileByPath(path) ? true : false;",
+          "  }"
+        ]
+      }
+    },
+    {
+      "accion": "Aplica el mismo patrón a tu clase: primero normalize, luego exists, luego ensureFolder y moveTo como async con try/catch.",
+      "hilo": [
+        {
+          "quien": "tu",
+          "texto": "Pido: un ejemplo análogo de otro dominio.",
+          "fecha": "2026-10-08T03:21:57.878Z"
+        },
+        {
+          "quien": "ia",
+          "texto": "**🔁 Ejemplo** · Imagina una clase `Bodega` que maneja estantes y cajas.  \n- `limpiarCodigo(codigo)`: si no es texto devuelve \"\"; si sí, quita espacios y guiones sobrantes. Es síncrona porque solo transforma texto.  \n- `hayEstante(codigo)`: limpia el código, si queda vacío devuelve false, y si no, devuelve si el registro lo encuentra. También es síncrona, porque consultar el registro en memoria es inmediato.  \n- `prepararEstante(codigo)`: es `async` porque construir un estante físico tarda. Limpia, busca; si ya hay un estante, true; si hay una caja en ese sitio, false; si no hay nada, lo construye con `await` y devuelve true. Todo va en try/catch.  \n- `mover Caja(caja, estante)`: es `async`. Valida entradas, prepara el estante con `await`, arma la ruta final, no pisa si ya hay algo y mueve con `await`. En el catch registra y devuelve false.  \nLa lección: las funciones que esperan algo lento son `async` y se llaman con `await`. Si olvidas el `await`, el `true` sale antes de que termine el trabajo y el catch no ve los fallos.\n\n📖 [developer.mozilla.org/es/docs/Learn_web_development/Extensio](https://developer.mozilla.org/es/docs/Learn_web_development/Extensions/Async_JS/Promises)",
+          "fecha": "2026-10-08T03:22:07.354Z"
+        }
+      ],
+      "snippets": [],
+      "bloqueante": false,
+      "estado": "resuelta",
+      "creada": "2026-10-08T03:21:57.878Z",
+      "actualizada": "2026-10-08T03:25:05.005Z",
+      "archivo": "Files.js",
+      "ancla": {
+        "linea": 49,
+        "texto": "exists(rawPath) {",
+        "funcion": "exists"
+      },
+      "tipo": "pregunta",
+      "titulo": "Ejemplo análogo: bodega de paquetes (async + validación)",
+      "origen": "pregunta",
+      "id": "n1",
+      "nivel": 4,
+      "desanclada": false
+    }
+  ]
+}
