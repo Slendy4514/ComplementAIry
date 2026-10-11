@@ -1,8 +1,8 @@
 {
   "name": "complementairy",
   "displayName": "ComplementAIry — tú programas, la IA te acompaña",
-  "description": "Tú programas, la IA te acompaña: plano, piezas, snippets que activas tú y comentarios mientras avanzas. Nunca escribe tu código.",
-  "version": "0.11.0",
+  "description": "ComplementAIry v1: programar con IA sin vibe coding. Tareas con diseño humano, plan sin código, ejecución con restricciones, revisión con evidencia, procedencia por línea y práctica sin IA.",
+  "version": "1.0.0",
   "publisher": "complementairy",
   "license": "MIT",
   "engines": {
@@ -29,6 +29,18 @@
   },
   "contributes": {
     "commands": [
+      {
+        "command": "cai.tarea.pedir",
+        "title": "ComplementAIry: Pedir algo (nueva tarea)"
+      },
+      {
+        "command": "cai.tarea.avanzar",
+        "title": "ComplementAIry: Avanzar la tarea (dice qué falta)"
+      },
+      {
+        "command": "cai.procedencia.alternar",
+        "title": "ComplementAIry: Mostrar u ocultar la procedencia en el margen"
+      },
       {
         "command": "cai.expandir",
         "title": "ComplementAIry: expandir snippet (o elegir uno de la biblioteca)"
@@ -306,6 +318,11 @@
         "key": "ctrl+alt+space",
         "mac": "cmd+alt+space",
         "when": "editorTextFocus"
+      },
+      {
+        "command": "cai.tarea.avanzar",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a"
       }
     ],
     "configuration": {
@@ -356,6 +373,11 @@
           "type": "boolean",
           "default": false,
           "description": "Mostrar las notas también como hilos dentro del código (entre las líneas). Apagado: ícono en el margen + panel Nota, que no quita el foco."
+        },
+        "cai.procedencia": {
+          "type": "boolean",
+          "default": true,
+          "description": "Colorear el margen según la procedencia de cada línea (IA sin revisar, revisada, ajena, pegada)."
         }
       }
     },
@@ -386,6 +408,42 @@
           "light": "#dc2626",
           "highContrast": "#ef4444"
         }
+      },
+      {
+        "id": "cai.iaSinRevisar",
+        "description": "Línea de la IA sin revisar",
+        "defaults": {
+          "dark": "#f14c4c",
+          "light": "#e51400",
+          "highContrast": "#f14c4c"
+        }
+      },
+      {
+        "id": "cai.iaRevisada",
+        "description": "Línea de la IA revisada con evidencia",
+        "defaults": {
+          "dark": "#73c991",
+          "light": "#388a34",
+          "highContrast": "#73c991"
+        }
+      },
+      {
+        "id": "cai.ajenoSinEntender",
+        "description": "Código heredado o ajeno sin entender",
+        "defaults": {
+          "dark": "#cca700",
+          "light": "#bf8803",
+          "highContrast": "#cca700"
+        }
+      },
+      {
+        "id": "cai.pegado",
+        "description": "Pegado o insertado de una vez (origen desconocido)",
+        "defaults": {
+          "dark": "#b180d7",
+          "light": "#652d90",
+          "highContrast": "#b180d7"
+        }
       }
     ],
     "viewsContainers": {
@@ -399,6 +457,16 @@
     },
     "views": {
       "complementairy": [
+        {
+          "type": "webview",
+          "id": "cai.tarea",
+          "name": "Tarea"
+        },
+        {
+          "type": "webview",
+          "id": "cai.comprension",
+          "name": "Comprensión"
+        },
         {
           "type": "webview",
           "id": "cai.nota",
@@ -504,6 +572,94 @@
         },
         {
           "command": "cai.corregir.modulo",
+          "when": "false"
+        },
+        {
+          "command": "cai.guia",
+          "when": "false"
+        },
+        {
+          "command": "cai.predecir",
+          "when": "false"
+        },
+        {
+          "command": "cai.check",
+          "when": "false"
+        },
+        {
+          "command": "cai.limpiar",
+          "when": "false"
+        },
+        {
+          "command": "cai.explica",
+          "when": "false"
+        },
+        {
+          "command": "cai.perfil",
+          "when": "false"
+        },
+        {
+          "command": "cai.panorama",
+          "when": "false"
+        },
+        {
+          "command": "cai.tests",
+          "when": "false"
+        },
+        {
+          "command": "cai.conocimiento",
+          "when": "false"
+        },
+        {
+          "command": "cai.buscarActualizacion",
+          "when": "false"
+        },
+        {
+          "command": "cai.pedirAqui",
+          "when": "false"
+        },
+        {
+          "command": "cai.plano",
+          "when": "false"
+        },
+        {
+          "command": "cai.responderIa",
+          "when": "false"
+        },
+        {
+          "command": "cai.silenciar",
+          "when": "false"
+        },
+        {
+          "command": "cai.ayudaArchivo",
+          "when": "false"
+        },
+        {
+          "command": "cai.notasArchivo",
+          "when": "false"
+        },
+        {
+          "command": "cai.estructura",
+          "when": "false"
+        },
+        {
+          "command": "cai.verPanorama",
+          "when": "false"
+        },
+        {
+          "command": "cai.verEstructura",
+          "when": "false"
+        },
+        {
+          "command": "cai.ideas.mas",
+          "when": "false"
+        },
+        {
+          "command": "cai.objetivos.ver",
+          "when": "false"
+        },
+        {
+          "command": "cai.reiniciar",
           "when": "false"
         }
       ],
@@ -618,8 +774,9 @@
   },
   "scripts": {
     "build": "node scripts/compartido.cjs && tsc -p .",
-    "package": "pnpm build && node scripts/humo.cjs && vsce package --no-dependencies --allow-missing-repository -o complementairy.vsix",
-    "humo": "node scripts/humo.cjs"
+    "package": "pnpm build && node scripts/humo.cjs && node scripts/paneles.cjs && vsce package --no-dependencies --allow-missing-repository -o complementairy.vsix",
+    "humo": "node scripts/humo.cjs",
+    "paneles": "node scripts/paneles.cjs"
   },
   "devDependencies": {
     "@types/node": "20",

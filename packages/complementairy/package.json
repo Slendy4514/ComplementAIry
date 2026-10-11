@@ -1,7 +1,7 @@
 {
   "name": "complementairy",
-  "version": "0.11.0",
-  "description": "ComplementAIry: tú programas, la IA te acompaña con comentarios; nunca escribe tu código.",
+  "version": "1.0.0",
+  "description": "ComplementAIry: programar con IA sin vibe coding. Tareas con diseño humano, plan sin código, ejecución con restricciones, revisión con evidencia, procedencia por línea y práctica sin IA.",
   "type": "module",
   "bin": {
     "complementairy": "dist/cli.js",

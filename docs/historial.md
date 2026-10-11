@@ -468,3 +468,53 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
 - **Documentos:** [planes/plan-C-mezclado.md](planes/plan-C-mezclado.md) (incluye la tabla de cada punto: qué te pide, cómo sugiere la IA y cómo se hace cumplir; casos límite; ejemplos de uso; por qué es más rápido sin deteriorarte), [planes/plan-A-con-proyecto.md](planes/plan-A-con-proyecto.md), [planes/plan-B-desde-cero.md](planes/plan-B-desde-cero.md) y [planes/comparacion.md](planes/comparacion.md).
 - **Crítica dejada por escrito:** abrir la escritura a la IA va contra la investigación del propio proyecto (delegar baja la comprensión). La sostienen las licencias (I.6) y la evidencia por tramo. Hay una puerta dura tras F5: probar con 2–3 personas antes de seguir.
 - **Siguiente paso:** F0 (rama `v1`, selftest partido en vitest por módulo, test de arquitectura).
+
+## v1.0 implementada (2026-10-10/11)
+- **Pedido del usuario:** implementar todo el Plan C y dejar la versión nueva completa. A mitad de camino propuso tres cosas, que se adoptaron:
+  - lo subjetivo (¿es vago?, ¿es demasiado amplio?) no lo deciden regex sino un **modelo chico de decisión**, que puede frenar el pedido antes de que llegue a la IA que delega;
+  - modelos **System One** (Jev de TypeSafe; Ollama `/v1/systemone`), o Haiku si no hay API key;
+  - **OpenCode** configurable, junto a Claude Code.
+- **Diseño resultante, "doble llave":** reglas fijas solo para lo objetivo, y un decisor que escala por incertidumbre (Jev → Ollama → Haiku → Sonnet). El decisor solo puede subir la exigencia, se puede rebatir y se mide con `cai ia evaluar` (acierto y calibración). Evidencia investigada: los números de Jev son del fabricante; un clasificador especializado le ganó en un benchmark; la práctica recomendada es escalar por incertidumbre y medir la calibración aparte.
+- **Hecho:** todo el Plan C. El estado detallado, con los desvíos y lo pendiente, está en `docs/planes/plan-C-mezclado.md` §12. Lo principal:
+  - capas impuestas por test;
+  - tareas, pedidos y entrevista;
+  - procedencia por línea;
+  - evidencia polimórfica;
+  - licencias y katas;
+  - decisiones con matriz, valor esperado y ADR;
+  - pull the plug;
+  - worktrees y agentes con roles;
+  - modelo mental (con traza real);
+  - práctica sin IA y expediente;
+  - MCP propio;
+  - git hooks y CI con SARIF;
+  - paneles Tarea y Comprensión;
+  - migrador.
+- **Prueba real con IA** (copia de demo-ts):
+  - el decisor real escaló de Haiku a Sonnet ante un pedido vago;
+  - Opus planificó sin código y detectó una contradicción del alcance (el test no cabía);
+  - el hook real denegó línea roja, dependencia nueva y `fetch` sin licencia;
+  - una explicación falsa fue rechazada;
+  - commit con `Cai-IA: 13 líneas (13 revisadas)`;
+  - `--no-verify` detectado por `cai ci`.
+- **Defectos que destapó la prueba real (corregidos):**
+  - el alcance extraído por regex incluía lo excluido ("cuota.ts no se toca") → ahora lo extrae la IA chica, validado literal;
+  - "tal cual" daba falso positivo;
+  - la IA veía el título recortado;
+  - "preservar la firma" protegía el cuerpo;
+  - el post-commit anunciaba cierres repetidos;
+  - el código de la IA fuera de tareas no tenía cómo recibir evidencia → `cai revisar --archivo`.
+- **Segunda tanda (terminar el plan):**
+  - **agentes por rol probados con IA real** (tester, implementador, revisor). La prueba destapó que `allowedTools` se salta `canUseTool`: el implementador llegó a editar el test. Ahora cada rol tiene `tools` explícitas y `allowedTools: []`, así que todo pasa por los permisos. Además los agentes reciben el texto de las decisiones vigentes (no solo sus ids) y los archivos que crean quedan atribuidos a la IA;
+  - **los supuestos del plan se agrupan en una sola decisión**: muchas decisiones chicas acostumbran a contestar sin leer (habituación);
+  - **prueba automática de los paneles** (`scripts/paneles.cjs`, también en el CI): VSCode simulado + la CLI real, sin IA. Destapó que lo que la IA chica extraía de una respuesta («solo src/users.ts, el resto no se toca») metía «el resto» como archivo de contexto. Ahora cada nombre se valida sin IA: aparece literal y es una ruta, un identificador, algo que existe o una función del índice;
+  - verificación: 278 pruebas de vitest + 209 escenarios + humo + paneles, en verde.
+- **Incidente durante la reestructuración:** un script de movimiento vació los archivos de test nuevos (abría para escribir antes de leer) y reescribió un string de `selftest.ts` que parecía un import. Los tests se reconstruyeron desde la sesión, se verificaron los strings contra git, y la herramienta de refactor se rehízo para leer todo antes de escribir y tocar solo imports reales.
+- **Para el usuario:**
+  - recorrer los paneles a mano en VSCode (la prueba automática cubre lo que dibujan y sus botones, no cómo se ven);
+  - probar Jev cuando tenga acceso a su API;
+  - la prueba con 2–3 personas antes de seguir (puerta tras F5);
+  - `cai init --solo-claude` en este repo y en sus proyectos;
+  - `cai migrar --aplicar` en los proyectos v0.11;
+  - conseguir acceso a Jev si quiere el decisor System One en la nube.
+- Pruebas: 278 de vitest + 209 escenarios + humo + paneles.

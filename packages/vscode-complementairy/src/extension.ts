@@ -12,6 +12,9 @@ import { Rapidas } from "./rapidas";
 import { BarraModo, Estado } from "./estado";
 import { NotasView } from "./notasView";
 import { Panel } from "./panel";
+import { TareaView } from "./tareaView";
+import { ComprensionView } from "./comprensionView";
+import { Procedencia } from "./procedencia";
 
 /**
  * Capa sobre la CLI `cai`: notas en la línea exacta (hilos con botones), panel "Siguiente paso",
@@ -96,6 +99,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
   ctx.subscriptions.push(panel.onPasos((p) => barra.siguiente(p[0])));
   new NotaPanel(notas).registrar(ctx);
   new ChatView().registrar(ctx);
+  // v1: la tarea de punta a punta, lo que no revisó un humano y la procedencia en el margen.
+  new TareaView().registrar(ctx);
+  new ComprensionView().registrar(ctx);
+  new Procedencia().registrar(ctx);
   registrarInicio(ctx);
   void avisarInstruccionesViejas();
 

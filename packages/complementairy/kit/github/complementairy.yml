@@ -1,17 +1,26 @@
-# ComplementAIry en CI: repite las verificaciones deterministas y rechaza comentarios de conversación olvidados.
+# ComplementAIry en CI (tercera barrera): recalcula la procedencia desde el repo (si alguien usó --no-verify
+# u otra IA, se ve acá), repite las verificaciones deterministas y publica lo no revisado como SARIF.
 # Requiere la variable de repositorio CAI_PKG con la URL del paquete, p. ej.:
 #   https://github.com/Slendy4514/ComplementAIry/releases/latest/download/complementairy.tgz
 name: cai
 on: [push, pull_request]
+permissions:
+  contents: read
+  security-events: write
 jobs:
   cai:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: corepack enable && pnpm install --frozen-lockfile
         if: hashFiles('pnpm-lock.yaml') != ''
       - run: npm i -g ${{ vars.CAI_PKG }}
       - run: cai guia check
+      - run: cai ci --sarif cai.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('cai.sarif') != ''
+        with: { sarif_file: cai.sarif }
       - run: cai gate

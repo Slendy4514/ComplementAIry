@@ -134,7 +134,7 @@ export class Rapidas implements vscode.Disposable {
   registrar(ctx: vscode.ExtensionContext): void {
     // Precalentar: si el proyecto usa notas y sugerencias rápidas, el proceso arranca ya.
     const cwd = root(vscode.window.activeTextEditor?.document);
-    if (cwd && vista(cwd) === "notas" && leerConfig(cwd).rapidas?.activas !== false) this.servidor(cwd)?.precalentar();
+    if (cwd && vista(cwd) === "notas" && leerConfig(cwd).rapidas?.activas === true) this.servidor(cwd)?.precalentar();
     ctx.subscriptions.push(
       this,
       vscode.window.onDidChangeTextEditorSelection((e) => this.programar(e.textEditor)),
@@ -190,7 +190,7 @@ export class Rapidas implements vscode.Disposable {
     const cwd = root(doc);
     if (!cwd || doc.uri.scheme !== "file" || vista(cwd) !== "notas" || silenciado() || !tieneCai(cwd)) return;
     const cfg = leerConfig(cwd).rapidas ?? {};
-    if (cfg.activas === false) return;
+    if (cfg.activas !== true) return; // II.3: nada aparece mientras tecleas salvo que lo actives (a pedido: Ctrl+Alt+Espacio)
     const turno = this.turno;
     this.timer = setTimeout(() => void this.pedir(ed, cwd, turno), Math.max(600, cfg.esperaMs ?? 1200));
   }

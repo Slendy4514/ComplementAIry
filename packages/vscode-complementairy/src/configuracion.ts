@@ -50,7 +50,7 @@ function inicial(c: ConfigProyecto, enLinea: boolean): Record<string, string | b
     modo: c.modo ?? "sugerir",
     procesoAbierto: c.rapidas?.procesoAbierto !== false,
     ayuda: c.ayuda?.porDefecto ?? "auto",
-    rapidas: c.rapidas?.activas !== false,
+    rapidas: c.rapidas?.activas === true,
     rapidasEspera: String((c.rapidas?.esperaMs ?? 1200) / 1000),
     soloConNota: c.rapidas?.soloConNota === true,
     alSalir: c.revisar?.alSalir ?? "nunca",
@@ -161,7 +161,7 @@ ${fila("Repertorio: guardar", chk("repGuardar", c.repertorio?.guardar !== false)
 ${fila("Repertorio: usar", sel("repUsar", c.repertorio?.usar ?? "preguntar", [["preguntar", "Preguntar (te muestra lo parecido y eliges)"], ["siempre", "Siempre (lo que ya hiciste va en pasos más grandes)"], ["nunca", "Nunca"]]), "En modo programar, lo que ya hiciste antes va en pasos más grandes y se puede proponer tu versión adaptada (como diff).")}
 <h2>Ayuda</h2>
 ${fila("Al preguntar, dame", sel("ayuda", c.ayuda?.porDefecto ?? "auto", [["auto", "Según mi nivel (automático)"], ["pista", "💡 Una pista"], ["piezas", "🧩 Las piezas (funciones/APIs)"], ["pseudo", "📝 Pseudocódigo"], ["ejemplo", "🔁 Un ejemplo análogo"]]), "Lo que responde cuando preguntas sin pedir un escalón. Siempre puedes pedir otro con los botones o \"no entiendo\" para subir uno.")}
-${fila("Guía mientras escribes", chk("rapidas", c.rapidas?.activas !== false), "Texto gris al final de la línea del cursor: qué sigue o qué está mal ahí. Se actualiza en cada pausa. No se inserta nada.")}
+${fila("Guía mientras escribes", chk("rapidas", c.rapidas?.activas === true), "Apagada por defecto (II.3 del manifiesto: las sugerencias constantes interrumpen tu razonamiento). A pedido: Ctrl+Alt+Espacio. Encendida: texto gris en cada pausa, sin insertar nada.")}
 ${fila("Proceso de Claude Code abierto", chk("procesoAbierto", c.rapidas?.procesoAbierto !== false), "Mantiene Claude Code arrancado para las sugerencias rápidas: ~1 s y ~US$0,002 cada una (sin él, ~20 s). Si falla, se usa la llamada normal.")}
 ${fila("Pausa antes de guiar (s)", numero("rapidasEspera", (c.rapidas?.esperaMs ?? 1200) / 1000, 0.2), "Segundos sin escribir antes de actualizar la guía de la línea.")}
 ${fila("Solo en funciones con nota", chk("soloConNota", c.rapidas?.soloConNota === true), "Apagado: te guía en cualquier función (en las que tienen nota, siguiendo sus pasos).")}

@@ -47,6 +47,15 @@ A y B usan la numeración vieja del manifiesto (cada uno trae la equivalencia). 
 4. **Primero piensas, después ves** (Buçinca 2021): tu diseño, tus criterios, tus bordes y tus predicciones van antes de lo de la IA.
 5. **Defensa en capas:** hooks de Claude Code, git hooks y CI. Si no se sabe algo, se bloquea.
 6. **Estricto siempre, sin habituación:** la evidencia es variada (polimórfica), las unidades son chicas, y cuando aparecen señales de piloto automático se **endurece**, no se afloja.
+7. **Lo subjetivo lo decide un decisor chico; las reglas fijas solo lo objetivo** (idea del usuario).
+   - **Qué es subjetivo:** si un pedido, una orden o una respuesta es vago; si es **demasiado amplio** para delegarlo; cuántos temas trae un pedido; si una explicación explica de verdad el tramo. Primero lo decide un **decisor rápido** (rol `decidir`):
+     - un modelo "System One" como **Jev** (TypeSafe, `POST /v1/systemone`: estado + preguntas tipadas → probabilidades), en la nube o local con **Ollama** (`/v1/systemone`);
+     - si no hay API key, **Haiku** vía Claude Code.
+   - **Escala según la incertidumbre:** si el decisor está seguro, se aplica; si duda, pasa a un modelo mayor; si sigue la duda, se te pregunta. Un pedido llega a la IA que delega **solo después** de pasar este filtro.
+   - **Qué queda en reglas fijas:** lo objetivo, que no se puede engañar: entrada vacía, "sí"/"dale" a secas, copia literal de la sugerencia (n-gramas) e identificadores que no existen. Esas reglas son un piso: el decisor no puede aprobar algo que ellas rechazaron.
+   - **Si el decisor te rechaza,** puedes rebatirlo con tus palabras. Queda registrado y alimenta `cai ia evaluar`, que mide acierto **y calibración** por separado.
+   - **Si no hay ningún decisor disponible,** se usan las heurísticas, marcadas "sin decisor".
+   - **Motores configurables por rol:** Claude Code (por defecto), **OpenCode** (`opencode run -m proveedor/modelo`), endpoints compatibles con OpenAI y la API de Anthropic.
 
 ### 4.2 Arquitectura
 Paquete `packages/complementairy/src/`:
@@ -109,6 +118,57 @@ borrador ─(diseño humano válido)→ diseñada ─(plan IA sin código)→ pl
 - **`ejecutor`:** `humano`, `pasos` (el construir.ts de hoy, con tus órdenes) o `agente` (Claude Code o el SDK dentro del alcance; opcionalmente en un worktree).
 - **`cai avanzar`** evalúa las guardas (funciones puras) y dice **exactamente qué falta**.
 - **La sesión queda ligada a la tarea** en SessionStart. Los Pre/Post de Edit aplican alcance, `preservar`, sin dependencias, presupuesto de líneas, líneas rojas, licencias y "no tocar tus líneas".
+
+### 4.3b Entrada: objetivos, foco de hoy, pedidos separados y entrevista de restricciones
+Antes de que exista una tarea, `cai` necesita saber **qué buscas** (en general y hoy), **qué pediste** (sin perder nada) y **con qué restricciones**.
+
+**1. Objetivos generales.** Se conserva `entender.ts`, que guarda `.cai/objetivos.json` y `objetivos.md` con: qué busca el proyecto, para quién es, criterios de terminado, restricciones globales y lo que queda fuera del alcance.
+- Confirmarlos y reabrirlos lo hace solo el humano.
+- Cada tarea se liga a un objetivo (campo `objetivo`).
+- Si pides algo fuera de alcance, la IA te lo dice y se abre una decisión: ampliar el alcance o descartarlo.
+
+**2. Foco de hoy** (`.cai/sesiones/<fecha>.json`).
+- La primera vez en el día que quieras usar la IA, escribes en una frase qué buscas hoy, o eliges tareas pendientes por su id.
+- Al cerrar (`cai sesion`) se compara de forma determinista lo que te propusiste con lo que se hizo, lo que quedó pendiente y lo que apareció en el camino.
+- `cai hoy` te muestra el foco, lo pendiente de ayer y los temas olvidados.
+
+**3. Pedidos separados, sin que se olvide nada** (`.cai/pedidos/<id>.json`). Si un pedido mezcla varias cosas, `AMPLIO` ya no lo rechaza: ofrece separarlo.
+- **Qué se guarda:** el **texto original literal** del pedido y, por cada tema, el **fragmento exacto** del texto que lo originó, la tarea creada (o "descartado porque…", con tus palabras) y su estado.
+- **Cobertura determinista:**
+  - cada fragmento tiene que ser un trozo real del texto, así que la IA no puede inventar temas;
+  - lo que no quedó asignado a ninguna tarea se resalta para que lo asignes o lo descartes.
+- **Ningún tema se olvida:** un pedido no se cierra mientras tenga temas sin destino. `cai avanzar`, `cai hoy` y el panel te recuerdan, por ejemplo: "p4: 1 tema sin empezar hace 5 días".
+- **Rastro:** se ve qué se tocó y cuándo. Por ejemplo: `p4: "exportar a PDF" → t11 ✔ cerrada (commit a1b2) · "buscador se cuelga" → t12 ⏳ en revisión · "color tema oscuro" → t13 ○ borrador`. Los commits llevan el trailer `Cai-Pedido: p4`.
+- **Choques:** si dos tareas tocan los mismos archivos, el sistema lo detecta y te pide decidir: hacerlas en orden, o en paralelo con un worktree cada una.
+- **Ajustes:** puedes unir, quitar o reescribir tareas con tus palabras. Cada una debe pasar sola las guardas de especificidad, y si queda vaga, se te pregunta antes de crearla.
+
+**4. Entrevista de restricciones** (antes de `diseñada`).
+- **Cómo pregunta:** de a una. La IA **sugiere** cada respuesta con su porqué, y tú contestas con tus palabras.
+- **Restricciones comunes una sola vez:** las que valen para todo el pedido (por ejemplo, "sin dependencias nuevas") se preguntan una vez, para que no se vuelva repetitivo.
+- **Lo que pregunta depende del tipo de tarea:**
+
+  | Tipo | Qué pregunta |
+  |---|---|
+  | Funcionalidad | archivos que puede tocar, dependencias, qué no cambiar (`preservar`), cómo sabremos que funciona (criterio verificable) y, si toca algo sensible, seguridad |
+  | Bug | cómo reproducirlo, tu hipótesis primero, alcance y el test que lo demuestra |
+  | UI | captura, alcance y comportamiento esperado |
+  | Refactor | qué no puede cambiar y qué tests deben seguir pasando |
+
+- **Cuestionar:** en cualquier pregunta puedes repreguntar ("¿por qué no puppeteer?"). Todo queda en el **diálogo de la tarea**.
+- **Compuerta determinista:** la tarea no pasa a `diseñada` sin todas las respuestas, escritas por ti (la IA no puede contestarlas: `confirmar.ts` + `soloHumano`).
+- **Qué se hace con cada respuesta:** se convierte en una regla que se hace cumplir (alcance → hook; "sin deps" → diff de `package.json`; `preservar` → huella) o en una decisión con tu porqué.
+- **En la reconstrucción semanal** (4.8):
+  - el enunciado se arma con esas restricciones y decisiones;
+  - los bordes que la IA vio y tú no pasan a ser casos ocultos del oráculo;
+  - tus "¿por qué?" vuelven en la reflexión final.
+
+**5. Si eres vago, o contestas "sí, dale".** Se valida sin IA, con la misma familia de guardas de `ordenValida`:
+- **Se rechaza la aprobación vacía:** "sí", "dale", "ok", "lo que digas", "como sugieres", "haz eso", "todo eso", "lo de arriba". La copia de la sugerencia también (`copiado` ≥ 0,5).
+- **Lo que vale:** la respuesta tiene que **decir el contenido** (nombrar la carpeta, la opción, el valor) con tus palabras. Corto está bien: `src/export/, el comando lo registro yo` pasa; `sí` no.
+- **El rechazo explica qué falta.** Ya se resolvieron los falsos positivos de v0.11: el "si" condicional no se lee como "sí", y se arregló el `\b` después de una tilde.
+- **Pedidos vagos** ("mejora el buscador"): no se crea la tarea hasta que nombres qué (archivo, función, comportamiento). La IA te ayuda con preguntas, no adivinando (IV.3).
+- **Señales de pereza medidas:** respuestas mínimas repetidas, mucha similitud entre tus respuestas o segundos de lectura menores que el largo del texto. Cuando aparecen, se **endurece**: pide el porqué y exige nivel 3 en la revisión de esa tarea.
+- **Escribir a mano nunca se bloquea:** si no quieres contestar, puedes escribir el código tú. Lo que no se puede es delegar sin pensar.
 
 ### 4.4 Procedencia y "no revisado por humano"
 - **Por tramos**, con la estructura de A: los orígenes de A más `ia-probable` de B, que marca las inserciones multilínea que no son pegado (Copilot y similares).
@@ -256,6 +316,35 @@ Todo lo que hoy te ayuda cuando escribes algo mal, o cuando algo se te pasa, **s
 - Lo que bloquea el commit son las verificaciones deterministas (tipos, lint, tests, reglas, detectores sin justificar), y valen para todos por igual.
 - La evidencia de comprensión se exige solo para lo que **no escribiste tú**.
 
+### 4.10 Expediente del programador (lo que sabes, entre proyectos)
+Es global, vive en `~/.cai/` (volumen que sobrevive al rebuild) y queda en archivos que puedes leer. Junta lo que hoy está repartido entre `perfil.json`, `patrones.json` y `repertorio/`. Todo sale de **evidencia, sin IA**; lo que declares tú se muestra aparte y nunca sube tu nivel por sí solo.
+
+| Archivo | Qué guarda | De dónde sale |
+|---|---|---|
+| `expediente/licencias.json` | Construcciones que dominas (I.6), con su fecha de último uso | Lo que escribiste a mano y quedó en verde, y las katas |
+| `expediente/dominios.json` | Nivel por dominio (TS, SQL, React, regex, Docker…) | Aciertos de predicción, resultados de revisión, katas y reconstrucciones (el ajuste por eventos de `profile.ts`, ampliado) |
+| `expediente/calibracion.json` | Seguridad declarada frente a acierto real, por dominio | Revisiones y repasos |
+| `patrones.json` | Errores frecuentes | Lo que más te corrigen (ya existe) |
+| `expediente/proyectos.json` | Por proyecto: nombre, stack, fechas, % de código tuyo, dominios usados, licencias ganadas ahí, qué aprendiste | Se actualiza al cerrar cada sesión |
+| `expediente/practica.json` | Katas, repasos y reconstrucciones: fecha, resultado y qué cambió | Las propias katas, repasos y reconstrucciones |
+| `repertorio/` | Tus funciones en verde, reutilizables entre proyectos | Ya existe; es un repo git propio |
+
+**En cada proyecto** queda lo aprendido ahí: `.cai/evidencias/` (va al repo) y un resumen en `expediente/proyectos.json`.
+
+**Para qué se usa:**
+- **Al empezar un proyecto nuevo** (`cai init`): carga tus reglas globales y tus licencias vigentes. Así no te pide una kata de algo que ya dominas en otro proyecto.
+- **Ajusta la ayuda** a tu nivel real (reversión de la pericia): en lo que dominas, la evidencia es una sola predicción; en lo nuevo, tareas `aprender`, la escalera y katas.
+- **Decide qué puede delegarse** (licencias) y dónde `producir` queda limitado (II.1).
+- **`cai yo`** muestra el expediente, por ejemplo: "SQL ▲ (3 licencias nuevas) · regex ▼ (2 predicciones falladas) · 4 proyectos · React en 3". También aparece en el informe semanal.
+- **`cai yo exportar` / `importar`** lo lleva a otra máquina. El repertorio ya se puede subir como repo git.
+
+**Decaimiento (honestidad):** haberlo hecho antes no garantiza recordarlo.
+- Una licencia sin uso en N semanas pasa a "por repasar", y `cai repaso` la vuelve a pedir.
+- Una predicción fallida en una construcción la revoca hasta otra kata.
+- Sin esto, el expediente terminaría diciendo que sabes cosas que ya olvidaste.
+
+**Privacidad:** es local. Nada sale de tu máquina salvo que lo exportes tú.
+
 ---
 
 ## 5. Lo nuevo del manifiesto (I.6 y II) en C
@@ -318,7 +407,7 @@ Columna **D**: **D** = determinista (parser, AST, git, tests, ejecución, contad
 ### IV. Prompting y modelos
 | Punto | Qué te pide / te da el programa | Cómo sugiere la IA | Cómo se hace cumplir | D |
 |---|---|---|---|---|
-| IV.1 Especificidad extrema | Tus pedidos y órdenes nombran qué (campo, endpoint, componente) | Sus sugerencias también son específicas: archivo, función, campo. Nunca "mejora esto" | Guardas sin IA (`ordenValida`, `VAGO`, `AMPLIO`, identificadores del índice) en el diseño, las órdenes y el chat (linter en UserPromptSubmit, con una reescritura sugerida). A sus sugerencias se les aplica el mismo filtro: una vaga se pide de nuevo | D |
+| IV.1 Especificidad extrema | Tus pedidos y órdenes nombran qué (campo, endpoint, componente) | Sus sugerencias también son específicas: archivo, función, campo. Nunca "mejora esto" | Guardas sin IA (`ordenValida`, `VAGO`, `AMPLIO`, identificadores del índice) en el diseño, las órdenes y el chat (linter en UserPromptSubmit, con una reescritura sugerida). A sus sugerencias se les aplica el mismo filtro: una vaga se pide de nuevo. Un pedido con varias cosas se separa en tareas, con cobertura del texto original (4.3b) | D |
 | IV.2 Contexto explícito | Declaras `contexto[]` en el diseño (archivos o símbolos) | Trabaja con eso y dice "me falta ver X", en vez de buscar a ciegas | El ejecutor recibe solo el contexto + el mapa; las lecturas fuera de él se cuentan y se muestran | D |
 | IV.3 Prohibido adivinar | Respondes las ambigüedades | Ante la duda **no supone**: da 2 opciones con pros y contras | Esquema: `ambiguedades[]` con exactamente 2 opciones → una decisión pendiente; no se aprueba con pendientes. Una sugerencia que dice "supongo…" sin opciones se rechaza. El Stop deniega tocar símbolos que no están en el plan | D |
 | IV.4 Apoyo visual | En una tarea de UI adjuntas una captura (o escribes por qué no hace falta) | Pide la captura en vez de imaginar la pantalla | UI (por extensión) o léxico visual en el pedido → falta la captura en `adjuntos/`, no avanza | D |
@@ -335,7 +424,7 @@ Columna **D**: **D** = determinista (parser, AST, git, tests, ejecución, contad
 | V.2.2 Flujo de datos, funciones, integración, retos | — | Los incluye todos | El esquema exige `flujoDeDatos`, `funcionesClave`, `integracion`, `retos`, `archivos` y `comoProbar` | D |
 | V.2.3 "No escribas código todavía" | — | Solo pasos prácticos | La instrucción va literal; `guard.ts` rechaza código y vuelve a pedir | D |
 | V.2.4 Dos opciones con pros y contras | Eliges tú (matriz o EV si es importante) | Presenta 2 opciones concretas | Esquema + `cai decidir` (pesos antes de ver, puntajes tuyos, sensibilidad) | D |
-| V.3 Ejecución con restricciones | Fijas el alcance; escribes la paráfrasis del plan | Implementa **exactamente** el plan, con instrucciones para probarlo | Hook: alcance, sin dependencias, `preservar`, presupuesto, licencias, líneas rojas; `comoProbar[]` → gate | D |
+| V.3 Ejecución con restricciones | Respondes la **entrevista de restricciones** (4.3b) con tus palabras; escribes la paráfrasis del plan | Sugiere cada restricción con su porqué y la respeta; implementa **exactamente** el plan, con instrucciones para probarlo | Hook: alcance, sin dependencias, `preservar`, presupuesto, licencias, líneas rojas; `comoProbar[]` → gate | D |
 | V.4.1 Revisión rigurosa | Revisas por tramos chicos con evidencia variada | Te muestra el tramo y su porqué, nunca un "Aceptar" | Nivel ≥ 2 por tramo; evidencia polimórfica; se endurece ante señales de piloto automático; límite de 2 tareas en revisión | D+P |
 | V.4.2 Preguntas críticas ("¿por qué este patrón? ¿bordes? ¿rendimiento?") | Escribes **primero** tus bordes y el impacto en rendimiento | Responde las tres preguntas y se muestra la diferencia con las tuyas | Sin tus listas no hay nivel 2 (interrogatorio "decidir antes de ver") | D+P |
 | V.4.3 Editas tú y la IA refactoriza alrededor | Editas a mano lo que quieras (nivel 4) | Se adapta a tus cambios sin tocarlos | El hook deniega a la IA editar líneas `humano` de la tarea; `cai tarea refactorizar` | D |
@@ -375,12 +464,12 @@ Cada fase se cierra con `pnpm build && pnpm test && node dist/cli.js selftest` e
 | **F1** | Capas (`nucleo/proyecto/garantias/ia/flujos/cli`), cortar las 3 violaciones, `comandos.ts` → tabla. `ia/proveedores` + roles + `falso` + `openaiCompatible` (Ollama) + `cai ia evaluar` | Test de arquitectura activo; hook ≤ 100 ms medido; prueba real Haiku vs. Ollama en "clasificar" |
 | **F2** | Almacén v1 con esquemas; reglas global/proyecto/ruta con precedencia; compilación a CLAUDE.md y `.claude/rules`; esqueleto de `cai migrar --simular` | vitest por esquema; JSON dañado; tabla de precedencia (las líneas rojas solo por unión) |
 | **F3** | **Procedencia**: `diffLineas`, tramos, Pre/Post de Edit (agregar el matcher en `init.ts`), guardado de la extensión, `adoptar`, pre-commit + merge driver, `cai informe` + gutter | Propiedades con fast-check (editar, mover y borrar al azar no pierde ni inventa atribución); sesión real de Claude Code editando |
-| **F4** | **Tareas**: `nucleo/flujo.ts`, `cai avanzar`, diseño con guardas, plan sin código, decisiones (matriz/EV/sensibilidad) + ADR, aprobación con paráfrasis, intención, licencias + kata (I.6), hooks SessionStart/UserPromptSubmit/Stop | Tabla de transiciones; escenarios `[seg]`: la IA edita sin plan, fuera del alcance, agrega deps, toca `preservar`, usa una construcción sin licencia |
+| **F4** | **Tareas**: objetivos y foco de hoy, pedidos separados con cobertura (`.cai/pedidos/`), entrevista de restricciones por tipo, validación contra "sí, dale", `nucleo/flujo.ts`, `cai avanzar`, diseño con guardas, plan sin código, decisiones (matriz/EV/sensibilidad) + ADR, aprobación con paráfrasis, intención, licencias + kata (I.6), hooks SessionStart/UserPromptSubmit/Stop | Tabla de transiciones; escenarios `[seg]`: la IA edita sin plan, fuera del alcance, agrega deps, toca `preservar`, usa una construcción sin licencia; "sí"/"dale" rechazados; ningún tema de un pedido queda sin destino |
 | **F5** | **Revisión y comprensión**: niveles 2–4, polimorfismo, interrogatorio, "refactorizar alrededor", Kernighan, calibración, señales de habituación, WIP | Una copia de la IA se rechaza; una predicción fallida no cuenta; prueba real en `examples/demo-ts` |
 | **Puerta** | **Prueba con 2–3 personas** antes de seguir | Tiempo por etapa, abandonos, cobertura de comprensión |
 | **F6** | Detectores de V.5, benchmarks de escalabilidad, mutación por fan-in, roles tester e implementador | Fixtures positivas y negativas con race, debounce y caché |
 | **F7** | Detector de bucle, checkpoints, `cai volver`, worktrees, tablero, `cai git` | Un `falso` que oscila; worktree real |
-| **F8** | Mapa, tarjetas, recorrido + traza, repaso, reconstrucción, bitácora propia | Repo ajeno real en `examples/heredado/` |
+| **F8** | Mapa, tarjetas, recorrido + traza, repaso, reconstrucción (enunciado y oráculo desde la entrevista), bitácora propia, **expediente del programador** (`cai yo`, exportar e importar, decaimiento) | Repo ajeno real en `examples/heredado/` |
 | **F9** | Superficie final: CLI de ~12 comandos, extensión con 2 paneles, guía solo a pedido (II.3), `cai-mcp`, catálogo y política MCP, regex de ramas, CLAUDE.md ≤ 40 líneas | `scripts/humo.cjs` + recorrido manual |
 | **F10** | `cai migrar` final (respaldo `.cai.v0-<fecha>/`, idempotente, reporte), docs, release v1.0, estudio de eficacia | Fixtures congeladas de `examples/demo-ts` y `examples/obsidian-files` |
 
@@ -426,6 +515,8 @@ Cada solución mantiene la exigencia **estricta**. Ninguna afloja una compuerta:
 | **Código de UI difícil de predecir** | Evidencia visual: una captura antes/después + tu descripción de lo que cambia + la predicción de un estado (props → qué se ve). Más adelante, Playwright |
 | **Kata "trampa"** (trivial, solo para ganar la licencia) | La kata debe pasar **tu** caso y un caso oculto generado al azar, verificado ejecutando. Además debe usar la construcción que se licencia (lo comprueba tree-sitter) |
 | **Una compuerta da un falso positivo** | Toda denegación ofrece "no aplica porque…": con tus palabras y guardas, se registra como **decisión** (visible y retractable). `cai reglas --estadisticas` muestra qué regla se salta más, y ajustar el umbral es una decisión humana registrada. Precisa, no floja |
+| **Contestas "sí, dale" o "lo que digas"** | Se rechaza sin IA: la respuesta tiene que nombrar el contenido con tus palabras (corto vale). Si se repiten respuestas mínimas, se endurece. Escribir a mano sigue libre (4.3b) |
+| **Pides 3 cosas a la vez** | Se separan en 3 tareas ligadas a un pedido que guarda el texto literal. Ningún tema se cierra sin destino, y cada uno muestra su tarea, su estado y su commit (4.3b) |
 | **La IA dice "ambiguo", pero te da igual** | Se permite la opción "cualquiera, porque…" como decisión registrada. No se adivina en silencio |
 | **Dos tareas sobre el mismo archivo** | Al aprobar se detecta el solapamiento de alcances: se pide una decisión (secuenciar, o un worktree cada una) |
 | **Pregunta rápida a la IA sin tarea** | Sesión sin tarea = **modo exploración**: la IA lee, explica y responde. Escribir código está denegado. Las conversaciones siguen siendo cortas (umbral de turnos) |
@@ -544,7 +635,24 @@ Pides `!pista` sobre lo del negativo, lo corriges tú y pruebas "¿quedó lista?
 ```
 Lo agregas, queda 🟢 y la nota se cierra. El detector de V.5 no encontró nada. Todo es tuyo: no te pide evidencia, y la bitácora registra que lo resolviste por tu cuenta.
 
-### Ejemplo 7: el informe semanal
+### Ejemplo 7: pides 3 cosas a la vez
+```
+Tú:  agrega exportar a PDF, arregla que el buscador se cuelga y cambia el color del tema oscuro
+IA:  Veo 3 temas. Pedido p4:
+       t11 "exportar a PDF"            funcionalidad
+       t12 "buscador se cuelga"        bug (probable debounce, V.5)
+       t13 "color del tema oscuro"     UI (pedirá captura)
+     t11 y t12 tocan src/notas/indice.ts → ¿en orden o en paralelo?  ¿Por cuál empezamos?
+Tú:  primero el buscador, después PDF, el color al final
+IA:  Común a las 3: ¿"sin dependencias nuevas"? Sugiero que sí, porque…
+Tú:  sí
+cai: ✘ "sí" no dice qué. Escríbelo con tus palabras (ej.: "sin deps salvo PDF, que lo decido ahí").
+Tú:  sin dependencias, salvo PDF que lo decido en su tarea
+IA:  t12 (1/4) Bug: ¿cómo lo reproduces? Y antes de que te diga la mía: ¿tu hipótesis?
+```
+Días después, `cai hoy` muestra: `p4: t12 ✔ (commit 9f3e) · t11 ⏳ en revisión · t13 ○ sin empezar hace 4 días`.
+
+### Ejemplo 8: el informe semanal
 ```
 $ cai informe --semana
 Tareas cerradas 9 (5 producir · 4 aprender)  ·  tiempo medio 41 min (semana 1: 63 min)
@@ -606,3 +714,45 @@ Pendiente: reconstrucción semanal (candidatas: slugNota, validarCupon, debounce
   5. `cai mapa --recorrido` en `examples/heredado/`.
 - Que `--no-verify` falle en CI.
 - Al cerrar: actualizar `docs/historial.md` y hacer el respaldo (`cp -r ~/.claude/projects ~/.claude/plans .claude-backup/`).
+
+---
+
+## 12. Estado de la implementación
+*(2026-10-11. Verificación: `pnpm build && pnpm test && node dist/cli.js selftest` → 278 pruebas de vitest (capas, núcleo, flujo, plan, extra y los escenarios por área) + 209 escenarios del selftest, en verde. La extensión compila y pasa la prueba de humo y la de paneles (`scripts/paneles.cjs`: los paneles Tarea y Comprensión con un VSCode simulado y la CLI real, sin IA). Prueba real con IA en una copia de `examples/demo-ts`: ver `docs/design.md` → v1.)*
+
+| Parte del plan | Estado | Notas |
+|---|---|---|
+| Capas `nucleo/proyecto/garantias/ia/flujos/cli` + test de arquitectura | ✅ | Los 74 módulos de v0.11 se reubicaron. Fusiones: `context`+`contexto`, `plano`+`planoArchivo`, `verify`→`nucleo/soloComentarios`; la guía en `flujos/guia/`, con una entrada única `guiar(pedido, canal)` que usan la CLI y `cai servir` |
+| Motores por rol (Claude Code, OpenCode, Anthropic, OpenAI-compatible), privacidad y presupuesto semanal | ✅ | `cai ia` |
+| Decisor System One con escalada, caché y `cai ia evaluar` (acierto + Brier) | ✅ / ⚠️ | Haiku y Sonnet probados de verdad. Jev se integró según su contrato publicado, **sin probarlo con la API real** (acceso por lista de espera) |
+| Doble llave (reglas para lo objetivo, decisor para lo subjetivo, rebatir, `cai reglas --estadisticas`) | ✅ | |
+| Pedidos separados con cobertura, entrevista por tipo, objetivos, foco del día y un solo "qué sigue" | ✅ | `cai siguiente` y el panel incluyen las tareas v1 y los temas sin destino. Los supuestos del plan se agrupan en **una** decisión (muchas decisiones chicas acostumbran a contestar sin leer). Lo que la IA chica extrae de tus respuestas se valida sin IA: aparece literal y es un nombre real («el resto» no es un archivo) |
+| Tarea: estados, `cai avanzar`, plan sin código (con capturas), disparadores con ADR, aprobación con paráfrasis | ✅ | Sin reglas globales ni secciones obligatorias, no se aprueba |
+| Ejecución con restricciones (alcance, línea roja, dependencias, `preservar` firma/cuerpo, tus líneas, presupuesto, licencias) | ✅ | |
+| Procedencia por línea (formato, merge driver, adoptar, pegado, `ia-probable`, inserciones con tu clic), informe, SARIF | ✅ | |
+| Revisión con evidencia polimórfica (explicación, bordes, predicción con seguridad obligatoria, mutante, visual), Kernighan, calibración, habituación, WIP | ✅ | `--tarea` y `--archivo`; predicciones aisladas si la función no se exporta |
+| Pruebas: detectores V.5, escalabilidad medida y **tus criterios ejecutados** antes de "probada" | ✅ | |
+| Refactor mecánico con herramienta determinista (`cai renombrar`, origen `herramienta`) | ✅ | |
+| Licencias (I.6), katas, repaso, reconstrucción semanal con oráculo, expediente (`cai yo`), bitácora | ✅ | |
+| Pull the plug: señales, desconexión, checkpoints, `cai volver` | ✅ | |
+| Worktrees, tablero, agentes con roles (`canUseTool`), git en lenguaje natural con dry-run | ✅ | Agentes tester, implementador y revisor probados con IA real: el tester no lee la implementación, el implementador no toca los tests (su md5 no cambió), el revisor solo lee. Lo que destapó la prueba: `allowedTools` se saltaba `canUseTool` (ahora `tools` + `allowedTools: []`), los agentes solo veían los ids de las decisiones (ahora el texto), y los archivos nuevos quedaban como «desconocido» |
+| Modelo mental: mapa, tarjetas que caducan (su predicción se ejecuta), recorrido, traza real (cobertura V8) | ✅ | |
+| Hooks v1, aviso de modelo por fase, git hooks, CI, MCP propio, catálogo MCP | ✅ | |
+| CLAUDE.md v1, skills `cai` y `cai-tarea`, workflow de CI | ✅ | |
+| Extensión: paneles Tarea y Comprensión, procedencia en el margen, guía solo a pedido, 14 comandos visibles | ✅ | Prueba de humo + prueba de paneles en el CI (dibujan; «sí» se rechaza; la explicación de relleno se rechaza; sin seguridad no se ejecuta la predicción; con ella se ejecuta y queda evidencia de nivel 3; las 6 pestañas de Comprensión). Falta el recorrido a mano en VSCode |
+| Intención de la tarea → ayuda en su alcance (II.5) | ✅ | "aprender" → escalera sin código; ejecutor "pasos" → construir juntos |
+| Migrador `cai migrar` | ✅ | Probado en `examples/demo-ts` |
+
+**Lo que quedó distinto del plan, a propósito:**
+- **Los modos, la vista y el chat aparte se conservan** (eran del Plan A, no del C). Plan C 4.9 conserva el acompañamiento. En v1 la intención de cada tarea fija el modo de los archivos de su alcance, y lo configurado a mano manda.
+- **`comandos.ts` sigue siendo un `switch`** para el acompañamiento. La superficie v1 es una tabla (`cli/v1.ts`).
+- **Decisiones en un solo `decisiones.json`** extendido (marco, tarea, ADR), en vez de un archivo por decisión.
+- **Presupuesto de IA solo por semana**, no por tarea.
+
+**Lo que no puede hacer la IA (te toca):**
+- La **puerta tras F5**: probar con 2–3 personas (tiempo por etapa, abandonos, cobertura de comprensión, acierto ≥ 70 %).
+- El **estudio de eficacia**.
+- Recorrer los paneles a mano en VSCode (la prueba automática cubre lo que dibujan y sus botones, no cómo se ven).
+- Probar Jev con su API real cuando tengas acceso.
+- El commit de la rama `v1` (hay más de 130 archivos cambiados).
+- Correr `cai init --solo-claude` en tus proyectos (y en este repo) para tener el `CLAUDE.md` v1.

@@ -1,6 +1,6 @@
 # ComplementAIry: tú programas, la IA te acompaña
 
-> **v1.0 en planificación:** reestructuración completa para hacer cumplir el [Manifiesto](../Manifiesto.md) ("No Vibe Coding"). Plan aprobado: [planes/plan-C-mezclado.md](planes/plan-C-mezclado.md). Este documento describe v0.11.
+> **v1.0:** reestructuración para hacer cumplir el [Manifiesto](../Manifiesto.md) ("No Vibe Coding"). Diseño completo y tabla punto por punto: [planes/plan-C-mezclado.md](planes/plan-C-mezclado.md). La sección [v1](#v1-programar-con-ia-sin-vibe-coding) resume lo nuevo; el resto del documento describe el acompañamiento, que se conserva.
 
 ## La idea en simple
 **Tú escribes tu código. La IA te acompaña:** te da el plano de lo que vas a construir, te dice qué funciones o piezas sirven, te sugiere snippets y te ayuda cuando ve que te trabas. Todo con **notas** al lado del código (vista por defecto en VSCode; la vista **comentarios** `@guia` dentro del archivo es la alternativa para cualquier editor). Las secciones 1 a 7 de abajo muestran la vista comentarios; la vista notas está en [Notas](#notas-lo-que-dice-la-ia-fuera-del-código-v05). La IA **no puede escribir tu código**, y eso no depende de que "se porte bien": lo impiden reglas automáticas (hooks) que bloquean y revierten cualquier intento.
@@ -8,6 +8,40 @@
 El único código que entra rápido a tus archivos son **snippets**: código que ya existe y que tú apruebas. Pueden ser tuyos o de una base de estructuras muy conocidas. La IA solo puede *sugerirlos apagados* (`[ ]`); **los activas tú** (`[x]`).
 
 **Principio:** todo lo que *bloquea* o *decide* es determinista (parsers, tests, compiladores, ejecución real, contadores). La IA solo *produce* texto, y ese texto se controla mecánicamente antes de llegar a tu archivo.
+
+## v1: programar con IA sin vibe coding
+**El cambio de fondo:** v0.11 decía "la IA nunca escribe tu código". v1 dice: **la IA escribe solo dentro de una tarea con tu diseño y un plan aprobado, nunca en líneas rojas, solo construcciones que ya escribiste tú a mano, y nada llega a un commit sin evidencia de que lo entendiste.** Escribir a mano nunca se bloquea.
+
+**Capas** (`packages/complementairy/src/`, impuestas por `test/arquitectura.test.ts`):
+
+| Capa | Qué tiene | Regla |
+|---|---|---|
+| `nucleo/` | puro: lenguajes y parser, comentarios, diff de líneas, máquina de estados de la tarea (`flujo.ts`), especificidad, matriz/EV, construcciones (licencias), detectores V.5, textos de prompts | no conoce `.cai/`, ni la IA |
+| `proyecto/` | almacenes: config, tareas/pedidos/foco, procedencia, evidencias, expediente (`~/.cai`), reglas en capas, decisiones, notas, índice | no llama a la IA |
+| `garantias/` | hooks de Claude Code (`hook.ts`, `tareaHook.ts`), Bash/snapshot, confirmar, gate, git hooks y CI, detector de bucle | no llama a la IA; el hook carga lo de tareas solo si hace falta (~100 ms) |
+| `ia/` | motores (Claude Code, OpenCode, Anthropic, OpenAI-compatible), roles, decisor System One con escalada, evaluación | |
+| `flujos/` | tarea, juez, revisión con evidencia, pruebas V.5, decidir, mapa/recorrido/traza, práctica (kata, repaso, reconstrucción), agentes y git, informe, migrar; y el acompañamiento de siempre (guía, notas, verificar, revisar, tests, construir…) | |
+| `cli/` | `v1.ts` (superficie centrada en la tarea), `mcp.ts` (servidor MCP propio), `comandos.ts` (acompañamiento), `init`, `doctor`, `selftest` | |
+
+**La tarea:** borrador (entrevista + diseño) → diseñada → planificada (plan sin código; ambigüedades y supuestos → decisiones; módulo nuevo / esquema / API pública → decisión con ADR) → aprobada (tu paráfrasis, licencias) → ejecutando (la IA escribe solo en el alcance) → en-revisión (evidencia por tramo) → revisada (gate + detectores V.5) → probada → cerrada (por el post-commit). Desde ejecutando: desconectada (bucle) → `cai volver`. `cai avanzar` dice exactamente qué falta.
+
+**Garantías nuevas (deterministas):**
+
+| Dónde | Qué impone |
+|---|---|
+| `PreToolUse` Edit/Write | sin tarea en ejecución ligada a la sesión: solo comentarios; con tarea: alcance, líneas rojas, sin dependencias, `preservar` (firma o cuerpo), tus líneas de la tarea, presupuesto por paso, licencias (I.6) |
+| `PostToolUse` Edit/Write | procedencia (líneas de la IA, nivel 0) y señales de bucle |
+| `SessionStart` | sesión = tarea; contexto de la tarea (plan, restricciones, replanteo, traspaso) o modo exploración |
+| `UserPromptSubmit` | conversación corta (umbral de turnos → traspaso), modelo fijo por fase, pedido vago al delegar |
+| `Stop` | checkpoint con tests en verde; si lo escrito sin revisar supera el presupuesto → revisión |
+| `PreToolUse mcp__*` | escribir en sistemas externos → "ask" |
+| Carpetas sin IA | kata y reconstrucción: todo prompt y herramienta bloqueados (salvo WebFetch a docs oficiales); `ask()` se niega |
+| git hooks | pre-commit (evidencia, líneas rojas, tareas probadas, dependencia → decisión), commit-msg (trailers `Cai-Tarea`, `Cai-IA`, `Cai-Humano`), post-commit (cierra tareas, licencias, expediente), pre-push y post-checkout (ramas), merge driver de la procedencia |
+| CI (`cai ci`) | recalcula todo desde el repo (`--no-verify` no sirve) y publica SARIF |
+
+**Doble llave para lo subjetivo** (idea del usuario): reglas fijas para lo objetivo (vacío, "sí" a secas, copia literal, identificadores inexistentes) + decisor rápido para lo subjetivo (vago, amplio, cuántos temas, si una explicación explica, qué incluye/excluye una respuesta). El decisor escala por incertidumbre (Jev → Ollama → Haiku → Sonnet), se cachea por huella, se puede rebatir con tu porqué y se mide con `cai ia evaluar` (acierto y calibración).
+
+**Prueba real (2026-10-10, copia de demo-ts, IA real):** pedido vago rechazado por el decisor (Haiku dudó → Sonnet: vago, 0,93); entrevista con sugerencias útiles (incluso señaló la duda abierta de validar meses); plan de Opus sin código, con dos ambigüedades legítimas (redondeo; "si el alcance es solo resumen.ts, ¿dónde va el test?") y cuatro supuestos; el hook real denegó línea roja, dependencia nueva y `fetch` sin licencia; una explicación con una afirmación falsa ("redondea con Math.round") fue rechazada por el decisor; commit con `Cai-IA: 13 líneas (13 revisadas)` y la tarea se cerró sola; código de la IA sin revisar fue bloqueado por el pre-commit y, con `--no-verify`, detectado por `cai ci`.
 
 ---
 
@@ -263,22 +297,20 @@ Agregar un stack es agregar una entrada en `packages/complementairy/src/adapters
 ## Componentes
 ```
 packages/complementairy/src/
-  lang.ts, parser.ts, comments.ts   lenguajes y extracción de comentarios (tree-sitter)
-  verify.ts                         regla central: "solo cambiaron comentarios @guia"
-  hook.ts, bash.ts, snapshot.ts     hooks de Claude Code, reglas de terminal, foto y reversión
-  config.ts, files.ts               zonas, configuración
-  threads.ts, render.ts, guard.ts   hilos de conversación, formato de comentarios, controles a la IA
-  tutor.ts, watch.ts                cai guia / watch
-  review.ts, gate.ts, adapters.ts   cai revisar / gate, herramientas por stack
-  predict.ts                        cai predecir / check
-  profile.ts, context.ts, state.ts  perfil, proyecto/reglas/patrones, estado de hilos
-  snippets.ts                       snippets propios y política de delegación
-  terminal.ts, arquitectura.ts      explica / pregunta / corre / error; arquitectura / ADR
-  doctor.ts, init.ts, cli.ts        diagnóstico, instalación, comandos
-  selftest.ts                       escenarios que prueban cada garantía (cai selftest)
-packages/complementairy/kit/                skills para el chat de Claude Code y workflow de CI
-packages/vscode-complementairy/             extensión de VSCode
-examples/demo-ts/                   proyecto de prueba con todo instalado
+  cli.ts                 entrada (`cai hook` carga solo garantias/hook; el resto, cli/comandos)
+  nucleo/                puro: lang, parser, comments, soloComentarios (antes verify), diffLineas, flujo (tarea),
+                         especificidad, matriz, construcciones, detectores, huella, render, guard, prompts…
+  proyecto/              config, almacen, tareas (y pedidos, foco), procedencia, evidencias, expediente, reglas,
+                         decisiones, notas, indice, siguiente, profile, snippets, context/contexto…
+  garantias/             hook, tareaHook, bash, snapshot, confirmar, gate, adapters, gitHooks, bucle
+  ia/                    llm (Agent SDK), sesion, motores, roles, decisor, evaluar
+  flujos/                tarea, juez, revision, pruebas, decidir, mapa, practica, agentes, informe, migrar;
+                         tutor, responder, rapida, acompanante, verificar, review, tests, predict, construir, programar…
+  cli/                   v1 (superficie nueva), mcp, soloHumano, comandos, args, init, doctor, servir, selftest
+packages/complementairy/test/   arquitectura (capas), v1/* (núcleo, flujo, extra), escenarios/* (selftest por área)
+packages/complementairy/kit/    skills (cai, cai-tarea, cai-guia, cai-revisar, cai-snippet), snippets base, CI
+packages/vscode-complementairy/ extensión: paneles Tarea, Comprensión, Nota, Proyecto; procedencia en el margen
+examples/demo-ts/               proyecto de prueba
 ```
 
 ## Notas: lo que dice la IA, fuera del código (v0.5)
@@ -360,7 +392,7 @@ examples/demo-ts/                   proyecto de prueba con todo instalado
 | 12 (v0.9) | Índice vivo, contexto común, decisiones con botones (retractables), impacto, chat del proyecto, revisión con veredicto y al salir, tests sin export (sandbox), hoy/deuda/sesión | ✅ |
 | 13 (v0.10) | Modos sugerir/aprender/programar, entender (proyecto, archivo, función), chat con conversaciones y modelo, tareas y correcciones desde el chat, Claude Code con confirmación por sus botones, ideas, notas con historial, modo programar (plan, tú diriges, PR por porciones con probador, repertorio) | ✅ |
 | 14 (v0.11) | Seguridad y datos (sin shell, JSON dañado no se pisa, candados), CLI mantenible (entrada mínima, args, selftest filtrable), las funciones se conocen (mapa del archivo, reutilizar, nota correcta), modos en dos ejes y construir juntos | ✅ |
-| 15 (v1.0) | Reestructuración según el Manifiesto: tareas con estados, procedencia por línea, licencias (I.6), decisiones con matriz/EV, proveedores por rol, pull the plug, modelo mental, reconstrucción semanal | 📝 plan aprobado ([planes/](planes/)) |
+| 15 (v1.0) | Reestructuración según el Manifiesto: capas, tareas con estados, pedidos y entrevista, procedencia por línea, evidencia polimórfica, licencias (I.6), decisiones con matriz/EV/ADR, motores por rol y decisor System One, pull the plug, worktrees y agentes con roles, modelo mental (mapa, tarjetas, recorrido, traza), práctica sin IA, expediente, MCP propio, paneles Tarea y Comprensión | ✅ (ver [estado](planes/plan-C-mezclado.md#12-estado-de-la-implementación)) |
 
 **Honcho:** el perfil y la memoria hoy son archivos locales legibles, que es lo que pide el principio de transparencia. Conectar Honcho, un servicio externo de modelado de usuario, requiere una cuenta y una API key tuyas, y envía datos de tu forma de programar a un tercero. Queda para cuando lo decidas.
 

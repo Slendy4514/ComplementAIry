@@ -1,18 +1,37 @@
 # ComplementAIry
 
-**Tú programas, la IA te acompaña.** Mientras escribes, ComplementAIry te deja en comentarios:
-- el plano de lo que vas a construir;
-- qué funciones o APIs te sirven;
-- correcciones y mejoras cuando terminas una parte;
-- ayuda cuando ve que te trabas.
+**Programar CON IA, sin vibe coding.** ComplementAIry v1 hace cumplir el [Manifiesto](Manifiesto.md): puedes escribir tú o delegarle a la IA, pero la IA solo escribe dentro de una **tarea** con tu diseño, un plan sin código que tú apruebas y restricciones que el sistema impone; y nada de lo que escribe llega a un commit sin **evidencia de que lo entendiste**.
 
-La IA **no puede escribir tu código**: lo impiden hooks deterministas. El código rápido entra solo como **snippets que tú activas**.
+- **Escribir a mano nunca se bloquea.** Las compuertas son para lo que hace la IA.
+- **El semáforo es determinista** (hooks de Claude Code, git hooks, CI, parser, ejecución). Lo subjetivo (¿es vago?, ¿es demasiado amplio?, ¿tu explicación explica?) lo juzga un **decisor rápido** (Jev u otro modelo "System One", o Haiku), que solo puede subir la exigencia.
+- **Procedencia por línea:** sabe quién escribió cada línea (tú, la IA, un snippet, código heredado, algo pegado) y si un humano la revisó. `cai informe` responde "¿qué código no revisó un humano?".
+- **No te deteriora:** la IA solo escribe construcciones que ya escribiste tú a mano (licencias, con katas sin IA), repaso espaciado, reconstrucción semanal sin IA, y tu expediente entre proyectos (`cai yo`).
+- **El acompañamiento de siempre sigue:** notas por función, "¿quedó lista?", revisión, tests según la intención, snippets que activas tú.
 
-**Comando:** `cai` (también existe `complementairy`). Antes se llamaba AICode: el comando `aicode` y los proyectos con `.aicode/` siguen funcionando, y `cai init .` los actualiza.
+**Comando:** `cai` (también `complementairy`).
 
+- [Manifiesto.md](Manifiesto.md): lo que se hace cumplir.
+- [docs/planes/plan-C-mezclado.md](docs/planes/plan-C-mezclado.md): el diseño de v1 (cada punto del manifiesto y cómo se cumple).
 - [docs/design.md](docs/design.md): cómo funciona, con ejemplos.
-- [docs/research.md](docs/research.md): la investigación detrás.
-- [docs/historial.md](docs/historial.md): las decisiones y por qué se tomaron.
+- [docs/research.md](docs/research.md) · [docs/historial.md](docs/historial.md).
+
+## v1 en 5 minutos
+```bash
+cai pedir "Agrega en src/resumen.ts resumenPrestamo(monto, tasa, meses) que use calcularCuota y devuelva cuota, total e intereses"
+cai tarea t1 --sugerir                                      # la IA sugiere cada restricción con su porqué
+cai tarea t1 --responder alcance "solo src/resumen.ts; cuota.ts no se toca"   # «sí» no vale: con tus palabras
+cai tarea t1 --diseno --problema "…" --enfoque "…" --criterio "resumenPrestamo(1200, 0, 12) → cuota 100"
+cai avanzar t1                                              # dice EXACTAMENTE qué falta, o avanza
+cai tarea t1 --planificar                                   # plan SIN código (modelo de razonamiento)
+cai decidir                                                 # las ambigüedades del plan las decides tú, con tu porqué
+cai tarea t1 --aprobar "<tu paráfrasis del plan>"
+cai tarea t1 --ejecutar                                     # y en Claude Code: «implementa t1»
+cai revisar --tarea t1                                      # tu evidencia por tramo: explicación, predicción, bordes o mutante
+cai avanzar t1 && git commit                                # gate + detectores V.5; el pre-commit verifica la procedencia
+```
+En VSCode, los paneles **Tarea** y **Comprensión** hacen lo mismo con botones, y el margen se colorea según la procedencia (rojo: IA sin revisar · verde: revisada · ámbar: ajeno sin entender · morado: pegado).
+
+**Proyectos de v0.11:** `cai migrar` simula y `cai migrar --aplicar` convierte (con respaldo).
 
 ## Requisitos
 - Node 22+ y git.
@@ -200,6 +219,12 @@ En un proyecto con `cai init`, el chat de Claude Code también es ComplementAIry
 - **Lo que solo decides tú, con sus botones:** para decidir, retractar, descartar, confirmar objetivos o aplicar una corrección, Claude Code te pregunta con su herramienta de preguntas y **un hook registra tu respuesta** (comprobado: la respuesta llega después de tu clic; si la pregunta ya trae una respuesta puesta, se rechaza, y el texto de la pregunta tiene que incluir exactamente lo que se registra). Si lo intentara con un comando, se revierte.
 - **Conoce el proyecto:** consulta `cai entender estado`, `cai indice`, `cai decisiones` y `cai memoria correcciones` antes de responder. En modo notas, lo que diga sobre tu código va a las notas (`cai responder`), no como comentarios en el archivo. Si tu `CLAUDE.md` tiene instrucciones de una versión anterior, la extensión ofrece actualizarlas (`cai init --solo-claude`).
 - **No puede escribir tu código:** los hooks lo bloquean. Tampoco puede activar snippets (`cai expandir`), instalar (`cai init`), crear snippets ni declarar tu perfil: eso lo haces tú.
+
+## Qué IA usa (motores por rol y decisor)
+- **Por rol** (`.cai/config.json → ia.roles`, `"motor:modelo"`): planificar con un modelo de razonamiento (Opus), implementar y revisar con uno de código (Sonnet), clasificar con uno barato (Haiku). `cai ia` muestra cada rol.
+- **Motores:** `claude-code` (tu sesión, por defecto), `opencode` (`opencode run -m proveedor/modelo`), `anthropic` (API), cualquier endpoint compatible con OpenAI (Ollama local, DeepSeek, Gemini, OpenRouter…) y decisores **System One** (`jev` de TypeSafe con `TYPESAFE_API_KEY`, u `ollama-systemone` local).
+- **Decisor** (`ia.decisor.cadena`): por defecto Jev → Ollama → Haiku → Sonnet, escalando mientras dude (`umbral`). `cai ia evaluar` mide acierto **y calibración** con un set dorado (más tus rebates) y saca de la cadena lo que no alcanza el mínimo.
+- **Privacidad:** un motor externo que no es Anthropic necesita opt-in (`ia.optIn`); `ia.privacidad: "solo-local"` no manda código afuera. Tope de gasto: `ia.presupuestoSemanaUsd`.
 
 ## Qué IA usa y cómo ahorra tokens
 **Modelo:** todos a través de tu sesión de Claude Code (sin API key), según el tamaño de la tarea:
