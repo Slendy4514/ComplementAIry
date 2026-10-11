@@ -377,3 +377,20 @@ export function notaOrigen(o: Origen): string {
   if (o === "terceros") return "Este archivo es de terceros (librería copiada o código generado): no lo critiques; solo explica cómo usarlo.";
   return "";
 }
+
+/**
+ * Agrega un motor System One LOCAL al decisor: lo define en ia.motores y lo pone primero en la cadena
+ * (si la cadena estaba vacía, parte de `cadenaBase`). Lo de afuera de tu máquina no pasa por aquí: eso lo
+ * configuras tú con opt-in. Escribe solo la parte `ia` de .cai/config.json.
+ */
+export function agregarDecisorLocal(root: string, nombre: string, motor: { tipo: "systemone"; url: string; local: true }, ref: string, cadenaBase: string[]): string[] {
+  const file = path.join(dataDir(root), "config.json");
+  const raw = (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {}) as { ia?: { motores?: Record<string, unknown>; decisor?: { cadena?: string[]; umbral?: number } } };
+  const ia = (raw.ia ??= {});
+  ia.motores = { ...ia.motores, [nombre]: motor };
+  const previa = ia.decisor?.cadena?.length ? ia.decisor.cadena : cadenaBase;
+  ia.decisor = { ...ia.decisor, cadena: [ref, ...previa.filter((r) => r !== ref)] };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(raw, null, 2)}\n`);
+  return ia.decisor.cadena!;
+}

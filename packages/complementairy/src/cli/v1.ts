@@ -76,7 +76,7 @@ Equipo, git e IA
   cai paralelo <id…> · cai agente <id> implementador|tester|revisor|refactorizador
   cai traspaso <id>                    resumen para seguir en una sesión NUEVA (IV.6)
   cai reglas [archivo] [--compilar]    reglas efectivas y su origen (global > proyecto > carpeta)
-  cai ia [roles|evaluar|uso]           motores por rol, decisor System One y su evaluación
+  cai ia [roles|evaluar|uso|systemone] motores por rol, decisor System One (catálogo, --agregar, --probar) y su evaluación
   cai adoptar · cai migrar [--aplicar] · cai ci [--sarif f] · cai doctor · cai init
 
 Acompañamiento a tu código (se conserva): cai guia, cai responder, cai verificar, cai revisar <archivo>,
@@ -87,6 +87,87 @@ export { SOLO_HUMANO_V1 } from "./soloHumano.js";
 function tareaId(args: string[], root: string): string {
   const id = args.find((a) => /^t\d+$/.test(a));
   return id ?? tarea.elegirActiva(root).id;
+}
+
+/** Dos casos fijos para `cai ia systemone --probar`: uno vago y uno concreto. */
+const PRUEBA_SYSTEMONE = [
+  { texto: "mejora el buscador", vago: true },
+  { texto: "agrega el campo editable (booleano) a la respuesta de GET /api/users/:id", vago: false },
+];
+
+/** `cai ia systemone`: qué modelos de decisión hay, cuáles tienes, cómo sumarlos y probarlos. */
+async function systemone(args: string[], root: string, c: ReturnType<typeof loadConfig>): Promise<number> {
+  const so = await import("../ia/systemone.js");
+  const { decidirCon, comoDato } = await import("../ia/decisor.js");
+  const motores = motoresDe(c);
+  const cadena = c.ia.decisor.cadena.length ? c.ia.decisor.cadena : CADENA_POR_DEFECTO;
+
+  const agregar = valor(args, "--agregar");
+  if (agregar) {
+    const m = so.CATALOGO_SYSTEMONE.find((x) => x.id === agregar);
+    if (!m) throw new Error(`no conozco «${agregar}». Los de servidor local: ${so.CATALOGO_SYSTEMONE.filter((x) => x.donde === "local").map((x) => x.id).join(", ")}`);
+    if (m.donde === "ollama") throw new Error(`${m.id} corre en Ollama y se detecta solo: \`${m.instalar}\` (el motor ollama-systemone ya está en la cadena)`);
+    const url = valor(args, "--url") ?? m.motor!.url!;
+    if (!so.urlLocal(url)) throw new Error(`${url} no es una dirección de tu máquina. Un modelo hospedado manda tu texto afuera: configúralo tú en .cai/config.json con opt-in (\`cai ia systemone\` muestra cómo)`);
+    if (m.donde === "hospedado") throw new Error(`${m.id} es hospedado: configúralo tú con opt-in (\`cai ia systemone\` muestra cómo)`);
+    const ref = `${m.id}:${valor(args, "--modelo") ?? m.id}`;
+    const nueva = (await import("../proyecto/config.js")).agregarDecisorLocal(root, m.id, { tipo: "systemone", url, local: true }, ref, cadena);
+    return out(args, { motor: m.id, url, cadena: nueva }, () => [`✔ ${m.id} (${url}) quedó primero en el decisor: ${nueva.join(" → ")} → heurística`, `Pruébalo: cai ia systemone --probar ${ref}   ·   mídelo: cai ia evaluar ${ref}`]);
+  }
+
+  const probar = valor(args, "--probar");
+  if (probar) {
+    const filas: { texto: string; esperado: boolean; valor?: boolean; confianza?: number; ms: number; error?: string }[] = [];
+    for (const p of PRUEBA_SYSTEMONE) {
+      const ini = Date.now();
+      try {
+        const r = await decidirCon(c, probar, { estado: `Un programador escribió este pedido para que una IA de programación lo implemente.\n${comoDato("pedido", p.texto)}`, preguntas: { vago: { type: "noul", description: "true si NO dice concretamente qué cambiar, dónde o qué resultado se espera" } } }, root);
+        filas.push({ texto: p.texto, esperado: p.vago, valor: r.vago?.valor === true, confianza: r.vago?.confianza ?? 0, ms: Date.now() - ini });
+      } catch (e) {
+        filas.push({ texto: p.texto, esperado: p.vago, ms: Date.now() - ini, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    return out(args, filas, () => [
+      `${probar}:`,
+      ...filas.map((f) => (f.error ? `  ✘ «${f.texto}»: ${f.error}` : `  ${f.valor === f.esperado ? "✔" : "✘"} «${f.texto}» → ${f.valor ? "vago" : "concreto"} (confianza ${Math.round((f.confianza ?? 0) * 100)}%, ${f.ms} ms)`)),
+      filas.some((f) => f.error) ? "" : `Dos casos no miden nada: el acierto de verdad lo da \`cai ia evaluar ${probar}\`.`,
+    ]);
+  }
+
+  // Listado: qué hay, qué tienes y cómo sumarlo.
+  const urlOllama = motores["ollama-systemone"]?.url ?? "http://localhost:11434/v1/systemone";
+  const instalados = await so.modelosOllama(urlOllama);
+  const respondeOllama = instalados.length > 0 || (await fetch(urlOllama.replace(/\/v1\/systemone\/?$/, "/api/version"), { signal: AbortSignal.timeout(1500) }).then((r) => r.ok).catch(() => false));
+  const elegido = so.mejorInstalado(instalados);
+  const pct = (m: { acierto?: { valor: number; fuente: string } }) => (m.acierto ? ` · acierto publicado ${Math.round(m.acierto.valor * 100)}% (${m.acierto.fuente})` : "");
+  const estado = so.CATALOGO_SYSTEMONE.map((m) => {
+    const configurado = motores[m.id];
+    const listo =
+      m.donde === "ollama"
+        ? instalados.includes(m.id)
+        : m.donde === "local"
+          ? !!configurado && so.esLocal(configurado)
+          : !!configurado && disponible(configurado) && !permitido(c, m.id, configurado);
+    return { ...m, listo, enCadena: cadena.some((r) => r === m.ref || r.split(":")[0] === m.id) || (m.donde === "ollama" && elegido === m.id && cadena.some((r) => r === "ollama-systemone:")) };
+  });
+  const linea = (m: (typeof estado)[number]) => `  ${m.listo ? "✔" : "○"} ${m.id} · ${m.quien} · ${m.tamano} · ${m.licencia}${pct(m)}${m.enCadena ? (m.listo ? " · EN USO" : " · en la cadena, pero no disponible") : ""}${m.listo ? "" : `\n      → ${m.instalar}`}${m.notas ? `\n      (${m.notas})` : ""}`;
+  const snippet = JSON.stringify({ ia: { motores: { "jev-openrouter": so.CATALOGO_SYSTEMONE.find((x) => x.id === "jev-openrouter")!.motor }, optIn: ["jev-openrouter"], decisor: { cadena: ["jev-openrouter:~typesafe/jev-latest", "claude-code:claude-haiku-5-5", "claude-code:claude-sonnet-5-5"] } } });
+  return out(args, { ollama: { url: urlOllama, responde: respondeOllama, instalados, elegido }, modelos: estado, cadena }, () => [
+    "Modelos System One para el decisor (todos con el formato /v1/systemone de Jev). Ninguno decide una compuerta solo: escalan por duda y las reglas fijas mandan.",
+    "",
+    `En Ollama 0.35+ (se detectan solos; ${respondeOllama ? `Ollama responde en ${urlOllama.replace(/\/v1\/systemone\/?$/, "")}` : "Ollama no responde: instálalo en tu máquina"}):`,
+    ...estado.filter((m) => m.donde === "ollama").map(linea),
+    "",
+    "En un servidor local tuyo (cai ia systemone --agregar <id> [--url http://localhost:PUERTO/v1/systemone]):",
+    ...estado.filter((m) => m.donde === "local").map(linea),
+    "",
+    "Hospedados (tu texto sale de tu máquina: los configuras tú en .cai/config.json, con opt-in):",
+    ...estado.filter((m) => m.donde === "hospedado").map(linea),
+    `  Ejemplo (Jev por OpenRouter): ${snippet}`,
+    "",
+    `Cadena del decisor: ${cadena.map((r) => (r === "ollama-systemone:" ? (elegido ? `ollama-systemone:${elegido} (detectado)` : "ollama-systemone: (el mejor instalado; ahora ninguno)") : r)).join(" → ")} → heurística`,
+    "Probar uno: cai ia systemone --probar <motor:modelo> · medir su acierto: cai ia evaluar <motor:modelo>",
+  ]);
 }
 
 const COMANDOS: Record<string, Run> = {
@@ -436,6 +517,7 @@ const COMANDOS: Record<string, Run> = {
       const es = await evaluar(c, root, refs.length ? refs : c.ia.decisor.cadena.length ? c.ia.decisor.cadena : CADENA_POR_DEFECTO);
       return out(args, es, () => (es.length ? es.map((e) => `${e.aprobado ? "✔" : "✘"} ${e.ref}: acierto ${Math.round(e.acierto * 100)}% · Brier ${e.brier.toFixed(3)} (calibración: menor es mejor) · ${e.msMedio} ms · ${e.casos} casos`) : ["ningún decisor disponible para evaluar"]));
     }
+    if (args[0] === "systemone") return systemone(args, root, c);
     if (args[0] === "uso") {
       const u = leerUso(Number(valor(args, "--dias") ?? 7));
       const por = new Map<string, number>();

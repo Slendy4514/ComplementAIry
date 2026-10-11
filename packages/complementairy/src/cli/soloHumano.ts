@@ -16,6 +16,7 @@ export const SOLO_HUMANO_V1: [RegExp, string][] = [
   [/^git\b.*--ejecutar\b/, "ejecutar comandos git"],
   [/^migrar\b.*--aplicar\b/, "migrar el proyecto"],
   [/^reglas\b.*--compilar\b/, "compilar las reglas a .claude/"],
+  [/^ia\s+systemone\b.*--agregar\b/, "elegir qué modelo juzga tus textos (el decisor)"],
   [/^yo\b.*--(importar|exportar)\b/, "importar o exportar el expediente"],
   [/^pedido\b.*--(comun|asignar|descartar)\b/, "responder o reasignar un pedido"],
 ];

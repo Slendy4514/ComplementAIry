@@ -84,8 +84,9 @@
       "crear": true,
       "origen": "estructura",
       "id": "t9",
-      "hecha": false,
-      "creada": "2026-10-09T21:46:32.161Z"
+      "hecha": true,
+      "creada": "2026-10-09T21:46:32.161Z",
+      "hechaEn": "2026-10-11T03:08:19.466Z"
     },
     {
       "titulo": "Crear packages/complementairy/src/nucleo/soloComentarios.ts",
@@ -94,8 +95,9 @@
       "crear": true,
       "origen": "estructura",
       "id": "t10",
-      "hecha": false,
-      "creada": "2026-10-09T21:46:32.162Z"
+      "hecha": true,
+      "creada": "2026-10-09T21:46:32.162Z",
+      "hechaEn": "2026-10-11T03:08:19.466Z"
     },
     {
       "titulo": "Crear packages/complementairy/src/flujos/comprension.ts",
@@ -137,7 +139,8 @@
       "id": "t14",
       "hecha": true,
       "creada": "2026-10-09T21:46:32.162Z",
-      "hechaEn": "2026-10-09T21:46:33.923Z"
+      "hechaEn": "2026-10-09T21:46:33.923Z",
+      "archivada": true
     },
     {
       "titulo": "Crear packages/complementairy/src/ia/llm.ts",
@@ -148,7 +151,8 @@
       "id": "t15",
       "hecha": true,
       "creada": "2026-10-09T21:46:32.162Z",
-      "hechaEn": "2026-10-09T21:46:33.923Z"
+      "hechaEn": "2026-10-09T21:46:33.923Z",
+      "archivada": true
     },
     {
       "titulo": "Crear packages/complementairy/src/flujos/acompanante.ts",
@@ -159,7 +163,8 @@
       "id": "t16",
       "hecha": true,
       "creada": "2026-10-09T21:46:32.162Z",
-      "hechaEn": "2026-10-09T21:46:33.923Z"
+      "hechaEn": "2026-10-09T21:46:33.923Z",
+      "archivada": true
     },
     {
       "titulo": "Crear packages/complementairy/src/garantias/hook.ts",
@@ -170,7 +175,8 @@
       "id": "t17",
       "hecha": true,
       "creada": "2026-10-09T21:46:32.162Z",
-      "hechaEn": "2026-10-09T21:46:33.923Z"
+      "hechaEn": "2026-10-09T21:46:33.923Z",
+      "archivada": true
     }
   ]
 }

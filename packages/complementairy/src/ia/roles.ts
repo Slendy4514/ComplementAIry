@@ -9,6 +9,7 @@ import type { Config } from "../proyecto/config.js";
 import { leerUso } from "./llm.js";
 import { consultarMotor, disponible, MOTORES_BASE, type DefMotor, type Pedido, type Respuesta } from "./motores.js";
 import { partir, refDeRol, ROLES_POR_DEFECTO, type Rol } from "../proyecto/rolesConfig.js";
+import { esLocal } from "./systemone.js";
 export { partir, refDeRol, ROLES_POR_DEFECTO, type Rol } from "../proyecto/rolesConfig.js";
 
 /** Roles que piensan a fondo (más esfuerzo de razonamiento). */
@@ -21,8 +22,10 @@ export function motoresDe(c: Config): Record<string, DefMotor> {
 /** ¿Se puede usar este motor con la privacidad del proyecto? Devuelve por qué no, o null. */
 export function permitido(c: Config, nombre: string, def: DefMotor): string | null {
   const priv = c.ia.privacidad ?? "normal";
-  const externo = !def.local && !["claude-code", "anthropic"].includes(def.tipo);
-  if (priv === "solo-local" && !def.local) return `${nombre} no es local y el proyecto es solo-local`;
+  // "local" solo vale si la url también lo es (un motor mal marcado no se salta la privacidad).
+  const local = esLocal(def);
+  const externo = !local && !["claude-code", "anthropic"].includes(def.tipo);
+  if (priv === "solo-local" && !local) return `${nombre} no es local y el proyecto es solo-local`;
   if (priv === "solo-anthropic" && externo) return `${nombre} no es de Anthropic y el proyecto es solo-anthropic`;
   if (externo && !(c.ia.optIn ?? []).includes(nombre)) return `${nombre} manda tu código a un tercero: habilítalo explícitamente en ia.optIn`;
   return null;

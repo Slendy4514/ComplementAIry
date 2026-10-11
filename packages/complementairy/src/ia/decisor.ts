@@ -19,6 +19,7 @@ import type { Config } from "../proyecto/config.js";
 import { home } from "../proyecto/profile.js";
 import { consultarMotor, disponible, type DefMotor } from "./motores.js";
 import { motoresDe, partir, permitido } from "./roles.js";
+import { esLocal, modeloAuto } from "./systemone.js";
 
 export type Pregunta =
   | { type: "choice"; options: string[]; description?: string }
@@ -181,6 +182,11 @@ export async function decidirCon(c: Config, ref: string, caso: Caso, cwd: string
   if (!def || !disponible(def)) throw new Error(`${ref} no está disponible`);
   const no = permitido(c, nombre, def);
   if (no) throw new Error(no);
+  if (def.tipo === "systemone" && esLocal(def) && !modelo) {
+    const auto = await modeloAuto(def.url!);
+    if (!auto) throw new Error(`${ref}: no encontré un modelo de decisión instalado (cai ia systemone)`);
+    return viaSystemOne(def, nombre, auto, caso);
+  }
   return def.tipo === "systemone" ? viaSystemOne(def, nombre, modelo, caso) : viaLLM(def, nombre, modelo, caso, cwd);
 }
 
@@ -225,17 +231,19 @@ async function decidirSinCache(c: Config, caso: Caso, cwd: string, heuristica: (
     const [nombre, modelo] = partir(ref);
     const def = motores[nombre];
     if (!def || !disponible(def) || permitido(c, nombre, def) || reprobado(ref)) continue;
-    // Un systemone local (Ollama) sin modelo configurado se salta (no hay cómo saber si está instalado).
-    if (def.tipo === "systemone" && def.local && !modelo) continue;
+    // Un systemone local sin modelo usa el mejor modelo de decisión instalado (Ollama); si no hay, se salta.
+    const usar = def.tipo === "systemone" && esLocal(def) && !modelo ? await modeloAuto(def.url!) : modelo;
+    if (usar === null) continue;
+    const usado = usar === modelo ? ref : `${nombre}:${usar}`;
     try {
-      const r = def.tipo === "systemone" ? await viaSystemOne(def, nombre, modelo, caso) : await viaLLM(def, nombre, modelo, caso, cwd);
+      const r = def.tipo === "systemone" ? await viaSystemOne(def, nombre, usar, caso) : await viaLLM(def, nombre, usar, caso, cwd);
       if (!completa(r, caso)) throw new Error("respuesta incompleta");
       ultima = r;
-      fuente = ref;
-      escalada.push(ref);
+      fuente = usado;
+      escalada.push(usado);
       if (Object.values(r).every((v) => v.confianza >= umbral)) return { respuestas: r, fuente, dudosa: false, escalada };
     } catch (e) {
-      escalada.push(`${ref} (falló: ${e instanceof Error ? e.message.slice(0, 80) : "?"})`);
+      escalada.push(`${usado} (falló: ${e instanceof Error ? e.message.slice(0, 80) : "?"})`);
     }
   }
   if (ultima) return { respuestas: ultima, fuente, dudosa: true, escalada };

@@ -519,4 +519,13 @@ Después del rebuild, abrí Claude Code. Para recuperar el chat completo, usá `
   - conseguir acceso a Jev si quiere el decisor System One en la nube.
 - Pruebas: 278 de vitest + 209 escenarios + humo + paneles.
 - **System One (2026-10-11):** el usuario preguntó por Tev1 y otros. El motor `systemone` sirve con cualquier servidor `/v1/systemone` (Ollama: tev1, nimble, clef; OpenRouter: Jev sin lista de espera). Se corrigió el formato contra el publicado de Jev (antes Score y Noul quedaban incompletos y siempre se escalaba a Haiku). Sumar OpenRouter como motor de fábrica lo bloqueó el clasificador de permisos (destino nuevo para el texto): queda como configuración del usuario con `optIn`. Pruebas: 279.
+- **Otros System One (nuevo `/goal` del usuario: «que implemente otros system one y el resto déjamelo a mí»):**
+  - catálogo `src/ia/systemone.ts` y comando `cai ia systemone` (listado, `--agregar`, `--probar`);
+  - en Ollama (nimble, tev1, tev1:0.8b), el motor `ollama-systemone` sin modelo usa el mejor instalado según el acierto publicado;
+  - en servidores locales (laya-serve, kev, von, OneJev/OpenJev en vLLM), `--agregar` solo acepta direcciones locales y es una acción solo humana (elegir quién juzga tus textos);
+  - los hospedados (Jev, Jev por OpenRouter) quedan como configuración del usuario con `optIn`;
+  - privacidad: «local: true» con una url externa ya no cuenta como local;
+  - Hesperan no se integró, porque su formato difiere y no hay documentación verificable;
+  - pruebas con un servidor HTTP que imita Ollama: 285 de vitest + 209 escenarios;
+  - queda para el usuario: probar con modelos reales, revisar los paneles a mano y la prueba con personas.
 - Commit `95790be` en la rama `v1` (el usuario lo pidió; sin push). Jev con API real, recorrer los paneles a mano y la prueba con personas quedan anotados como tareas del usuario (lo eligió él).

@@ -9,7 +9,7 @@ Al crear un tag en el repo (`git tag v0.3.0 && git push --tags`), el workflow `r
 **En un proyecto**, en `.devcontainer/devcontainer.json`:
 ```jsonc
 "features": {
-  "ghcr.io/Slendy4514/complementairy/complementairy:0": {}
+  "ghcr.io/Slendy4514/complementairy/complementairy:1": {}
 },
 "customizations": { "vscode": { "extensions": ["anthropic.claude-code"] } }
 ```
@@ -18,13 +18,13 @@ Al crear un tag en el repo (`git tag v0.3.0 && git push --tags`), el workflow `r
 (`Ctrl+Shift+P` → "Preferences: Open User Settings (JSON)"):
 ```jsonc
 "dev.containers.defaultFeatures": {
-  "ghcr.io/Slendy4514/complementairy/complementairy:0": {}
+  "ghcr.io/Slendy4514/complementairy/complementairy:1": {}
 },
 "dev.containers.defaultExtensions": ["anthropic.claude-code"]
 ```
 
 **Actualizaciones:** la extensión revisa tu último release y, si hay una versión nueva, te avisa con
-"Reconstruir ahora". El tag `:0` siempre apunta a la última 0.x, así que reconstruir basta.
+"Reconstruir ahora". El tag `:1` siempre apunta a la última 1.x, así que reconstruir basta. Al pasar de la 0.x a la 1.x hay que cambiar `:0` por `:1` una vez (es un cambio mayor) y, en cada proyecto, correr `cai migrar --aplicar`.
 Manual: `Ctrl+Shift+P` → "ComplementAIry: buscar actualizaciones".
 
 > El repo y el paquete de ghcr.io tienen que ser **públicos** (GitHub → tu perfil → Packages → complementairy →

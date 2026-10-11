@@ -223,6 +223,11 @@ En un proyecto con `cai init`, el chat de Claude Code también es ComplementAIry
 ## Qué IA usa (motores por rol y decisor)
 - **Por rol** (`.cai/config.json → ia.roles`, `"motor:modelo"`): planificar con un modelo de razonamiento (Opus), implementar y revisar con uno de código (Sonnet), clasificar con uno barato (Haiku). `cai ia` muestra cada rol.
 - **Motores:** `claude-code` (tu sesión, por defecto), `opencode` (`opencode run -m proveedor/modelo`), `anthropic` (API), cualquier endpoint compatible con OpenAI (Ollama local, DeepSeek, Gemini, OpenRouter…) y decisores **System One** (`jev` de TypeSafe con `TYPESAFE_API_KEY`, u `ollama-systemone` local).
+- **Otros System One** (`cai ia systemone`): todos hablan el formato `/v1/systemone` de Jev.
+  - **En Ollama 0.35+** (`nimble`, `tev1`, `tev1:0.8b`): se detectan solos y el decisor usa el de mejor acierto que tengas instalado.
+  - **En un servidor local tuyo** (Laya, Kev, Von, OneJev, OpenJev): `cai ia systemone --agregar laya [--url http://localhost:PUERTO/v1/systemone]`. Solo acepta direcciones de tu máquina.
+  - **Hospedados** (Jev en TypeSafe, o por OpenRouter sin lista de espera): tu texto sale de tu máquina, así que los configuras tú con `optIn`. El comando muestra el ejemplo.
+  - `cai ia systemone --probar <motor:modelo>` hace una consulta de verdad; `cai ia evaluar <motor:modelo>` mide el acierto.
 - **Decisor** (`ia.decisor.cadena`): por defecto Jev → Ollama → Haiku → Sonnet, escalando mientras dude (`umbral`). `cai ia evaluar` mide acierto **y calibración** con un set dorado (más tus rebates) y saca de la cadena lo que no alcanza el mínimo.
 - **Privacidad:** un motor externo que no es Anthropic necesita opt-in (`ia.optIn`); `ia.privacidad: "solo-local"` no manda código afuera. Tope de gasto: `ia.presupuestoSemanaUsd`.
 
