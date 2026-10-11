@@ -749,10 +749,9 @@ Pendiente: reconstrucción semanal (candidatas: slugNota, validarCupon, debounce
 - **Decisiones en un solo `decisiones.json`** extendido (marco, tarea, ADR), en vez de un archivo por decisión.
 - **Presupuesto de IA solo por semana**, no por tarea.
 
-**Lo que no puede hacer la IA (te toca):**
+**Cerrado:** commit `95790be` en la rama `v1` (sin push). **Lo que no puede hacer la IA (quedó anotado como tuyo, por decisión del programador):**
 - La **puerta tras F5**: probar con 2–3 personas (tiempo por etapa, abandonos, cobertura de comprensión, acierto ≥ 70 %).
 - El **estudio de eficacia**.
 - Recorrer los paneles a mano en VSCode (la prueba automática cubre lo que dibujan y sus botones, no cómo se ven).
 - Probar Jev con su API real cuando tengas acceso.
-- El commit de la rama `v1` (hay más de 130 archivos cambiados).
 - Correr `cai init --solo-claude` en tus proyectos (y en este repo) para tener el `CLAUDE.md` v1.
