@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { setLLM, type AskOptions } from "../../src/ia/llm.js";
-import { leerSystemOne, setDecisor } from "../../src/ia/decisor.js";
+import { aSystemOne, leerSystemOne, setDecisor } from "../../src/ia/decisor.js";
 import { atender } from "../../src/cli/mcp.js";
 import { migrar } from "../../src/flujos/migrar.js";
 import { adoptar, sinRevisar } from "../../src/flujos/informe.js";
@@ -193,6 +193,23 @@ describe("piezas sueltas", () => {
     const q = { vago: { type: "noul" as const }, cat: { type: "choice" as const, options: ["a", "b"] } };
     expect(leerSystemOne({ answers: { vago: { value: true, probability: 0.8 }, cat: { probabilities: { a: 0.3, b: 0.7 } } } }, q)).toEqual({ vago: { valor: true, confianza: 0.8 }, cat: { valor: "b", confianza: 0.7 } });
     expect(leerSystemOne({ vago: { yes: 0.2 } }, q).vago).toEqual({ valor: false, confianza: 0.8 });
+  });
+  test("System One con el formato publicado de Jev (también tev1/nimble en Ollama): ida y vuelta", () => {
+    const q = { vago: { type: "noul" as const, description: "¿es vago?" }, cat: { type: "choice" as const, options: ["a", "b"] }, temas: { type: "score" as const, min: 1, max: 6 } };
+    expect(aSystemOne(q)).toEqual({
+      vago: { type: "noul", instructions: "¿es vago?" },
+      cat: { type: "choice", instructions: "cat", criteria: { a: "a", b: "b" } },
+      temas: { type: "score", instructions: "temas", criteria: ["1", "2", "3", "4", "5", "6"] },
+    });
+    const respuesta = {
+      model: "jev-1.13.0",
+      answers: {
+        vago: { type: "noul", noul: 0.9 },
+        cat: { type: "choice", choice: "a", probabilities: { a: 0.6, b: 0.4 }, confidence: 0.55 },
+        temas: { type: "score", score: 2.1, legend: { "0": "1", "1": "2", "2": "3" }, probabilities: { "0": 0.1, "2": 0.8, "3": 0.1 }, confidence: 0.8 },
+      },
+    };
+    expect(leerSystemOne(respuesta, q)).toEqual({ vago: { valor: true, confianza: 0.9 }, cat: { valor: "a", confianza: 0.55 }, temas: { valor: 3, confianza: 0.8 } });
   });
   test("git en lenguaje natural: sin shell ni encadenamientos", () => {
     expect(argsGit('git commit -m "hola mundo"')).toEqual(["commit", "-m", "hola mundo"]);

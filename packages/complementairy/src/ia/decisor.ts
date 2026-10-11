@@ -61,7 +61,25 @@ export const comoDato = (etiqueta: string, texto: string) => `<${etiqueta}>\n${t
 
 // --- Respuesta de un modelo System One (formato tolerante) ---------------------------------------------
 
-/** Lee la respuesta de /v1/systemone, aceptando las variantes razonables del formato. */
+/** Niveles de una pregunta score en el formato System One (2 a 10, de menor a mayor). */
+const nivelesScore = (q: { min: number; max: number }) => Array.from({ length: Math.min(10, Math.max(2, q.max - q.min + 1)) }, (_, i) => String(q.min + i));
+
+/**
+ * Las preguntas en el formato de /v1/systemone (Jev, y quienes lo imitan, como Ollama con tev1, nimble o
+ * clef): `instructions` + `criteria` (choice: opción → descripción; score: niveles de menor a mayor).
+ */
+export function aSystemOne(preguntas: Record<string, Pregunta>): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [nombre, q] of Object.entries(preguntas)) {
+    const instructions = q.description ?? nombre;
+    if (q.type === "choice") out[nombre] = { type: "choice", instructions, criteria: Object.fromEntries(q.options.map((o) => [o, o])) };
+    else if (q.type === "score") out[nombre] = { type: "score", instructions, criteria: nivelesScore(q) };
+    else out[nombre] = { type: "noul", instructions };
+  }
+  return out;
+}
+
+/** Lee la respuesta de /v1/systemone (choice/score/noul de Jev), aceptando también variantes razonables. */
 export function leerSystemOne(j: unknown, preguntas: Record<string, Pregunta>): Record<string, Valor> {
   const raiz = (j ?? {}) as Record<string, unknown>;
   const bolsa = (raiz.answers ?? raiz.results ?? raiz.decisions ?? raiz.outputs ?? raiz) as Record<string, unknown>;
@@ -74,15 +92,33 @@ export function leerSystemOne(j: unknown, preguntas: Record<string, Pregunta>): 
       continue;
     }
     const probs = (r.probabilities ?? r.distribution ?? r.probs) as Record<string, number> | undefined;
-    if (q.type === "choice" && probs) {
-      const [mejor, p] = Object.entries(probs).sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
-      out[nombre] = { valor: mejor, confianza: p };
+    const conf = typeof r.confidence === "number" ? r.confidence : undefined;
+    // Noul (Jev): solo la probabilidad de «sí».
+    const si = typeof r.noul === "number" ? r.noul : typeof r.yes === "number" ? r.yes : undefined;
+    if (q.type === "noul" && si !== undefined && r.value === undefined) {
+      out[nombre] = { valor: si >= 0.5, confianza: Math.max(si, 1 - si) };
       continue;
     }
-    const valor = (r.value ?? r.answer ?? r.prediction ?? r.label) as string | number | boolean | undefined;
-    const p = Number(r.probability ?? r.confidence ?? r.p ?? (q.type === "noul" && typeof r.yes === "number" ? Math.max(r.yes as number, 1 - (r.yes as number)) : 1));
-    if (q.type === "noul" && valor === undefined && typeof r.yes === "number") out[nombre] = { valor: (r.yes as number) >= 0.5, confianza: Math.max(r.yes as number, 1 - (r.yes as number)) };
-    else if (valor !== undefined) out[nombre] = { valor, confianza: Number.isFinite(p) ? p : 1 };
+    if (q.type === "choice" && probs) {
+      const [mejor, p] = Object.entries(probs).sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+      out[nombre] = { valor: typeof r.choice === "string" ? r.choice : mejor, confianza: conf ?? p };
+      continue;
+    }
+    // Score (Jev): probabilidades por nivel ("0".."n-1", o el texto del nivel) → el nivel más probable.
+    if (q.type === "score" && probs) {
+      const niveles = nivelesScore(q);
+      const [k, p] = Object.entries(probs).sort((a, b) => b[1] - a[1])[0] ?? ["0", 0];
+      // Jev trae `legend` (posición → nivel) y sus claves son posiciones; si no, puede que sean los niveles.
+      const porPosicion = r.legend !== undefined || !Object.keys(probs).every((x) => niveles.includes(x));
+      const i = porPosicion ? (/^\d+$/.test(k) && Number(k) < niveles.length ? Number(k) : -1) : niveles.indexOf(k);
+      if (i >= 0) {
+        out[nombre] = { valor: q.min + i, confianza: conf ?? p };
+        continue;
+      }
+    }
+    const valor = (r.value ?? r.answer ?? r.prediction ?? r.label ?? r.choice) as string | number | boolean | undefined;
+    const p = Number(r.probability ?? conf ?? r.p ?? 1);
+    if (valor !== undefined) out[nombre] = { valor, confianza: Number.isFinite(p) ? p : 1 };
   }
   return out;
 }
@@ -96,7 +132,7 @@ async function viaSystemOne(def: DefMotor, nombre: string, modelo: string, c: Ca
       method: "POST",
       signal: ctl.signal,
       headers: { "content-type": "application/json", ...(clave ? { authorization: `Bearer ${clave}` } : {}) },
-      body: JSON.stringify({ model: modelo || "jev-latest", state: c.estado, questions: c.preguntas }),
+      body: JSON.stringify({ model: modelo || "jev-latest", state: c.estado, questions: aSystemOne(c.preguntas) }),
     });
     if (!r.ok) throw new Error(`${nombre} respondió ${r.status}`);
     return leerSystemOne(await r.json(), c.preguntas);
